@@ -8,7 +8,9 @@
 #   ② 각 goal SUCCEEDED 직후의 실위치 끝점 오차 + 소요시간 기록
 #   ③ 통계(평균/p95/최대/최종) + 오차 그래프 PNG 생성
 #
-# 사용: bash tools/accuracy_bench.sh [라벨]       (라벨 기본 = 날짜시각)
+# 사용: bash tools/accuracy_bench.sh [라벨] [추가 런치인자...]
+#   예: bash tools/accuracy_bench.sh loc_mode localization:=true
+#   (라벨 기본 = 날짜시각)
 # 출력: ~/ros2_ws/bench_out/<라벨>/ {trace.csv, summary.txt, error.png}
 # 비교: python3 tools/accuracy_report.py A/trace.csv B/trace.csv \
 #         --labels 조정전 조정후 -o compare.png
@@ -21,6 +23,8 @@ source ~/ros2_ws/install/setup.bash
 set -u
 
 LABEL=${1:-$(date +%m%d_%H%M)}
+shift 2>/dev/null || true
+EXTRA_ARGS=("$@")           # 라벨 뒤 인자는 그대로 런치에 전달 (예: localization:=true)
 OUT=~/ros2_ws/bench_out/$LABEL
 mkdir -p "$OUT"
 LOGDIR=$(mktemp -d /tmp/accbench.XXXX)
@@ -30,8 +34,9 @@ cleanup() {
   pkill -9 -f "accuracy[_]sampler" 2>/dev/null
   pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
   pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "async_slam[_]toolbox_node" 2>/dev/null
+  pkill -9 -f "slam[_]toolbox" 2>/dev/null   # async(mapping)·localization 둘 다 매칭
   pkill -9 -f "robot_state[_]publisher" 2>/dev/null
+  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # ★ nav2 노드 전체 — launch 부모 kill -9 는 고아(좀비 bt_navigator)를 남김
   pkill -9 -x ekf_node 2>/dev/null
   pkill -9 -f "spawn[_]entity" 2>/dev/null
   sleep 1
@@ -64,7 +69,7 @@ endpoint() {  # $1=goal이름 $2=목표x $3=목표y $4=소요초
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"

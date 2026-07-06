@@ -44,11 +44,16 @@ def generate_launch_description():
     gui = LaunchConfiguration('gui')
 
     # ① 시뮬 + SLAM + Nav2 전체 스택 (검증된 기존 런치 재사용)
+    #    ★ 미션은 localization 기본 true (§18): "지도는 미리 있고 그 위에서 운영"
+    #      = 실제 시나리오와 동일 + 실행마다 지도 품질 달라지는 비결정성 제거.
+    #      지도 재제작이 필요하면: bash tools/make_map.sh (mapping 주행+posegraph 저장)
+    #      옛 방식(라이브 SLAM)으로 돌리려면: localization:=false
     stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, 'launch', 'slam_nav2.launch.py')
         ),
-        launch_arguments={'gui': gui}.items(),
+        launch_arguments={'gui': gui,
+                          'localization': LaunchConfiguration('localization')}.items(),
     )
 
     # ② 미션 상태머신 (두뇌) — Nav2 가 자리 잡을 시간을 준 뒤 기동
@@ -85,6 +90,8 @@ def generate_launch_description():
                               description='true=GUI, false=헤드리스'),
         DeclareLaunchArgument('follower', default_value='true',
                               description='false 면 가짜 추종자 없이 (단독 탈출 시나리오 등)'),
+        DeclareLaunchArgument('localization', default_value='true',
+                              description='true=저장 지도로 운영(표준), false=라이브 SLAM'),
         stack,
         mission,
         follower,

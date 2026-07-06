@@ -26,8 +26,9 @@ echo "로그: $LOGDIR"
 cleanup() {
   pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
   pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "async_slam[_]toolbox_node" 2>/dev/null
+  pkill -9 -f "slam[_]toolbox" 2>/dev/null   # async(mapping)·localization 둘 다 매칭
   pkill -9 -f "robot_state[_]publisher" 2>/dev/null
+  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # ★ nav2 노드 전체 — launch 부모 kill -9 는 고아(좀비 bt_navigator)를 남김
   pkill -9 -x ekf_node 2>/dev/null
   pkill -9 -f "spawn[_]entity" 2>/dev/null
   sleep 1

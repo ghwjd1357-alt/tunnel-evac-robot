@@ -30,14 +30,15 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('tunnel_sim')
     nav2_share = get_package_share_directory('nav2_bringup')
     gui = LaunchConfiguration('gui')
+    localization = LaunchConfiguration('localization')
     nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
 
-    # ① 로봇 + 월드 + slam_toolbox
+    # ① 로봇 + 월드 + slam_toolbox (localization:=true 면 저장 지도로 위치추정만 — §18)
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, 'launch', 'slam.launch.py')
         ),
-        launch_arguments={'gui': gui}.items(),
+        launch_arguments={'gui': gui, 'localization': localization}.items(),
     )
 
     # ② Nav2 네비게이션 스택 (map_server·amcl 없이). slam 이 map→odom 줄 시간 벌려고 8초 지연.
@@ -59,6 +60,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true',
                               description='true=GUI, false=헤드리스'),
+        DeclareLaunchArgument('localization', default_value='false',
+                              description='true=저장 지도로 위치추정만 (운영), false=지도작성'),
         slam,
         navigation,
     ])

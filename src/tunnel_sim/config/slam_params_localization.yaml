@@ -1,0 +1,71 @@
+# slam_params_localization.yaml — ★ 운영 모드: 저장 지도로 위치추정만 (07-06)
+# ============================================================
+# [mapping 과 뭐가 다른가]
+#   mapping      : 빈 지도에서 시작, 벽을 그려가며 내 위치도 추정 (지도 제작용)
+#   localization : 완성된 posegraph 를 읽어 들고 "이 지도 위 내가 어디?"만 추정
+#
+# [왜 운영은 localization 인가 — §17 다음 단계]
+#   ① 실행마다 지도 품질이 달라지는 비결정성 제거 (회귀 테스트 재현성↑)
+#   ② 시작 순간부터 완성 지도 기준 → 지도 성장 리사이즈 계열 문제 원천 소멸
+#   ③ 실제 시나리오와 동일: "터널 지도는 미리 있고, 재난 시 그 위에서 주행"
+#      (allow_unknown:false 채택 때 이미 이 전제였음)
+#
+# [지도 재료 만드는 법] bash tools/make_map.sh (mapping 주행 → posegraph 저장)
+# [실행 노드] localization_slam_toolbox_node (mapping 은 async_slam_toolbox_node)
+#
+# 스캔매칭 튜닝(distance/angle penalty 등)은 정본 slam_params.yaml 과 동일 —
+# localization 도 같은 매처로 "지도 vs 현재 스캔"을 맞추므로 복도 대책이 그대로 필요.
+slam_toolbox:
+  ros__parameters:
+
+    use_sim_time: true    # ⚠ 실차 이식 시 false 로!
+
+    # --- 솔버 (정본과 동일) ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- 프레임/토픽 (정본과 동일) ---
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+
+    # ===== ★ localization 모드 핵심 3줄 =====
+    mode: localization
+    # 읽을 posegraph (확장자 없이 — .posegraph/.data 자동). make_map.sh 산출물.
+    map_file_name: /home/minwoo/ros2_ws/maps/tunnel_localization
+    # 시작 위치 = map (0,0,0): 로봇 스폰 지점이 곧 지도 원점 (스폰 world(-12,0)=map(0,0)).
+    # ⚠ 실차에선 실제 출발 지점의 map 좌표로 교체 필요.
+    map_start_pose: [0.0, 0.0, 0.0]
+
+    # --- 지도 해상도/범위 (정본과 동일) ---
+    resolution: 0.05
+    max_laser_range: 16.0
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    map_update_interval: 2.0
+
+    # --- 스캔 등록 조건 (정본과 동일) ---
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+
+    # --- 스캔 매칭 (정본 slam_params.yaml 과 동일 — 근거 주석은 정본 참조) ---
+    distance_variance_penalty: 0.02
+    correlation_search_space_dimension: 0.2
+    minimum_distance_penalty: 0.05
+    angle_variance_penalty: 0.05
+    minimum_angle_penalty: 0.1
+    coarse_search_angle_offset: 0.1
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    link_match_minimum_response_fine: 0.1
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45

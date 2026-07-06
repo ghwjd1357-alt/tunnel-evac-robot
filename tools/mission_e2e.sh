@@ -7,7 +7,8 @@
 #   → /follower_cmd stop (놓침 재현) → SEARCH_BACK (역행)
 #   → /follower_cmd follow (재접근) → 재발견 → GUIDE 복귀 → ESCAPED
 #
-# 사용: bash ~/ros2_ws/tools/mission_e2e.sh   (약 5~8분, 헤드리스)
+# 사용: bash ~/ros2_ws/tools/mission_e2e.sh [추가 런치인자...]   (약 5~8분, 헤드리스)
+#   예: bash tools/mission_e2e.sh localization:=true  (운영 모드로 검증)
 # 판정: 마지막 줄 PASS / FAIL.
 #
 # 노하우 박제 (0705_현황.md 함정들):
@@ -21,6 +22,7 @@ source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
+EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=true)
 LOGDIR=$(mktemp -d /tmp/mission_e2e.XXXX)
 echo "로그: $LOGDIR"
 
@@ -29,8 +31,9 @@ cleanup() {
   pkill -9 -f "mission[_]node" 2>/dev/null
   pkill -9 -f "fake[_]follower" 2>/dev/null
   pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "async_slam[_]toolbox_node" 2>/dev/null
+  pkill -9 -f "slam[_]toolbox" 2>/dev/null   # async(mapping)·localization 둘 다 매칭
   pkill -9 -f "robot_state[_]publisher" 2>/dev/null
+  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # ★ nav2 노드 전체 — launch 부모 kill -9 는 고아(좀비 bt_navigator)를 남김
   pkill -9 -x ekf_node 2>/dev/null
   pkill -9 -f "spawn[_]entity" 2>/dev/null
   sleep 1
@@ -55,7 +58,7 @@ wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재�
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"

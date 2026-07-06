@@ -21,6 +21,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
@@ -30,7 +31,8 @@ def generate_launch_description():
 
     pkg_share = get_package_share_directory('tunnel_sim')
     gui = LaunchConfiguration('gui')
-    # slam_params 인자 (07-05): 실험용 파라미터 파일 교체 가능.
+    localization = LaunchConfiguration('localization')
+    # slam_params 인자 (07-05): 실험용 파라미터 파일 교체 가능 (mapping 모드에만 적용).
     #   기본 = slam_params.yaml (시뮬 정본, odom 과신 튜닝)
     #   실차 리허설 = slam_params:=slam_params_realodom.yaml (오돔오차 대비 완화 튜닝)
     slam_params = PathJoinSubstitution([pkg_share, 'config', LaunchConfiguration('slam_params')])
@@ -43,20 +45,35 @@ def generate_launch_description():
         launch_arguments={'gui': gui}.items(),
     )
 
-    # ② slam_toolbox 비동기 노드 (online async = 실시간 지도작성)
-    slam = Node(
+    # ② slam_toolbox — localization 인자로 두 모드 중 하나만 켬 (07-06 §18):
+    #    mapping      = 지도 제작 (빈 지도에서 그려가며) — 지도 만들 때만
+    #    localization = 저장 posegraph 로 위치추정만 — 운영(미션) 표준
+    slam_mapping = Node(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
         output='screen',
         parameters=[slam_params, {'use_sim_time': True}],
+        condition=UnlessCondition(localization),
+    )
+    slam_localization = Node(
+        package='slam_toolbox',
+        executable='localization_slam_toolbox_node',   # ★ 전용 실행파일이 따로 있음
+        name='slam_toolbox',
+        output='screen',
+        parameters=[os.path.join(pkg_share, 'config', 'slam_params_localization.yaml'),
+                    {'use_sim_time': True}],
+        condition=IfCondition(localization),
     )
 
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true',
                               description='true=GUI, false=헤드리스'),
         DeclareLaunchArgument('slam_params', default_value='slam_params.yaml',
-                              description='config/ 안의 slam 파라미터 파일명'),
+                              description='config/ 안의 slam 파라미터 파일명 (mapping 용)'),
+        DeclareLaunchArgument('localization', default_value='false',
+                              description='true=저장 지도로 위치추정만 (운영), false=지도작성'),
         robot,
-        slam,
+        slam_mapping,
+        slam_localization,
     ])
