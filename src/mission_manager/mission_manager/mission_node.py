@@ -83,6 +83,20 @@ def yaw_to_quat(yaw):
     return (0.0, 0.0, math.sin(yaw / 2.0), math.cos(yaw / 2.0))
 
 
+def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
+    """안전장치 ②의 수식부 (순수 함수로 분리 — 단위테스트 대상, 07-06).
+    역행 목표 (gx,gy)가 화재 (fx,fy)에서 dmin 보다 가까우면
+    화재→목표 방향을 유지한 채 dmin 지점으로 밀어낸 좌표를 돌려준다.
+    목표가 화재와 사실상 같은 점이면 방향 정의 불가 → None (역행 포기)."""
+    d = math.hypot(gx - fx, gy - fy)
+    if d >= dmin:
+        return (gx, gy)                 # 충분히 멀다 — 그대로
+    if d < 1e-6:
+        return None                     # 목표=화재 지점 — 밀어낼 방향이 없음
+    return (fx + (gx - fx) / d * dmin,
+            fy + (gy - fy) / d * dmin)
+
+
 class MissionNode(Node):
 
     def __init__(self):
@@ -113,7 +127,8 @@ class MissionNode(Node):
             cone_half_deg=float(sb.get('cone_half_deg', 60.0)),
             max_range=float(sb.get('detect_range', 2.5)),
             lost_sec=float(sb.get('lost_sec', 3.0)),
-            seen_sec=float(sb.get('seen_sec', 1.0)))
+            seen_sec=float(sb.get('seen_sec', 1.0)),
+            max_cluster_width=float(sb.get('cluster_max_width', 0.8)))
         # ⚠ 시뮬 라이다 QoS = sensor(BestEffort) — 기본 Reliable 구독이면 한 장도 안 옴
         self.create_subscription(LaserScan, '/scan', self.on_scan,
                                  qos_profile_sensor_data)
@@ -259,11 +274,18 @@ class MissionNode(Node):
         elif self.state == State.GUIDE:
             if not self.goal_active:
                 self.send_goal(self.wp['escape'], tag='escape')
-            # --- 후방 추종감시 (give_up 이면 단독 탈출 — 더는 안 돌아봄) ---
+            # --- 추종감시 (give_up 이면 단독 탈출 — 더는 안 돌아봄) ---
+            # ★ zone='any'(전방위) 로 판정 (07-06 E2E 가 잡은 설계 구멍 수정):
+            #   집결지에서 로봇이 180° 회전하면 추종자가 로봇 '앞'에 있고,
+            #   유도 초반 추월 구간에선 '옆'에 있다 — rear(후방 부채꼴)만 보면
+            #   그 동안 가짜 '놓침'이 뜨며 역행 예산 2회를 전부 태워먹는다 (실측).
+            #   유도의 본질은 "사람이 근처에 있나"지 "정확히 뒤에 있나"가 아님.
+            #   (1차 점개수 구현에선 any 가 벽 오탐 탓에 못 쓸 물건이었지만,
+            #    클러스터 크기 판별로 any 가 신뢰 가능해져 이 수정이 가능해짐)
             if not self.give_up:
-                if self.monitor.visible():
+                if self.monitor.visible(zone='any'):
                     self.record_last_seen()       # 보이는 동안 위치 갱신
-                elif self.monitor.lost():
+                elif self.monitor.lost(zone='any'):
                     self.enter_search_back()      # 놓침 확정 → 역행
 
         elif self.state == State.SEARCH_BACK:
@@ -273,7 +295,7 @@ class MissionNode(Node):
                 self.get_logger().info('★ 추종자 재발견 → GUIDE 복귀')
                 self.cancel_current_goal()
                 self.refind_since = None
-                self.monitor.reset('rear')   # 후방 타이머 리셋 — 복귀 즉시 재-놓침 방지
+                self.monitor.reset('any')    # 타이머 리셋 — 복귀 즉시 재-놓침 방지
                 self.state = State.GUIDE
             elif not self.goal_active and self.refind_since is None:
                 self.send_goal(self.search_goal, tag='search_back')
@@ -318,24 +340,25 @@ class MissionNode(Node):
             self.get_logger().warn('마지막 목격 지점 없음 — 역행 불가, 유도 계속')
             return
 
-        self.search_attempts += 1
         gx, gy = self.last_seen
 
         # 안전장치 ②: 화재 안전하한 — 역행 목표가 화재에 너무 가까우면 뒤로 클램프
+        # (수식은 clamp_to_fire_min_dist 순수 함수 — 단위테스트로 검증됨)
         if self.fire is not None:
             fx, fy = self.fire['pos']
-            d = math.hypot(gx - fx, gy - fy)
             dmin = float(sb['min_fire_dist'])
-            if d < dmin:
-                if d < 1e-6:
-                    self.get_logger().error('역행 목표=화재 지점 — 역행 포기')
-                    return
-                # 화재→목표 방향으로 dmin 만큼 떨어진 점으로 밀어냄
-                gx = fx + (gx - fx) / d * dmin
-                gy = fy + (gy - fy) / d * dmin
+            clamped = clamp_to_fire_min_dist(gx, gy, fx, fy, dmin)
+            if clamped is None:
+                self.get_logger().error('역행 목표=화재 지점 — 역행 포기')
+                return
+            if clamped != (gx, gy):
+                gx, gy = clamped
                 self.get_logger().warn(
                     f'⚠ 화재 안전하한 작동: 역행 목표를 화재에서 {dmin}m 지점으로 클램프')
 
+        # 여기까지 왔으면 실제로 역행한다 — 이때만 시도 횟수 소모
+        # (클램프 포기 등으로 역행 없이 return 하는 경로는 예산을 안 깎음, 07-06 수정)
+        self.search_attempts += 1
         self.get_logger().warn(
             f'★ 추종 놓침 확정 → SEARCH_BACK {self.search_attempts}/{sb["max_attempts"]}: '
             f'마지막 목격 ({gx:.1f}, {gy:.1f}) 로 역행')
