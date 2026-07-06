@@ -114,7 +114,8 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **미션 ② (07-05 5차)** — GATHER/GUIDE 정식 승격, GUIDE 저속 0.12 동적 변경, fake_follower(+`/follower_cmd` stop=놓침 재현). → `§13`
 - ✅ **미션 ③ (07-06)** — follower_monitor(디바운스 비대칭·이중 구역) + SEARCH_BACK(안전장치 2종: 시도 2회 제한·화재하한 5m 클램프). 실패·성공 경로 E2E 완주 = 시나리오 상태머신 전체 가동. → `§14`
 - ✅ **품질 세션 (07-06 오후)** — **git 개시**(.gitignore+커밋, 이후 작업 단위마다 커밋) · **RPP 속도저하 숙제 종결**(재현 불가 — rolling 결함 시절 부작용. cost regulation 명시 OFF + scaling 2.5 일치) · **감지 2차 = 클러스터 크기 판별**(벽 호 배제·랩 병합·슬라이버 배제) · **★GUIDE 판정 rear→any 존 전환**(집결 180° 회전 후 추종자가 '앞' — rear만 보면 가짜 놓침으로 역행예산 전소, E2E 자동화가 첫 실행에 검거) · **pytest 13개 + 회귀 스크립트 2종 + mission.launch.py**. → `§15`
-- ▶ **다음 후보:** ⓐ 집결지 계산 모듈(화재 좌표 기반 — `self.fire['pos']` 준비됨) ⓑ 역할 B `.msg` 계약 합의(+funnel 연결) ⓒ 중간보고서 초안(재료 풍부) ⓔ micro-ROS(구동부 진행 시). 변경 후 회귀 = `bash tools/regression_3goals.sh` + `bash tools/mission_e2e.sh` + `pytest src/mission_manager/test/`. + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
+- ✅ **ⓐ 집결지 계산 (07-06 저녁)** — 고정 좌표 → **화재→탈출구 방향선 위 gather_dist(8m) 지점 계산**(`compute_gather_point` 순수 함수, yaw=탈출구 방향). 클램프·fallback(yaml gather) 포함, gather_dist=8.0 은 표준 화재(14,0)에서 기존 검증값 (6,0) 재현. pytest 18개 + E2E PASS. 한계: 직선 수식(곁복도 화재는 그래프 경유지 과제). → `§16`
+- ▶ **다음 후보:** ⓑ 역할 B `.msg` 계약 합의(+funnel 연결) ⓒ 중간보고서 초안(재료 풍부) ⓔ micro-ROS(구동부 진행 시) + 감지 3차(지도 배경제거). 변경 후 회귀 = `bash tools/regression_3goals.sh` + `bash tools/mission_e2e.sh` + `pytest src/mission_manager/test/`. + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
 
 ### 런치/실행법
 - **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김).
@@ -182,7 +183,7 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0621_현황.md` | `~/Desktop/개발현황/` | 2B ROS2 기초 + 2C Gazebo 개념 (§9 파이썬 / §10 런치 / §13~14 Gazebo·SDF) |
 | `0623_현황.md` | `~/Desktop/개발현황/` | RPLIDAR C1 실물테스트 전과정 (디버깅순서·포트권한·LaserScan 구조·RViz) |
 | `0626_현황.md` | `~/Desktop/개발현황/` | 2D URDF(differential) + 2E SLAM 지도 전과정 (URDF구조·diff_drive튜닝·2휠전환·헤드리스SLAM·지도저장) |
-| `0705_현황.md` | `~/Desktop/개발현황/` | §7 EKF(9m→0.17m) · §8 회귀진단 · §10 오돔주입 · §11~12 미션설계+뼈대 · §13 ② · §14 ③(후방감지+SEARCH_BACK) · **§15 품질세션(git·RPP종결·클러스터 감지·any존·테스트 인프라·mission.launch)** |
+| `0705_현황.md` | `~/Desktop/개발현황/` | §7 EKF(9m→0.17m) · §8 회귀진단 · §10 오돔주입 · §11~12 미션설계+뼈대 · §13 ② · §14 ③(후방감지+SEARCH_BACK) · **§15 품질세션(git·RPP종결·클러스터 감지·any존·테스트 인프라·mission.launch)** · §16 집결지 계산 |
 | `0705_실차전_전략.md` | `~/Desktop/개발현황/` | ★ 실차 전 전략 정본: 가짜 detection 판단(계약+깡통만) + 실차 결합 5단계 로드맵 |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |

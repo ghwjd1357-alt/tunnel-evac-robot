@@ -22,7 +22,7 @@ import math
 import types
 
 from mission_manager.follower_monitor import FollowerMonitor
-from mission_manager.mission_node import clamp_to_fire_min_dist
+from mission_manager.mission_node import clamp_to_fire_min_dist, compute_gather_point
 
 
 # ============================================================
@@ -213,3 +213,40 @@ def test_clamp_diagonal_keeps_direction():
 def test_clamp_target_equals_fire_gives_none():
     """목표=화재 지점 → 방향 정의 불가 → None (역행 포기 신호)."""
     assert clamp_to_fire_min_dist(14.0, 0.0, 14.0, 0.0, 5.0) is None
+
+
+# ============================================================
+# 집결지 계산 테스트 (ⓐ 모듈 — "화재에 가깝되 안전한 곳" 수식)
+# ============================================================
+def test_gather_standard_fire_reproduces_verified_point():
+    """표준 테스트 화재(14,0)·탈출구(0,0)·거리8 → (6,0)·서향(π) = 기존 검증 집결지."""
+    g = compute_gather_point(14.0, 0.0, 0.0, 0.0, 8.0)
+    assert abs(g['x'] - 6.0) < 1e-9 and abs(g['y']) < 1e-9
+    assert abs(g['yaw'] - math.pi) < 1e-9
+
+
+def test_gather_lies_between_fire_and_escape_at_exact_dist():
+    """집결지는 화재→탈출구 선분 위, 화재에서 정확히 gather_dist."""
+    g = compute_gather_point(10.0, 6.0, 2.0, 0.0, 5.0)
+    assert abs(math.hypot(g['x'] - 10.0, g['y'] - 6.0) - 5.0) < 1e-9
+    # 선분 위(방향 일치): 화재→집결지 벡터와 화재→탈출구 벡터가 평행·같은 방향
+    cross = (g['x'] - 10.0) * (0.0 - 6.0) - (g['y'] - 6.0) * (2.0 - 10.0)
+    assert abs(cross) < 1e-9
+
+
+def test_gather_yaw_faces_escape():
+    """집결지 yaw = 탈출구를 바라보는 방향 (집결 후 바로 유도 출발)."""
+    g = compute_gather_point(0.0, 10.0, 0.0, 0.0, 4.0)   # 북쪽 화재 → 남쪽 탈출구
+    assert abs(g['yaw'] - (-math.pi / 2)) < 1e-9          # 남향(-y)
+
+
+def test_gather_fire_near_escape_clamped_to_escape():
+    """화재가 탈출구에 gather_dist 보다 가까우면 탈출구 자체로 클램프
+    (지나쳐서 화재 반대편 미지 영역으로 나가면 안 됨)."""
+    g = compute_gather_point(3.0, 0.0, 0.0, 0.0, 8.0)
+    assert (g['x'], g['y']) == (0.0, 0.0)
+
+
+def test_gather_fire_equals_escape_gives_none():
+    """화재=탈출구 → 방향 정의 불가 → None (호출부가 yaml 고정값 fallback)."""
+    assert compute_gather_point(0.0, 0.0, 0.0, 0.0, 8.0) is None

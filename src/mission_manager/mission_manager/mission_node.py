@@ -97,6 +97,39 @@ def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
             fy + (gy - fy) / d * dmin)
 
 
+def compute_gather_point(fx, fy, ex, ey, gather_dist):
+    """집결지 계산 (순수 함수 — 단위테스트 대상, 07-06 ⓐ 모듈).
+
+    시나리오 요구 = "화재에 가깝되 안전한 곳". 대피자들은 화재에서 탈출구
+    방향으로 도망치므로, 집결지 = **화재→탈출구 방향선 위, 화재에서
+    gather_dist 만큼 떨어진 점.** yaw 는 탈출구를 바라보게(집결 후 바로
+    그 방향으로 유도 출발).
+
+        탈출구(ex,ey) ←—— ●집결지 ——— 🔥화재(fx,fy)
+                          └ gather_dist ┘
+
+    반환: {'x','y','yaw'} dict (send_goal 이 먹는 waypoint 형식 그대로)
+          화재=탈출구 동일점(방향 정의 불가)이면 None → 호출부가 yaml
+          고정 집결지로 fallback.
+    경계: 화재가 탈출구에 gather_dist 보다 가까우면 탈출구 자체로 클램프
+          (탈출구를 지나쳐 화재 반대편으로 나가는 것 방지).
+    ⚠ 한계(의도적): 직선 수식이라 화재가 곁복도(분기)에 있으면 벽을 뚫는
+      지점이 나올 수 있음 → Nav2 가 거부해 FAULT 재시도가 흡수. 복도
+      그래프 경유지 방식은 시나리오 확정 후 과제 (0705_현황.md §16)."""
+    d = math.hypot(ex - fx, ey - fy)
+    if d < 1e-6:
+        return None                     # 화재=탈출구 — 방향 정의 불가
+    if d <= gather_dist:
+        gx, gy = ex, ey                 # 화재가 탈출구 코앞 — 탈출구에서 집결
+    else:
+        gx = fx + (ex - fx) / d * gather_dist
+        gy = fy + (ey - fy) / d * gather_dist
+    yaw = math.atan2(ey - gy, ex - gx)  # 탈출구 바라보기
+    if gx == ex and gy == ey:           # 클램프된 경우: 화재 반대 방향 바라보기
+        yaw = math.atan2(ey - fy, ex - fx)
+    return {'x': gx, 'y': gy, 'yaw': yaw}
+
+
 class MissionNode(Node):
 
     def __init__(self):
@@ -146,6 +179,7 @@ class MissionNode(Node):
         self._escaped_logged = False
         self.siren_on = False
         self.fire = None                # funnel 번역된 화재 정보
+        self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
 
         # --- SEARCH_BACK 관리 ---
         self.search_attempts = 0        # 역행 시도 횟수 (안전장치 ①)
@@ -262,7 +296,8 @@ class MissionNode(Node):
 
         elif self.state == State.APPROACH:
             if not self.goal_active:
-                self.send_goal(self.wp['gather'], tag='gather')
+                # 계산된 집결지 우선, 계산 불가였으면 yaml 고정값 (fallback)
+                self.send_goal(self.gather_wp or self.wp['gather'], tag='gather')
 
         elif self.state == State.GATHER:
             elapsed = (self.get_clock().now() - self.gather_since).nanoseconds / 1e9
@@ -392,6 +427,18 @@ class MissionNode(Node):
             'pos': (msg.pose.position.x, msg.pose.position.y),
             'kind': 'fire',             # 자리 예약
         }
+        # ⓐ 집결지 계산 (07-06): 화재 좌표 기반 — 화재→탈출구 방향 gather_dist 지점
+        fx, fy = self.fire['pos']
+        esc = self.wp['escape']
+        self.gather_wp = compute_gather_point(
+            fx, fy, float(esc['x']), float(esc['y']),
+            float(self.wp.get('gather_dist', 8.0)))
+        if self.gather_wp is not None:
+            self.get_logger().info(
+                f'집결지 계산: 화재({fx:.1f},{fy:.1f}) → '
+                f'({self.gather_wp["x"]:.1f}, {self.gather_wp["y"]:.1f})')
+        else:
+            self.get_logger().warn('집결지 계산 불가(화재=탈출구) — yaml 고정 집결지 사용')
         self.get_logger().info('🔥 화재 알람 수신 → PATROL 중단, APPROACH 시작 (싸이렌 ON)')
         self.cancel_current_goal()
         self.set_siren(True)
