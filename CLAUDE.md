@@ -123,6 +123,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김). **기본 = localization 운영 모드**(저장 posegraph 위치추정, §18) — 라이브 SLAM 으로 돌리려면 `localization:=false`, 지도 재제작은 `bash tools/make_map.sh`.
   - 화재: `ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 14.0, y: 0.0}}}"`
   - 놓침 재현: `ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String "{data: stop}"` (재개 `follow`) / 관찰: `ros2 topic echo /mission_state`. ⚠ pub 은 `--once` 금지, `-w 1` (§함정).
+  - 관제 (07-07): `/mission_cmd` 에 `reset`(임무 초기화→PATROL) / `abort`(정지, FAULT 유지) — FAULT 소진 후 재가동용. 같은 pub 형식.
 - `ros2 launch tunnel_sim slam_nav2.launch.py` — 라이브SLAM+Nav2 만 (미션노드 없이 목표 실험용). 목표: `ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: ..., y: ...}, orientation: {w: 1.0}}}}"`
 - `ros2 launch tunnel_sim robot.launch.py` — Gazebo+로봇만 / `slam.launch.py` — +지도작성(저장: `map_saver_cli -f ~/ros2_ws/maps/tunnel_map`) / `nav2.launch.py` — 저장맵+amcl / 키보드: `teleop_twist_keyboard`
 - **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.2초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분). **07-07 부터 스크립트 2종 기본 = localization 운영 모드** (mapping 검증은 `localization:=false` 인자, 0707_현황.md §3)

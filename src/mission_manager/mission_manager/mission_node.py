@@ -130,6 +130,44 @@ def compute_gather_point(fx, fy, ex, ey, gather_dist):
     return {'x': gx, 'y': gy, 'yaw': yaw}
 
 
+def validate_waypoints(wp):
+    """waypoints.yaml 필수 키 검사 (fail-fast, 07-07 — 순수 함수, 단위테스트 대상).
+
+    왜: 키가 빠져도 지금은 '그 키를 처음 쓰는 순간'(예: escape 는 GUIDE 진입)에야
+    KeyError 로 죽음 = 미션 한복판 크래시. 설정 실수는 시작 순간에 잡아야 한다.
+    검사 대상 = 코드가 wp['...'] 로 직접 인덱싱하는 키 전부
+    (.get(기본값) 으로 읽는 선택 키는 제외 — gather_dist, cone_half_deg 등).
+    반환: 빠진 키 경로 문자열 리스트 (빈 리스트 = 통과)."""
+    missing = []
+
+    def need(d, key, path):
+        if not isinstance(d, dict) or key not in d:
+            missing.append(path)
+            return None
+        return d[key]
+
+    for k in ('gather_wait_sec', 'guide_speed', 'normal_speed'):
+        need(wp, k, k)
+    patrol = need(wp, 'patrol', 'patrol')
+    if patrol is not None:
+        if not isinstance(patrol, list) or not patrol:
+            missing.append('patrol(리스트 아님/비어있음)')
+        else:
+            for n, p in enumerate(patrol):
+                for k in ('x', 'y'):
+                    need(p, k, f'patrol[{n}].{k}')
+    for name in ('gather', 'escape'):
+        pt = need(wp, name, name)
+        if pt is not None:
+            for k in ('x', 'y'):
+                need(pt, k, f'{name}.{k}')
+    sb = need(wp, 'search_back', 'search_back')
+    if sb is not None:
+        for k in ('max_attempts', 'min_fire_dist', 'refind_wait_sec'):
+            need(sb, k, f'search_back.{k}')
+    return missing
+
+
 class MissionNode(Node):
 
     def __init__(self):
@@ -143,6 +181,13 @@ class MissionNode(Node):
         wp_path = self.get_parameter('waypoints_file').value
         with open(wp_path, 'r') as f:
             self.wp = yaml.safe_load(f)
+        # ★ fail-fast (07-07): 필수 키 누락은 미션 한복판 KeyError 가 아니라
+        #   시작 즉시, 어떤 키가 없는지 명확한 메시지로 죽는다.
+        bad = validate_waypoints(self.wp)
+        if bad:
+            self.get_logger().fatal(
+                f'waypoints.yaml 필수 키 누락: {", ".join(bad)} (파일: {wp_path})')
+            raise SystemExit(1)
         self.get_logger().info(f'웨이포인트 로드: {wp_path}')
 
         # --- 통신 구성 ---
@@ -150,6 +195,9 @@ class MissionNode(Node):
         self.state_pub = self.create_publisher(String, '/mission_state', 10)
         self.siren_pub = self.create_publisher(Bool, '/siren', 10)
         self.create_subscription(PoseStamped, '/alarm', self.on_alarm, 10)
+        # 관제 인터페이스 (07-07): reset = 처음부터 / abort = 즉시 정지 (FAULT 유지)
+        # 현장 복구가 '프로세스 재시작'뿐이던 것을 토픽 한 줄로. (⚠ pub 은 -w 1, --once 금지)
+        self.create_subscription(String, '/mission_cmd', self.on_cmd, 10)
         self.param_cli = self.create_client(SetParameters,
                                             '/controller_server/set_parameters')
 
@@ -161,7 +209,12 @@ class MissionNode(Node):
             max_range=float(sb.get('detect_range', 2.5)),
             lost_sec=float(sb.get('lost_sec', 3.0)),
             seen_sec=float(sb.get('seen_sec', 1.0)),
-            max_cluster_width=float(sb.get('cluster_max_width', 0.8)))
+            max_cluster_width=float(sb.get('cluster_max_width', 0.8)),
+            # 아래 3개는 라이다 물리 특성(각해상도·노이즈)에 묶인 값 —
+            # 실물 RPLIDAR C1 전환 시 1순위 재튜닝 대상이라 yaml 로 노출 (07-07)
+            min_points=int(sb.get('min_points', 3)),
+            range_jump=float(sb.get('range_jump', 0.3)),
+            edge_margin=float(sb.get('edge_margin', 0.2)))
         # ⚠ 시뮬 라이다 QoS = sensor(BestEffort) — 기본 Reliable 구독이면 한 장도 안 옴
         self.create_subscription(LaserScan, '/scan', self.on_scan,
                                  qos_profile_sensor_data)
@@ -439,6 +492,11 @@ class MissionNode(Node):
     def on_alarm(self, msg: PoseStamped):
         """funnel: raw msg 저장 금지, 내부 dict 번역. 계약 바뀌면 여기 한 곳만."""
         if self.state != State.PATROL:
+            # 조용히 버리면 "알람 보냈는데 왜 무반응?"을 디버깅할 단서가 없다 (07-07).
+            # 다중 화재·위치 갱신 대응은 시나리오 확정 후 과제 — 지금은 기록만.
+            self.get_logger().warn(
+                f'알람 수신했으나 상태 {self.state.name} — 무시 (PATROL 에서만 접수)',
+                throttle_duration_sec=5.0)
             return
         self.fire = {
             'pos': (msg.pose.position.x, msg.pose.position.y),
@@ -460,6 +518,41 @@ class MissionNode(Node):
         self.cancel_current_goal()
         self.set_siren(True)
         self.state = State.APPROACH
+
+    def on_cmd(self, msg: String):
+        """관제 명령 (07-07). 얇게 유지 — 명령 2개, 나머지는 무시+로그."""
+        cmd = msg.data.strip().lower()
+        if cmd == 'reset':
+            # 임무 전체를 초기 상태로 — FAULT 소진·ESCAPED 후 재가동용
+            self.get_logger().warn('★ 관제 reset — 임무 초기화 → PATROL')
+            self.cancel_current_goal()
+            self.state = State.PATROL
+            self.patrol_idx = 0
+            self.fire = None
+            self.gather_wp = None
+            self.gather_since = None
+            self._escaped_logged = False
+            self.search_attempts = 0
+            self.give_up = False
+            self.last_seen = None
+            self.search_goal = None
+            self.refind_since = None
+            self.fault_retries = 0
+            self.fault_since = None
+            self.resume_state = None
+            self.set_siren(False)
+            self.set_nav_speed(float(self.wp['normal_speed']))
+        elif cmd == 'abort':
+            # 즉시 정지, 자동 재시도 없이 FAULT 유지 (복구는 reset 으로)
+            self.get_logger().error('★ 관제 abort — 목표 취소, 정지 (재가동은 reset)')
+            self.cancel_current_goal()
+            self.set_siren(False)
+            self.fault_retries = self.MAX_RETRIES   # 자동 재시도 차단
+            self.resume_state = None
+            self.fault_since = self.get_clock().now()
+            self.state = State.FAULT
+        else:
+            self.get_logger().warn(f'알 수 없는 /mission_cmd: "{msg.data}" (reset|abort)')
 
     def enter_fault(self):
         if self.state != State.FAULT:

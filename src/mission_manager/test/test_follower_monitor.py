@@ -22,7 +22,9 @@ import math
 import types
 
 from mission_manager.follower_monitor import FollowerMonitor
-from mission_manager.mission_node import clamp_to_fire_min_dist, compute_gather_point
+from mission_manager.mission_node import (clamp_to_fire_min_dist,
+                                          compute_gather_point,
+                                          validate_waypoints)
 
 
 # ============================================================
@@ -270,3 +272,43 @@ def test_gather_fire_near_escape_clamped_to_escape():
 def test_gather_fire_equals_escape_gives_none():
     """화재=탈출구 → 방향 정의 불가 → None (호출부가 yaml 고정값 fallback)."""
     assert compute_gather_point(0.0, 0.0, 0.0, 0.0, 8.0) is None
+
+
+# ============================================================
+# validate_waypoints (fail-fast, 07-07) 테스트
+# ============================================================
+def _valid_wp():
+    """검사 통과하는 최소 구성 (waypoints.yaml 의 필수 키 축소판)."""
+    return {
+        'patrol': [{'x': 3.0, 'y': 0.0}],
+        'gather': {'x': 6.0, 'y': 0.0},
+        'escape': {'x': 0.0, 'y': 0.0},
+        'gather_wait_sec': 8.0,
+        'guide_speed': 0.12,
+        'normal_speed': 0.26,
+        'search_back': {'max_attempts': 2, 'min_fire_dist': 5.0,
+                        'refind_wait_sec': 10.0},
+    }
+
+
+def test_validate_complete_config_passes():
+    assert validate_waypoints(_valid_wp()) == []
+
+
+def test_validate_reports_missing_escape_coord():
+    """escape.y 누락 — 옛날엔 GUIDE 진입 순간(미션 한복판)에야 KeyError."""
+    wp = _valid_wp()
+    del wp['escape']['y']
+    assert 'escape.y' in validate_waypoints(wp)
+
+
+def test_validate_reports_missing_search_back_key():
+    wp = _valid_wp()
+    del wp['search_back']['min_fire_dist']
+    assert 'search_back.min_fire_dist' in validate_waypoints(wp)
+
+
+def test_validate_empty_patrol_rejected():
+    wp = _valid_wp()
+    wp['patrol'] = []
+    assert any('patrol' in m for m in validate_waypoints(wp))
