@@ -8,7 +8,9 @@
 #   → /follower_cmd follow (재접근) → 재발견 → GUIDE 복귀 → ESCAPED
 #
 # 사용: bash ~/ros2_ws/tools/mission_e2e.sh [추가 런치인자...]   (약 5~8분, 헤드리스)
-#   예: bash tools/mission_e2e.sh localization:=true  (운영 모드로 검증)
+#   ★ 기본 = localization 운영 모드 (07-07: 테스트는 운영 구성을 따라간다 원칙).
+#     라이브 SLAM(mapping)으로 검증하려면: bash tools/mission_e2e.sh localization:=false
+#     (뒤에 준 인자가 기본값을 덮음 — ros2 launch 는 중복 인자 시 마지막 값 적용)
 # 판정: 마지막 줄 PASS / FAIL.
 #
 # 노하우 박제 (0705_현황.md 함정들):
@@ -58,7 +60,7 @@ wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재�
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false "${EXTRA_ARGS[@]}" \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"

@@ -6,8 +6,10 @@
 #   goal1 분기입구(12,0 북향) → goal2 곁복도(12,9 남향) → goal3 동쪽끝(13.5,0)
 #   을 차례로 보내 전부 SUCCEEDED 인지 + 최종 실위치 오차를 판정한다.
 #
-# 사용: bash ~/ros2_ws/tools/regression_3goals.sh
+# 사용: bash ~/ros2_ws/tools/regression_3goals.sh [추가 런치인자...]
 # 판정: 마지막 줄 PASS / FAIL. (약 4~6분 소요)
+#   ★ 기본 = localization 운영 모드 (07-07: 테스트는 운영 구성을 따라간다 원칙).
+#     라이브 SLAM(mapping)으로 검증하려면: bash tools/regression_3goals.sh localization:=false
 #
 # 노하우 박제 (0705_현황.md 함정들):
 #   - pkill/pgrep 자기매칭 자살 방지 → 브래킷 트릭 "ros2[ ]launch"
@@ -20,6 +22,7 @@ source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
+EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=false)
 LOGDIR=$(mktemp -d /tmp/reg3goals.XXXX)
 echo "로그: $LOGDIR"
 
@@ -53,7 +56,7 @@ send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"

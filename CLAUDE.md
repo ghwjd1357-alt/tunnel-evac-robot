@@ -125,7 +125,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
   - 놓침 재현: `ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String "{data: stop}"` (재개 `follow`) / 관찰: `ros2 topic echo /mission_state`. ⚠ pub 은 `--once` 금지, `-w 1` (§함정).
 - `ros2 launch tunnel_sim slam_nav2.launch.py` — 라이브SLAM+Nav2 만 (미션노드 없이 목표 실험용). 목표: `ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: ..., y: ...}, orientation: {w: 1.0}}}}"`
 - `ros2 launch tunnel_sim robot.launch.py` — Gazebo+로봇만 / `slam.launch.py` — +지도작성(저장: `map_saver_cli -f ~/ros2_ws/maps/tunnel_map`) / `nav2.launch.py` — 저장맵+amcl / 키보드: `teleop_twist_keyboard`
-- **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.2초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분)
+- **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.2초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분). **07-07 부터 스크립트 2종 기본 = localization 운영 모드** (mapping 검증은 `localization:=false` 인자, 0707_현황.md §3)
 - **정확도 벤치 (SLAM·Nav2 튜닝 전/후 측정):** `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/{trace.csv,summary.txt,error.png}` / 비교: `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png` (§17)
 
 ### 2C 완료 (2026-06-23) — GUI 배치 워크플로우("마우스 배치→`gz model -m 이름 -p` 좌표→world `<include>`→build") · T자 터널(메인 30m×폭6m + 곁복도 12m) · 가상 라이다 `/scan` 검증. → `0623_현황.md §8~10`

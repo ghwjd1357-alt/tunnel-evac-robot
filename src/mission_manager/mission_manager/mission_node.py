@@ -180,6 +180,7 @@ class MissionNode(Node):
         self.siren_on = False
         self.fire = None                # funnel 번역된 화재 정보
         self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
+        self._speed_synced = False      # 시작 속도 동기화 완료 여부 (아래 tick 참조)
 
         # --- SEARCH_BACK 관리 ---
         self.search_attempts = 0        # 역행 시도 횟수 (안전장치 ①)
@@ -282,6 +283,16 @@ class MissionNode(Node):
     # 심장박동
     # ===========================================================
     def tick(self):
+        # ★ 시작 속도 동기화 (07-07): 주행속도는 controller_server(Nav2) 쪽에 저장되는
+        #   원격 파라미터라, GUIDE(0.12) 도중 미션 노드만 재시작하면 새 PATROL 이
+        #   저속을 물려받는다 (Nav2 가 계속 떠 있는 실차 운영 패턴에서 발생).
+        #   → "PATROL 시작 = normal_speed" 전제를 남에게 맡기지 않고 직접 선언.
+        #   서비스가 늦게 뜰 수 있어 준비될 때까지 tick 재시도 (블로킹 금지 §12.2).
+        #   상태 전환의 속도 변경보다 같은 tick 안에서 항상 먼저 실행 → 덮어쓰기 없음.
+        if not self._speed_synced and self.param_cli.service_is_ready():
+            self.set_nav_speed(float(self.wp['normal_speed']))
+            self._speed_synced = True
+
         # 상태·싸이렌 상시 발행
         m = String()
         m.data = self.state.name
@@ -452,6 +463,8 @@ class MissionNode(Node):
         if self.fault_retries >= self.MAX_RETRIES:
             self.get_logger().error(
                 f'FAULT — 재시도 {self.MAX_RETRIES}회 소진, 정지. (사람 개입 필요)')
+            # 정지로 끝나도 속도는 평시값 복원 — GUIDE 저속(0.12) 채로 남기지 않기 (07-07)
+            self.set_nav_speed(float(self.wp['normal_speed']))
         else:
             self.get_logger().warn(f'FAULT — {self.RETRY_WAIT}초 후 재시도 예정')
 
