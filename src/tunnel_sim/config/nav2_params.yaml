@@ -72,6 +72,15 @@ controller_server:
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.6
       use_regulated_linear_velocity_scaling: true
+      # ★ 비용 기반 감속 (07-06 실험으로 종결 — 이월 숙제 'RPP 속도저하 규명'):
+      #   이 키는 기본값이 true 라 안 적어도 켜져 있었음. §8.7 의 감속(0.26→0.12)은
+      #   rolling+static costmap 결함 시절 관측 → rolling_window:false 수정 후
+      #   직선 12m·곁복도 9m 모두 평균 0.257 로 재현 불가 실측 (감속 원인 소멸).
+      #   시뮬은 전역 플래너가 이미 중앙 경로를 그리므로 명시적으로 끔 (이중 감속 방지).
+      use_cost_regulated_linear_velocity_scaling: false
+      # ⚠ 실차에서 켤 경우: 이 값은 costmap 의 cost_scaling_factor 와 반드시 일치(2.5).
+      #   기본값 3.0 인 채 켜면 비용→장애물거리 역산이 틀어져 잘못된 감속 (07-06 불일치 실측).
+      inflation_cost_scaling_factor: 2.5
       regulated_linear_scaling_min_radius: 0.6
       regulated_linear_scaling_min_speed: 0.1
       use_rotate_to_heading: true       # 제자리 회전으로 방향 먼저 맞춤 (차동 강점)
