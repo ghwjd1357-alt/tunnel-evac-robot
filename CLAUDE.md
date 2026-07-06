@@ -90,7 +90,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 | URDF 로봇(differential) + Gazebo spawn + 운전 | ✅ 2026-06-26 (2D, 상세: `0626_현황.md`) |
 | slam_toolbox + Nav2 + robot_localization (노트북 apt) | ✅ 2026-06-26 설치 |
 | SLAM 터널 지도 생성·저장 (`maps/tunnel_map.*`) | ✅ 2026-06-26 (2E, 헤드리스 자동주행) |
-| Nav2 자율주행 | ✅ **완전검증 (2026-07-06 갱신):** SLAM 궤적오차 평균 0.027m, tolerance 강화 후 **끝점오차 0.12~0.17m** (07-05 의 0.24m 에서 개선 — 병목이 goal tolerance 였음, §17) |
+| Nav2 자율주행 | ✅ **완전검증 (2026-07-06 갱신):** tolerance 강화 후 **끝점오차 0.12~0.17m** (병목이 goal tolerance 였음, §17). **운영 = localization 모드** (저장 posegraph, 궤적오차 평균 **0.015m**, §18) |
 | **미션 로직 (`mission_manager`)** | ✅ **①~③ + 감지 2차 완료 (2026-07-06):** PATROL→APPROACH→GATHER→GUIDE⇄SEARCH_BACK→ESCAPED+FAULT 전체 시뮬 E2E 검증. 추종감지 = 클러스터 크기 판별(GUIDE 판정 any존), 안전장치 2종, `mission.launch.py` 한 줄 실행 (상세: 0705_현황.md §12~15) |
 | **테스트·회귀 인프라** | ✅ 2026-07-06: git 저장소(작업 단위 커밋) + pytest 13개 + `tools/regression_3goals.sh` + `tools/mission_e2e.sh` — **변경 후 이 3종 실행이 회귀 검증** (상세: §15.5) |
 | EKF (robot_localization, odom+IMU 융합) | ✅ 2026-07-05: 시뮬 IMU 추가 + `config/ekf.yaml` + slam 파라미터 튜닝. 12.5m 주행 시 SLAM 위치오차 **9m → 0.17m** (상세: `0705_현황.md` §7) |
@@ -115,11 +115,12 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **미션 ③ (07-06)** — follower_monitor(디바운스 비대칭·이중 구역) + SEARCH_BACK(안전장치 2종: 시도 2회 제한·화재하한 5m 클램프). 실패·성공 경로 E2E 완주 = 시나리오 상태머신 전체 가동. → `§14`
 - ✅ **품질 세션 (07-06 오후)** — **git 개시**(.gitignore+커밋, 이후 작업 단위마다 커밋) · **RPP 속도저하 숙제 종결**(재현 불가 — rolling 결함 시절 부작용. cost regulation 명시 OFF + scaling 2.5 일치) · **감지 2차 = 클러스터 크기 판별**(벽 호 배제·랩 병합·슬라이버 배제) · **★GUIDE 판정 rear→any 존 전환**(집결 180° 회전 후 추종자가 '앞' — rear만 보면 가짜 놓침으로 역행예산 전소, E2E 자동화가 첫 실행에 검거) · **pytest 13개 + 회귀 스크립트 2종 + mission.launch.py**. → `§15`
 - ✅ **ⓐ 집결지 계산 (07-06 저녁)** — 고정 좌표 → **화재→탈출구 방향선 위 gather_dist(8m) 지점 계산**(`compute_gather_point` 순수 함수, yaw=탈출구 방향). 클램프·fallback(yaml gather) 포함, gather_dist=8.0 은 표준 화재(14,0)에서 기존 검증값 (6,0) 재현. pytest 18개 + E2E PASS. 한계: 직선 수식(곁복도 화재는 그래프 경유지 과제). → `§16`
-- ✅ **정확도 벤치 + tolerance 강화 (07-06 밤)** — `tools/accuracy_{sampler,bench,report}` 신설(매초 ground truth vs SLAM 오차 → CSV·그래프). ★ 실측: SLAM 궤적오차 **평균 0.027m** vs 끝점오차 0.26~0.30m = **병목은 xy_goal_tolerance(0.3)** → xy 0.15·yaw 0.25·planner 0.25 로 조임 → 끝점오차 **절반(0.12~0.17m)**, +2~3s/goal 뿐(맴돎 없음). 남은 후보: localization 모드 전환·BT BackUp 회복·velocity_smoother(실차). → `§17`
+- ✅ **정확도 벤치 + tolerance 강화 (07-06 밤)** — `tools/accuracy_{sampler,bench,report}` 신설(매초 ground truth vs SLAM 오차 → CSV·그래프). ★ 실측: SLAM 궤적오차 **평균 0.027m** vs 끝점오차 0.26~0.30m = **병목은 xy_goal_tolerance(0.3)** → xy 0.15·yaw 0.25·planner 0.25 로 조임 → 끝점오차 **절반(0.12~0.17m)**, +2~3s/goal 뿐(맴돎 없음). → `§17`
+- ✅ **localization 운영 모드 (07-06 심야)** — 미션 = 저장 posegraph 위치추정(라이브 SLAM 은 지도 제작 시만). `make_map.sh`(지도 재현) + `slam_params_localization.yaml` + 런치 `localization` 인자(mission.launch 기본 true). 궤적오차 평균 **0.015m**(mapping 대비 절반)·E2E PASS. ★새 함정: launch 부모 kill -9 는 **고아 nav2 노드**를 남겨 좀비 bt_navigator 가 goal 가로채 거부("목표 거부됨→FAULT", 증상 매번 다름) → cleanup 에 `pkill -9 -f "lib/nav2[_]"` 필수. 남은 후보: BT BackUp 회복·velocity_smoother(실차). → `§18`
 - ▶ **다음 후보:** ⓑ 역할 B `.msg` 계약 합의(+funnel 연결) ⓒ 중간보고서 초안(재료 풍부) ⓔ micro-ROS(구동부 진행 시) + 감지 3차(지도 배경제거). 변경 후 회귀 = `bash tools/regression_3goals.sh` + `bash tools/mission_e2e.sh` + `pytest src/mission_manager/test/`. + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
 
 ### 런치/실행법
-- **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김).
+- **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김). **기본 = localization 운영 모드**(저장 posegraph 위치추정, §18) — 라이브 SLAM 으로 돌리려면 `localization:=false`, 지도 재제작은 `bash tools/make_map.sh`.
   - 화재: `ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 14.0, y: 0.0}}}"`
   - 놓침 재현: `ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String "{data: stop}"` (재개 `follow`) / 관찰: `ros2 topic echo /mission_state`. ⚠ pub 은 `--once` 금지, `-w 1` (§함정).
 - `ros2 launch tunnel_sim slam_nav2.launch.py` — 라이브SLAM+Nav2 만 (미션노드 없이 목표 실험용). 목표: `ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: ..., y: ...}, orientation: {w: 1.0}}}}"`
@@ -185,7 +186,7 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0621_현황.md` | `~/Desktop/개발현황/` | 2B ROS2 기초 + 2C Gazebo 개념 (§9 파이썬 / §10 런치 / §13~14 Gazebo·SDF) |
 | `0623_현황.md` | `~/Desktop/개발현황/` | RPLIDAR C1 실물테스트 전과정 (디버깅순서·포트권한·LaserScan 구조·RViz) |
 | `0626_현황.md` | `~/Desktop/개발현황/` | 2D URDF(differential) + 2E SLAM 지도 전과정 (URDF구조·diff_drive튜닝·2휠전환·헤드리스SLAM·지도저장) |
-| `0705_현황.md` | `~/Desktop/개발현황/` | §7 EKF(9m→0.17m) · §8 회귀진단 · §10 오돔주입 · §11~12 미션설계+뼈대 · §13 ② · §14 ③(후방감지+SEARCH_BACK) · **§15 품질세션(git·RPP종결·클러스터 감지·any존·테스트 인프라·mission.launch)** · §16 집결지 계산 · §17 정확도 벤치+tolerance 강화 |
+| `0705_현황.md` | `~/Desktop/개발현황/` | §7 EKF(9m→0.17m) · §8 회귀진단 · §10 오돔주입 · §11~12 미션설계+뼈대 · §13 ② · §14 ③(후방감지+SEARCH_BACK) · **§15 품질세션(git·RPP종결·클러스터 감지·any존·테스트 인프라·mission.launch)** · §16 집결지 계산 · §17 정확도 벤치+tolerance 강화 · §18 localization 운영 모드 |
 | `0705_실차전_전략.md` | `~/Desktop/개발현황/` | ★ 실차 전 전략 정본: 가짜 detection 판단(계약+깡통만) + 실차 결합 5단계 로드맵 |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |
