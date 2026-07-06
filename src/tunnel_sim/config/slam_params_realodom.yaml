@@ -1,0 +1,68 @@
+# slam_params_realodom.yaml — ★ 실차 리허설용 SLAM 튜닝 (2026-07-05)
+# ============================================================
+# 배경: 정본 slam_params.yaml 의 odom 과신 튜닝(distance_variance_penalty 0.02)은
+#   "EKF odom 이 사실상 완벽"이라는 시뮬 전제 위의 값.
+#   오돔 오차 주입 실험(robot_odomerr.urdf, 거리 +5% 거짓)으로 실측한 결과:
+#   → penalty 0.02 는 거짓말까지 통째로 삼킴 (12.87m 주행, 오차 +0.622m = 거짓 그대로).
+#   분기 입구(특징 지형)를 지나도 교정 못 함 — 탐색폭 0.2m 잠금 + 강벌점이
+#   스캔매칭의 '교정 능력' 자체를 봉쇄하기 때문.
+#
+# 이 파일의 목표: 실차급 odom 오차(수 %) 전제에서
+#   복도(특징 없음)   → 여전히 odom 이 '안 움직였다' 피크를 이기고
+#   특징 있는 곳      → 스캔매칭이 odom 거짓을 교정
+#   하는 중간점. 오돔오차 주입 시뮬로 사전 검증 후 실차에 들고 간다.
+#
+# [정본 대비 바꾼 것 — 거리 3개만. 회전은 실차도 IMU 가 정확하므로 잠금 유지]
+#   distance_variance_penalty       0.02 → 0.1   (벌점 분모↑ = odom 신뢰 완화)
+#   minimum_distance_penalty        0.05 → 0.1   (하한 소폭 완화)
+#   correlation_search_space_dimension 0.2 → 0.3 (한 스텝 교정 허용폭 ±0.15m)
+#
+# 실행: ros2 launch tunnel_sim slam.launch.py slam_params:=slam_params_realodom.yaml \
+#         urdf:=robot_odomerr.urdf gui:=false
+slam_toolbox:
+  ros__parameters:
+
+    use_sim_time: true    # ⚠ 실차 이식 시 false 로!
+
+    # --- 솔버 (정본과 동일) ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- 프레임/토픽 (정본과 동일) ---
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping
+
+    # --- 지도 해상도/범위 (정본과 동일) ---
+    resolution: 0.05
+    max_laser_range: 16.0
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    map_update_interval: 2.0
+
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+
+    # --- 스캔 매칭: ★ 거리 신뢰만 완화 (이 파일의 존재 이유) ---
+    distance_variance_penalty: 0.1            # 정본 0.02 → 완화 (분모: 클수록 벌점 약함)
+    minimum_distance_penalty: 0.1             # 정본 0.05 → 소폭 완화
+    correlation_search_space_dimension: 0.3   # 정본 0.2 → 한 스텝 ±0.15m 교정 허용
+    # --- 회전 구속은 정본 유지 (실차 IMU 도 yaw 는 정확 — EKF 융합 전제) ---
+    angle_variance_penalty: 0.05
+    minimum_angle_penalty: 0.1
+    coarse_search_angle_offset: 0.1
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    link_match_minimum_response_fine: 0.1
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45

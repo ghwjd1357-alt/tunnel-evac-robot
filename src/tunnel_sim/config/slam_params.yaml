@@ -1,0 +1,76 @@
+# slam_params.yaml — slam_toolbox(비동기 온라인 SLAM) 설정 (2E)
+# ============================================================
+# slam_toolbox 가 하는 일:
+#   /scan(라이다) + odom→base_footprint TF 를 받아 → 지도(/map) 작성 + map→odom TF 발행.
+#   즉 "라이다로 벽을 그리며 내가 어디 있는지(map기준) 추정".
+#
+# [TF 체인 완성]
+#   map ──(slam_toolbox)──> odom ──(diff_drive)──> base_footprint ──(URDF)──> base_link → lidar_link
+#   slam 이 map→odom 을 채워야 RViz 에서 지도 위 로봇이 보인다.
+#
+# [프레임 이름은 우리 로봇과 정확히 일치해야 함]
+#   odom_frame=odom / base_frame=base_footprint / scan_topic=/scan  ← URDF·diff_drive 와 동일
+slam_toolbox:
+  ros__parameters:
+
+    # --- 시뮬 시계 사용 (Gazebo /clock 동기화) ★ 시뮬에선 반드시 true ---
+    use_sim_time: true
+
+    # --- 솔버 (지도 최적화 엔진, 기본 Ceres) ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- 프레임/토픽 (★ 우리 로봇과 일치) ---
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping                  # mapping=지도작성 / localization=기존지도로 위치추정
+
+    # --- 지도 해상도/범위 ---
+    resolution: 0.05               # 격자 한 칸 5cm
+    max_laser_range: 16.0          # 라이다 최대거리 (C1·시뮬과 동일)
+    minimum_time_interval: 0.5     # 스캔 처리 최소 간격(초)
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    map_update_interval: 2.0       # 지도 갱신 주기(초)
+
+    # --- 새 스캔 등록 조건 (이만큼 움직여야 지도에 반영) ---
+    minimum_travel_distance: 0.3   # 30cm 이동마다
+    minimum_travel_heading: 0.3    # 0.3rad 회전마다
+
+    # --- 스캔 매칭 (odom 오차를 라이다로 보정 → 4륜 슬립 보정 핵심) ---
+    # ★ 2E EKF 후속 튜닝: EKF 융합 odom 은 이제 매우 정확(12.53m 주행 오차 ~0 실측).
+    #   그런데 특징 없는 복도에선 scan-match 응답이 길이방향으로 평평해서
+    #   매칭이 odom 예측을 '자신 없게' 덮어쓰며 뒤로 미끄러짐(6m 드리프트 재현).
+    #   → 아래 두 param 으로 "odom 예측에서 벗어나면 벌점"을 강하게:
+    #     복도(매칭 애매)에선 odom 승 / 특징 있는 곳(매칭 뚜렷)에선 라이다 승.
+    # (실측 반복: 기본값 → 6.2m 오차 / penalty 5.0·dim 0.3 → 3.7m / 아래값 → 재측정)
+    # ※ 복도에선 연속 스캔이 '똑같아 보여서' 매처가 "안 움직였다"를 적극 선호
+    #   → 벌점이 그 끌어당김을 압도할 만큼 세야 한다.
+    # ⚠ 이름 함정: 이 값은 '벌점 크기'가 아니라 벌점 공식의 '분모(분산)'!
+    #   penalty = 1 − 이탈²/variance → 작을수록 벌점이 강함. (50 으로 키웠더니 무효과 실측)
+    #   0.02 면 odom 예측서 0.1m 이탈 시 점수 절반, 0.15m 이탈 시 바닥(하한 0.05).
+    distance_variance_penalty: 0.02     # 기본 0.5. ↓ = odom 신뢰 ↑
+    correlation_search_space_dimension: 0.2   # 기본 0.5. 한 스텝에 미끄러질 수 있는 탐색폭 축소
+    # ★ 벌점 '하한선' — 기본 0.5 는 "아무리 이탈해도 점수 절반까지만 감점"이라
+    #   복도의 '안 움직였다' 피크를 못 이김 → 하한을 사실상 제거해 벌점이 실제로 작동하게.
+    minimum_distance_penalty: 0.05      # 기본 0.5
+    # ★★ 회전 구속 (회귀진단 발견 07-05): 거리만 잠그니 매처가 '회전'으로 탈출해
+    #   분기 통과 후 지도가 ~18° 기울어짐(기본 탐색각 ±0.349rad≈20° 와 일치).
+    #   EKF yaw 는 IMU 융합으로 오차 0.02° 실측 = 가장 믿을 수 있는 값 → 회전도 잠근다.
+    angle_variance_penalty: 0.05        # 기본 1.0. 분모(분산) — 작을수록 회전 이탈 벌점 강함
+    minimum_angle_penalty: 0.1          # 기본 0.9(=사실상 무벌점!) → 하한 제거
+    coarse_search_angle_offset: 0.1     # 기본 0.349. 탐색 각도범위 자체도 ±0.1rad 로 축소
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    link_match_minimum_response_fine: 0.1
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true          # 루프 닫기(한 바퀴 돌면 지도 오차 보정)
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45

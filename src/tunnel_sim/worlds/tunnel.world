@@ -1,0 +1,214 @@
+<?xml version="1.0" ?>
+<!--
+  tunnel.world — 지하터널 시뮬 (2026-06-23 보강: T자 분기 + 크기 확대)
+  크기: 메인 복도 길이 30m × 폭 6m × 높이 2m, 곁복도 길이 12m × 폭 6m.
+
+  [평면도 — 위에서 내려다본 모습]  (x=앞뒤, y=좌우, 단위 m)
+
+                   ┌─────┐          ← branch_end (곁복도 끝벽, y=+15)
+                   │ 🧍  │             victim_1 (대피자)
+                   │ 곁  │
+                   │ 복  │  폭 6m (x = -3 ~ +3)
+                   │ 도  │  길이 12m (y = +3 ~ +15)
+     ┌─────────────┘     └─────────────┐   ← 북벽 2조각 (가운데 분기 입구 6m 뚫림)
+     │ W                              E │   ← west_end / east_end (양 끝벽)
+     │      🔶          🛢️              │   메인 복도 (길이 30m, 폭 6m, 높이 2m)
+     └─────────────────────────────────┘   ← 남벽 (통짜)
+    x=-15                            x=+15
+
+  [핵심 SDF 개념 복습]
+    - collision : 라이다·충돌이 '맞는' 형태 (빠지면 LiDAR가 통과!).  visual : 눈에 보이는 형태.
+    - pose "x y z  roll pitch yaw" : 물체 중심 위치(m) + 방향(라디안).
+    - ★ z = 높이의 절반. 높이 2m 벽 → z=1.0 (그래야 바닥에 딱 붙음. z=0이면 절반이 땅속).
+    - yaw=1.5708(90도) : 벽을 가로로 회전 (길이축 x→y).   static true : 고정.
+
+  [분기 만드는 법 ★]
+    북벽을 통짜로 두면 분기 입구가 막힘 → 서쪽조각(x -15~-3) + 동쪽조각(x +3~+15) '두 개'로
+    쪼개서 가운데(x -3~+3, 폭6m)를 비워 곁복도 입구를 만든다.
+-->
+<sdf version="1.6">
+  <world name="tunnel">
+
+    <!-- ⓪ gazebo_ros_state 플러그인 (07-05 ②단계): 모델 위치를 ROS 서비스로 읽고/쓰기.
+         /gazebo/get_entity_state·/gazebo/set_entity_state 서비스 제공.
+         용도: 가짜 추종자(원기둥)를 스크립트로 로봇 뒤를 따라다니게 이동 —
+         ③단계 라이다 후방 추종감지 알고리즘의 시험 무대. -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/gazebo</namespace>
+      </ros>
+      <update_rate>10.0</update_rate>
+    </plugin>
+
+    <!-- ① 태양(조명) -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- ② 바닥(무한 평면) -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- ====================== 메인 복도 (30m × 6m × 2m) ====================== -->
+
+    <!-- 남벽 (통짜): y=-3 에 x축으로 길게 30m -->
+    <model name="wall_south">
+      <static>true</static>
+      <pose>0 -3 1.0  0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>30 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>30 0.2 2</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 북벽 서쪽조각: x = -15 ~ -3 (길이 12, 중심 x=-9) -->
+    <model name="wall_north_west">
+      <static>true</static>
+      <pose>-9 3 1.0  0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 북벽 동쪽조각: x = +3 ~ +15 (길이 12, 중심 x=+9) -->
+    <model name="wall_north_east">
+      <static>true</static>
+      <pose>9 3 1.0  0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 서쪽 끝벽: x=-15 에서 복도 폭(y, 6m) 막음. yaw=90도 -->
+    <model name="wall_west_end">
+      <static>true</static>
+      <pose>-15 0 1.0  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 동쪽 끝벽: x=+15 -->
+    <model name="wall_east_end">
+      <static>true</static>
+      <pose>15 0 1.0  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ====================== 곁복도 (T자 분기, 12m × 6m × 2m) ====================== -->
+
+    <!-- 곁복도 서벽: x=-3, y = +3 ~ +15 (길이 12, 중심 y=9). yaw=90도 -->
+    <model name="branch_wall_west">
+      <static>true</static>
+      <pose>-3 9 1.0  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 곁복도 동벽: x=+3, y = +3 ~ +15 -->
+    <model name="branch_wall_east">
+      <static>true</static>
+      <pose>3 9 1.0  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>12 0.2 2</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 곁복도 끝벽: y=+15 에서 곁복도 폭(x, 6m) 막음 -->
+    <model name="branch_end">
+      <static>true</static>
+      <pose>0 15 1.0  0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6 0.2 2</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ====================== 터널 안 물체 (include) ====================== -->
+    <!-- <pose> 위치는 마우스로 배치 후 'gz model -m 이름 -p'로 읽어 갱신 가능 -->
+
+    <!-- 공사 콘: 남벽 근처 (장애물)
+         ★ (0,0)→(5,-2.2) 이동 (07-05): 원위치가 분기 입구 정중앙 = 주행/회전 경로였는데
+         콘 높이(~0.3m) < 라이다 평면(0.65m) 이라 costmap 에 안 보임 → 로봇이 13m 밀고
+         다니다 회전 시 몸통·벽 사이에 끼어 쐐기(회전 잠김, Nav2 abort) 유발.
+         ⚠ 실전 시사점: 낮은 장애물 = 2D 라이다 사각지대 → Orbbec 깊이카메라(역할 B) 필수 근거. -->
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>cone_1</name>
+      <pose>5 -2.2 0  0 0 0</pose>
+    </include>
+
+    <!-- 공사 배럴: 메인 복도 동쪽 (장애물) -->
+    <include>
+      <uri>model://construction_barrel</uri>
+      <name>barrel_1</name>
+      <pose>7 -1 0  0 0 0</pose>
+    </include>
+
+    <!-- 대피자(사람): 곁복도 끝에 서 있음 → 로봇이 분기로 들어가 찾아갈 victim -->
+    <include>
+      <uri>model://person_standing</uri>
+      <name>victim_1</name>
+      <pose>0 13 0  0 0 3.14159</pose>
+    </include>
+
+    <!-- ====================== 로봇 (2C → 2D 변경) ======================
+      예전엔 여기에 static 'box_robot'(고정 박스 + 라이다)를 박아 /scan 만 확인했다.
+      2D부터는 로봇을 월드에서 빼고, URDF 로봇(src/tunnel_sim/urdf/robot.urdf)을
+      robot.launch.py 가 spawn 으로 소환한다.
+      → 움직이는(diff_drive) + /odom 발행 + TF 완비 로봇으로 교체됨.
+      실행:  ros2 launch tunnel_sim robot.launch.py
+    -->
+
+  </world>
+</sdf>

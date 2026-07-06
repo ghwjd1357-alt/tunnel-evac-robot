@@ -1,0 +1,251 @@
+<?xml version="1.0"?>
+<!--
+  robot.urdf — 지하터널 대피로봇 '몸 설계도' (2D, differential)
+  =====================================================================
+  [중요 — 시뮬 구동 모델 결정]
+    실물 = 4륜 강체 차동(skid-steer). 그러나 Gazebo Classic 에서 4개를 모두 구동하면
+    앞/뒤 바퀴가 과구속(over-constrained)돼 서로 싸워서 '제자리 회전'이 안 되는
+    고질병이 있다(헤드리스 실측으로 확인). 그래서 시뮬은 표준적인
+        '2 구동휠(중앙 좌우) + 앞뒤 캐스터(자유 구체)'  ← 이상적 differential
+    로 모델링한다. 발행/구독 토픽(/scan·/odom·/cmd_vel)·TF·footprint 는 실물과 동일하므로
+    SLAM·Nav2 코드는 그대로 실물(4륜)에 이식된다. (CLAUDE.md §6 '통찰' 그대로)
+
+  [link 구성]
+        lidar_link (지면 0.60m)
+            │ fixed z=+0.50
+        base_link (z=0.10=wheel_radius)  몸통 0.50×0.40×0.55(클리어런스 5cm)
+         ├── imu_link     (IMU 센서, 몸통 중심 — EKF 융합용, 2E)
+         ├── wheel_left   (구동, 중앙 좌, continuous)
+         ├── wheel_right  (구동, 중앙 우, continuous)
+         ├── caster_front (자유 구체, 지지)
+         └── caster_rear  (자유 구체, 지지)
+            │ fixed z=-0.10
+        base_footprint (지면 z=0, odom/Nav2 기준)
+
+  [좌표]  x=앞, y=왼쪽, z=위 (REP-103)
+  [확정치수]  base 0.50×0.40×0.60 / 바퀴 r=0.10 / 좌우간격 0.44 / 라이다 지면 0.60
+  [잠정값 ⏳]  wheel_radius·wheel_separation·질량 → 구동부 실측 오면 교체
+-->
+<robot name="tunnel_robot">
+
+  <material name="blue">  <color rgba="0.1 0.2 0.8 1"/></material>
+  <material name="black"> <color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="gray">  <color rgba="0.4 0.4 0.4 1"/></material>
+  <material name="red">   <color rgba="0.8 0.1 0.1 1"/></material>
+
+  <!-- ① base_footprint : 지면(z=0) 가상 기준점 (odom·Nav2 기준). root link. -->
+  <link name="base_footprint"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>   <!-- base_link = 바퀴축 높이 -->
+  </joint>
+
+  <!-- ② base_link : 몸통(타워). 바닥에 끌리지 않게 박스 바닥을 월드 z=0.05 로 띄움(클리어런스).
+       박스중심(base_link기준) z=0.225, 높이 0.55 → 월드 0.05~0.60. 윗면 0.60=라이다 높이. -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <geometry><box size="0.50 0.40 0.55"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <geometry><box size="0.50 0.40 0.55"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <mass value="6.0"/>
+      <inertia ixx="0.231" ixy="0" ixz="0" iyy="0.276" iyz="0" izz="0.205"/>
+    </inertial>
+  </link>
+
+  <!-- ============================================================
+       ③ 구동 바퀴 2개 : 중앙 좌/우 (x=0). 원통 r=0.10, 두께 0.05.
+          continuous + axis y (굴러감). 좌우간격 0.44(y=±0.22).
+       ============================================================ -->
+  <link name="wheel_left">
+    <visual>   <origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry> <material name="black"/></visual>
+    <collision><origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.5"/><inertia ixx="0.0014" ixy="0" ixz="0" iyy="0.0014" iyz="0" izz="0.0025"/></inertial>
+  </link>
+  <joint name="wheel_left_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_left"/>
+    <origin xyz="0 0.22 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="wheel_right">
+    <visual>   <origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry> <material name="black"/></visual>
+    <collision><origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.5"/><inertia ixx="0.0014" ixy="0" ixz="0" iyy="0.0014" iyz="0" izz="0.0025"/></inertial>
+  </link>
+  <joint name="wheel_right_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_right"/>
+    <origin xyz="0 -0.22 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ============================================================
+       ④ 캐스터(자유 지지) 2개 : 앞/뒤 (x=±0.18). 구체 r=0.04.
+          fixed joint 로 붙이고 마찰을 0 으로 둬서 '미끄러지는 받침'처럼 동작
+          → 로봇이 2 구동휠로 자유롭게 제자리 회전 가능.
+          구체 중심 월드 z=0.04(=반지름) → 바닥에 닿음. base_link기준 z=0.04-0.10=-0.06.
+       ============================================================ -->
+  <link name="caster_front">
+    <visual>   <geometry><sphere radius="0.04"/></geometry> <material name="gray"/></visual>
+    <collision><geometry><sphere radius="0.04"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.00006" ixy="0" ixz="0" iyy="0.00006" iyz="0" izz="0.00006"/></inertial>
+  </link>
+  <joint name="caster_front_joint" type="fixed">
+    <parent link="base_link"/><child link="caster_front"/>
+    <origin xyz="0.18 0 -0.06" rpy="0 0 0"/>
+  </joint>
+
+  <link name="caster_rear">
+    <visual>   <geometry><sphere radius="0.04"/></geometry> <material name="gray"/></visual>
+    <collision><geometry><sphere radius="0.04"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.00006" ixy="0" ixz="0" iyy="0.00006" iyz="0" izz="0.00006"/></inertial>
+  </link>
+  <joint name="caster_rear_joint" type="fixed">
+    <parent link="base_link"/><child link="caster_rear"/>
+    <origin xyz="-0.18 0 -0.06" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ⑤ lidar_link : 타워 위(지면 0.65m). base_link 기준 z=+0.55.
+       ★ 0.60→0.65 수정(07-05 회귀진단): 라이다 평면이 몸통 윗면(0.60)과 같은 높이면
+         레이저가 자기 몸통 윗모서리를 상시 타격(±90°에서 0.20m 고정 히트 실측)
+         → 지나간 자리마다 유령 장애물을 그려 지도 오염 + Nav2 경로 막힘.
+         5cm 클리어런스로 해결. ⚠ 실물도 동일: RPLIDAR 는 360° 다 보므로
+         몸통 최상면보다 반드시 위에 장착할 것 (구동부/하드웨어 팀 전달사항). -->
+  <link name="lidar_link">
+    <visual>   <geometry><cylinder radius="0.04" length="0.05"/></geometry> <material name="red"/></visual>
+    <collision><geometry><cylinder radius="0.04" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/><child link="lidar_link"/>
+    <origin xyz="0 0 0.55" rpy="0 0 0"/>   <!-- 지면 0.65m (몸통 윗면 +5cm 클리어런스) -->
+  </joint>
+
+  <!-- ⑥ imu_link : IMU 센서 자리 (EKF 융합용, 2E).
+       실물에선 구동부 Teensy의 IMU가 /imu/data 를 주지만, 시뮬에선 여기 붙는
+       gazebo IMU 플러그인이 같은 타입·이름의 토픽을 발행한다(가짜=진짜 원리).
+       몸통 중심(회전축 위)에 두면 회전 시 원심가속도 오염이 없어 가장 깨끗. -->
+  <link name="imu_link">
+    <inertial><mass value="0.01"/><inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/></inertial>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/><child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============================================================
+       ===== <gazebo> 시뮬 전용 설정 =====
+       ============================================================ -->
+  <gazebo reference="base_link"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="lidar_link"><material>Gazebo/Red</material></gazebo>
+
+  <!-- 구동 바퀴: 마찰 충분히(잘 굴러 추진). mu1=mu2=1.0(2륜이라 scrub 과구속 없음). -->
+  <gazebo reference="wheel_left">
+    <material>Gazebo/Black</material>
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+  <gazebo reference="wheel_right">
+    <material>Gazebo/Black</material>
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+
+  <!-- 캐스터: 마찰 0 → 미끄러지는 받침 (회전 저항 없음). -->
+  <gazebo reference="caster_front">
+    <material>Gazebo/Grey</material>
+    <mu1>0.0</mu1><mu2>0.0</mu2>
+  </gazebo>
+  <gazebo reference="caster_rear">
+    <material>Gazebo/Grey</material>
+    <mu1>0.0</mu1><mu2>0.0</mu2>
+  </gazebo>
+
+  <!-- ====== ⑦ diff_drive = 시뮬의 '구동부 Teensy' ======
+       /cmd_vel 구독 → 2바퀴 구동 / /odom 발행 / odom→base_footprint TF.
+       2 구동휠 = 1 쌍(num_wheel_pairs=1). -->
+  <gazebo>
+    <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
+      <ros><namespace>/</namespace></ros>
+
+      <num_wheel_pairs>1</num_wheel_pairs>
+      <left_joint>wheel_left_joint</left_joint>
+      <right_joint>wheel_right_joint</right_joint>
+
+      <wheel_separation>0.44</wheel_separation>
+      <wheel_diameter>0.20</wheel_diameter>   <!-- 2 × r 0.10 -->
+      <max_wheel_torque>30</max_wheel_torque>
+      <max_wheel_acceleration>5.0</max_wheel_acceleration>
+
+      <command_topic>cmd_vel</command_topic>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <publish_odom>true</publish_odom>
+      <!-- ★ 2E EKF: odom→base_footprint TF 는 이제 EKF(robot_localization)가 발행.
+           둘이 같은 TF 를 쏘면 'TF 싸움'(위치 널뜀) → 여기선 반드시 꺼서 한쪽만.
+           diff_drive 는 /odom '토픽'만 내보낸다 (EKF 의 입력 재료). -->
+      <publish_odom_tf>false</publish_odom_tf>
+      <publish_wheel_tf>false</publish_wheel_tf>
+    </plugin>
+  </gazebo>
+
+  <!-- ====== ⑧ 라이다 센서 (2C 검증한 /scan 발행) — lidar_link 부착 ====== -->
+  <gazebo reference="lidar_link">
+    <sensor type="ray" name="lidar">
+      <pose>0 0 0 0 0 0</pose>
+      <visualize>true</visualize>
+      <update_rate>10</update_rate>
+      <ray>
+        <scan><horizontal>
+          <samples>360</samples><resolution>1</resolution>
+          <min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle>
+        </horizontal></scan>
+        <range><min>0.12</min><max>16.0</max><resolution>0.01</resolution></range>
+      </ray>
+      <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros><namespace>/</namespace><remapping>~/out:=scan</remapping></ros>
+        <output_type>sensor_msgs/LaserScan</output_type>
+        <frame_name>lidar_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- ====== ⑨ IMU 센서 (2E EKF) — imu_link 부착. 라이다와 같은 3층 구조:
+       link + <sensor type="imu"> + 플러그인(libgazebo_ros_imu_sensor.so).
+       발행: /imu/data (sensor_msgs/Imu) — 실물 Teensy IMU 토픽 계약과 동일(§4).
+       노이즈를 일부러 넣는 이유: 완전 무결한 센서는 covariance=0 이 되어
+       EKF 가 "얼마나 믿을지" 판단할 수 없다 → 실물 IMU 급 가우시안 노이즈 부여. -->
+  <gazebo reference="imu_link">
+    <sensor type="imu" name="imu_sensor">
+      <always_on>true</always_on>
+      <update_rate>50</update_rate>   <!-- 50Hz: EKF(30Hz)보다 빠르면 충분 -->
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+        <ros><namespace>/</namespace><remapping>~/out:=imu/data</remapping></ros>
+        <frame_name>imu_link</frame_name>
+        <!-- false = 자세(orientation)를 '월드 기준 절대값'으로 보고 (REP-145 표준).
+             true 면 스폰 시점 자세가 0 이 되는 상대값. 우리는 스폰 yaw=0 이라 값은 같지만
+             표준을 따라 false 로 명시. -->
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+</robot>

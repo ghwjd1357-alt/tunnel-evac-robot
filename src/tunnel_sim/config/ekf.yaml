@@ -1,0 +1,60 @@
+# ekf.yaml — robot_localization EKF 설정 (2E 복도 드리프트 보강)
+# ============================================================
+# [EKF가 하는 일]
+#   /odom(휠, diff_drive) + /imu/data(IMU) 두 정보원을 융합해
+#   ① /odometry/filtered 토픽 ② odom→base_footprint TF 를 발행.
+#   ★ 이 TF 는 원래 diff_drive 가 쏘던 것 — URDF 에서 publish_odom_tf 를 껐으므로
+#     이제 EKF 가 유일한 발행자다 (이중 발행 = TF 싸움 금지).
+#
+# [왜 EKF 인가 — 0705 전략판단]
+#   특징 없는 직선 복도에선 라이다 scan-matching 이 앞뒤 위치를 잡을 정보가 없음.
+#   휠 odom 은 "바퀴가 몇 바퀴 굴렀나"라 앞뒤 거리는 정확 → 없던 정보원을 추가하는 것.
+#
+# [TF 체인 완성형]
+#   map ─(slam_toolbox)→ odom ─(★EKF)→ base_footprint ─(URDF)→ base_link → …
+#
+# [융합 매트릭스 읽는 법] 15칸 = [x, y, z, roll, pitch, yaw,
+#                                 vx, vy, vz, vroll, vpitch, vyaw,
+#                                 ax, ay, az]  (true = 그 값을 믿고 융합)
+ekf_filter_node:
+  ros__parameters:
+
+    use_sim_time: true          # ★ 시뮬 시계 (Gazebo /clock). 하나라도 빠지면 TF 시간 불일치 폭주
+    frequency: 30.0             # 융합 결과 발행 주기 (Hz)
+    two_d_mode: true            # 평면 로봇: z·roll·pitch 강제 0 (터널 바닥 주행)
+    publish_tf: true            # odom→base_footprint TF 발행 (이제 EKF 담당)
+
+    # --- 프레임 (★ URDF·SLAM 과 정확히 일치해야 함) ---
+    map_frame: map              # SLAM 담당 (EKF 는 안 건드림)
+    odom_frame: odom
+    base_link_frame: base_footprint   # 우리 로봇 기준 link (slam_params 의 base_frame 과 동일)
+    world_frame: odom           # EKF 가 "odom 기준 위치"를 추정 = odom→base TF 를 만든다는 뜻
+
+    # ===== 입력 ① 휠 오도메트리 (diff_drive 의 /odom 토픽) =====
+    # 속도(vx, vy, vyaw)만 융합 — 위치(x,y)를 그대로 믿으면 odom 누적드리프트까지
+    # 통째로 믿게 됨. 속도를 받아 EKF 가 직접 적분하는 게 표준.
+    # vy 도 true 인 이유: 차동구동은 옆으로 못 가므로 "vy=0" 자체가 유용한 정보(제약).
+    odom0: /odom
+    odom0_config: [false, false, false,    # x, y, z
+                   false, false, false,    # roll, pitch, yaw
+                   true,  true,  false,    # vx, vy, vz   ← 앞뒤거리 정보의 원천
+                   false, false, true,     # vroll, vpitch, vyaw
+                   false, false, false]    # ax, ay, az
+    odom0_differential: false
+    odom0_queue_size: 10
+
+    # ===== 입력 ② IMU (/imu/data) =====
+    # yaw(자세) + vyaw(각속도)만 신뢰 — 4륜 슬립 시 휠 odom 회전각을 IMU 가 교정 (§5).
+    # 가속도(ax..)는 시뮬·실물 모두 노이즈가 커서 제외 (0705 §4 함정 경고).
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, true,      # yaw ← 절대 방위
+                  false, false, false,
+                  false, false, true,      # vyaw ← 회전 각속도
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false        # 플러그인이 월드 기준 절대 yaw 를 줌 (스폰 yaw=0 이라 odom 과 일치)
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true   # 가속도 안 쓰지만 표준상 명시
+
+    # --- 프로세스 노이즈: 기본값 사용 (문제 생기면 그때 튜닝) ---

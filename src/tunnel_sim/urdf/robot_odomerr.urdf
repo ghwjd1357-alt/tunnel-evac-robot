@@ -1,0 +1,231 @@
+<?xml version="1.0"?>
+<!--
+  robot_odomerr.urdf — ★ 오돔 오차 주입 실험용 사본 (2026-07-05, 실차 리허설)
+  =====================================================================
+  robot.urdf 와 완전히 동일하되, diff_drive 플러그인의 '오돔 계산 파라미터'만
+  일부러 틀리게 넣은 버전. 물리 바퀴(collision r=0.10)는 그대로이므로
+  실제 움직임은 정상 — 하지만 플러그인이 보고하는 /odom 은 거짓이 된다.
+  = 실차에서 "바퀴 반지름 실측 부정확 + 4륜 회전 슬립" 상황의 시뮬 재현.
+
+  [주입한 오차 2종]
+    ① wheel_diameter  0.20 → 0.21 (+5%)
+       플러그인이 바퀴를 실제보다 크다고 믿음 → 같은 바퀴회전에 대해
+       거리를 5% 과대 보고. 복도 12m 주행 시 odom 이 약 0.6m 거짓.
+       (실차: 바퀴 마모·공기압·실측오차로 1~5% 흔함)
+    ② wheel_separation 0.44 → 0.40 (−9%)
+       플러그인이 좌우 간격을 실제보다 좁다고 믿음 → 같은 좌우 속도차에 대해
+       yaw 회전을 ~10% 과대 보고.
+       (실차: skid-steer 는 슬립 때문에 '유효 간격'이 물리 간격과 달라짐 — 대표 오차)
+
+  [실험 목적]
+    - EKF 검증: IMU yaw 융합이 ②(회전 거짓말)를 구해주는가?
+    - SLAM 검증: odom 과신 튜닝(distance_variance_penalty 0.02)이
+      ①(거리 거짓말)까지 통째로 믿어버리는가? → 실차용 재튜닝 수치 미리 확보.
+
+  [실행]  ros2 launch tunnel_sim robot.launch.py urdf:=robot_odomerr.urdf
+          (slam_nav2.launch.py 등 상위 런치에도 urdf:= 인자가 그대로 전달됨)
+  ⚠ 본 파일은 실험 전용 — 평상시·본선 검증은 robot.urdf 사용.
+  ⚠ robot.urdf 를 고치면 이 파일도 같이 갱신할 것 (플러그인 2값 빼고 동일 유지).
+-->
+<robot name="tunnel_robot">
+
+  <material name="blue">  <color rgba="0.1 0.2 0.8 1"/></material>
+  <material name="black"> <color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="gray">  <color rgba="0.4 0.4 0.4 1"/></material>
+  <material name="red">   <color rgba="0.8 0.1 0.1 1"/></material>
+
+  <!-- ① base_footprint : 지면(z=0) 가상 기준점 (odom·Nav2 기준). root link. -->
+  <link name="base_footprint"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 0.10" rpy="0 0 0"/>   <!-- base_link = 바퀴축 높이 -->
+  </joint>
+
+  <!-- ② base_link : 몸통(타워). robot.urdf 와 동일. -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <geometry><box size="0.50 0.40 0.55"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <geometry><box size="0.50 0.40 0.55"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0.225" rpy="0 0 0"/>
+      <mass value="6.0"/>
+      <inertia ixx="0.231" ixy="0" ixz="0" iyy="0.276" iyz="0" izz="0.205"/>
+    </inertial>
+  </link>
+
+  <!-- ③ 구동 바퀴 2개 : 물리 바퀴는 원본과 완전 동일 (r=0.10, 간격 0.44).
+       ★ 오차는 여기(물리)가 아니라 아래 ⑦ diff_drive 플러그인(계산식)에만 주입! -->
+  <link name="wheel_left">
+    <visual>   <origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry> <material name="black"/></visual>
+    <collision><origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.5"/><inertia ixx="0.0014" ixy="0" ixz="0" iyy="0.0014" iyz="0" izz="0.0025"/></inertial>
+  </link>
+  <joint name="wheel_left_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_left"/>
+    <origin xyz="0 0.22 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="wheel_right">
+    <visual>   <origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry> <material name="black"/></visual>
+    <collision><origin rpy="1.5708 0 0"/> <geometry><cylinder radius="0.10" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.5"/><inertia ixx="0.0014" ixy="0" ixz="0" iyy="0.0014" iyz="0" izz="0.0025"/></inertial>
+  </link>
+  <joint name="wheel_right_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_right"/>
+    <origin xyz="0 -0.22 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ④ 캐스터(자유 지지) 2개 : 원본과 동일. -->
+  <link name="caster_front">
+    <visual>   <geometry><sphere radius="0.04"/></geometry> <material name="gray"/></visual>
+    <collision><geometry><sphere radius="0.04"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.00006" ixy="0" ixz="0" iyy="0.00006" iyz="0" izz="0.00006"/></inertial>
+  </link>
+  <joint name="caster_front_joint" type="fixed">
+    <parent link="base_link"/><child link="caster_front"/>
+    <origin xyz="0.18 0 -0.06" rpy="0 0 0"/>
+  </joint>
+
+  <link name="caster_rear">
+    <visual>   <geometry><sphere radius="0.04"/></geometry> <material name="gray"/></visual>
+    <collision><geometry><sphere radius="0.04"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.00006" ixy="0" ixz="0" iyy="0.00006" iyz="0" izz="0.00006"/></inertial>
+  </link>
+  <joint name="caster_rear_joint" type="fixed">
+    <parent link="base_link"/><child link="caster_rear"/>
+    <origin xyz="-0.18 0 -0.06" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ⑤ lidar_link : 지면 0.65m (자기타격 방지 +5cm). 원본과 동일. -->
+  <link name="lidar_link">
+    <visual>   <geometry><cylinder radius="0.04" length="0.05"/></geometry> <material name="red"/></visual>
+    <collision><geometry><cylinder radius="0.04" length="0.05"/></geometry></collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/><child link="lidar_link"/>
+    <origin xyz="0 0 0.55" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ⑥ imu_link : 원본과 동일. IMU 자체는 거짓말 안 함 (오차는 휠오돔에만). -->
+  <link name="imu_link">
+    <inertial><mass value="0.01"/><inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/></inertial>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/><child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link"><material>Gazebo/Blue</material></gazebo>
+  <gazebo reference="lidar_link"><material>Gazebo/Red</material></gazebo>
+
+  <gazebo reference="wheel_left">
+    <material>Gazebo/Black</material>
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+  <gazebo reference="wheel_right">
+    <material>Gazebo/Black</material>
+    <mu1>1.0</mu1><mu2>1.0</mu2>
+  </gazebo>
+
+  <gazebo reference="caster_front">
+    <material>Gazebo/Grey</material>
+    <mu1>0.0</mu1><mu2>0.0</mu2>
+  </gazebo>
+  <gazebo reference="caster_rear">
+    <material>Gazebo/Grey</material>
+    <mu1>0.0</mu1><mu2>0.0</mu2>
+  </gazebo>
+
+  <!-- ====== ⑦ diff_drive — ★★ 오차 주입 지점 (이 파일의 존재 이유) ======
+       아래 두 값은 '물리'가 아니라 플러그인의 '오돔 계산식 + cmd_vel→바퀴속도 변환식'에
+       쓰인다. 물리 바퀴(r=0.10, 간격 0.44)와 다르게 주면:
+       - /odom 이 실제 움직임과 다른 거짓 보고 (우리가 원하는 것)
+       - cmd_vel 변환도 살짝 틀어짐 (실제 속도 약간 감소 — 실차의 캘리브레이션 오차와 동일 현상) -->
+  <gazebo>
+    <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
+      <ros><namespace>/</namespace></ros>
+
+      <num_wheel_pairs>1</num_wheel_pairs>
+      <left_joint>wheel_left_joint</left_joint>
+      <right_joint>wheel_right_joint</right_joint>
+
+      <wheel_separation>0.40</wheel_separation>  <!-- ★거짓: 실제 0.44 (−9%) → yaw ~10% 과대보고 (회전 슬립 흉내) -->
+      <wheel_diameter>0.21</wheel_diameter>      <!-- ★거짓: 실제 0.20 (+5%) → 거리 5% 과대보고 (반지름 실측오차 흉내) -->
+
+      <!-- ★★ 핵심 (07-05 실측 발견): odometry_source 기본값 = world
+           = Gazebo 실제 위치를 그대로 복사하는 '치트 오돔' → 위의 거짓 파라미터가
+           오돔에 전혀 반영 안 됨! (기존 시뮬 odom 이 늘 완벽했던 진짜 이유,
+           /odom 에 spawn 좌표가 포함돼 나오던 이유도 이것.)
+           encoder 로 바꾸면 실차처럼 '바퀴 회전량 × 파라미터'로 적분 계산
+           → 거짓 파라미터가 효력 발생 + odom 이 (0,0)에서 시작 (실차와 동일). -->
+      <odometry_source>encoder</odometry_source>
+      <max_wheel_torque>30</max_wheel_torque>
+      <max_wheel_acceleration>5.0</max_wheel_acceleration>
+
+      <command_topic>cmd_vel</command_topic>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>false</publish_odom_tf>   <!-- TF 는 EKF 단독 발행 (원본과 동일) -->
+      <publish_wheel_tf>false</publish_wheel_tf>
+    </plugin>
+  </gazebo>
+
+  <!-- ====== ⑧ 라이다 센서 : 원본과 동일 ====== -->
+  <gazebo reference="lidar_link">
+    <sensor type="ray" name="lidar">
+      <pose>0 0 0 0 0 0</pose>
+      <visualize>true</visualize>
+      <update_rate>10</update_rate>
+      <ray>
+        <scan><horizontal>
+          <samples>360</samples><resolution>1</resolution>
+          <min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle>
+        </horizontal></scan>
+        <range><min>0.12</min><max>16.0</max><resolution>0.01</resolution></range>
+      </ray>
+      <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros><namespace>/</namespace><remapping>~/out:=scan</remapping></ros>
+        <output_type>sensor_msgs/LaserScan</output_type>
+        <frame_name>lidar_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- ====== ⑨ IMU 센서 : 원본과 동일 (IMU 는 정직 — EKF 가 휠오돔 거짓을 이길 무기) ====== -->
+  <gazebo reference="imu_link">
+    <sensor type="imu" name="imu_sensor">
+      <always_on>true</always_on>
+      <update_rate>50</update_rate>
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+        <ros><namespace>/</namespace><remapping>~/out:=imu/data</remapping></ros>
+        <frame_name>imu_link</frame_name>
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+</robot>

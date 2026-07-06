@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mission_manager</name>
+  <version>0.0.0</version>
+  <description>대피 유도 로봇의 임무 상태머신(두뇌). Nav2 위에서 '어디로 갈지'를 결정. 실차 이식 대상.</description>
+  <maintainer email="ghwjd1357@gmail.com">minwoo</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- rclpy: 파이썬 ROS2 클라이언트 / 상태발행·구독용 std_msgs·geometry_msgs -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <!-- Nav2 목표 전송(액션): NavigateToPose 는 nav2_msgs 에 있음 -->
+  <depend>nav2_msgs</depend>
+  <depend>action_msgs</depend>
+  <!-- ③단계: /scan 구독(후방감시) + map→base_footprint TF 조회(마지막 목격 지점) -->
+  <depend>sensor_msgs</depend>
+  <depend>tf2_ros_py</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
