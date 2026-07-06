@@ -117,7 +117,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **ⓐ 집결지 계산 (07-06 저녁)** — 고정 좌표 → **화재→탈출구 방향선 위 gather_dist(8m) 지점 계산**(`compute_gather_point` 순수 함수, yaw=탈출구 방향). 클램프·fallback(yaml gather) 포함, gather_dist=8.0 은 표준 화재(14,0)에서 기존 검증값 (6,0) 재현. pytest 18개 + E2E PASS. 한계: 직선 수식(곁복도 화재는 그래프 경유지 과제). → `§16`
 - ✅ **정확도 벤치 + tolerance 강화 (07-06 밤)** — `tools/accuracy_{sampler,bench,report}` 신설(매초 ground truth vs SLAM 오차 → CSV·그래프). ★ 실측: SLAM 궤적오차 **평균 0.027m** vs 끝점오차 0.26~0.30m = **병목은 xy_goal_tolerance(0.3)** → xy 0.15·yaw 0.25·planner 0.25 로 조임 → 끝점오차 **절반(0.12~0.17m)**, +2~3s/goal 뿐(맴돎 없음). → `§17`
 - ✅ **localization 운영 모드 (07-06 심야)** — 미션 = 저장 posegraph 위치추정(라이브 SLAM 은 지도 제작 시만). `make_map.sh`(지도 재현) + `slam_params_localization.yaml` + 런치 `localization` 인자(mission.launch 기본 true). 궤적오차 평균 **0.015m**(mapping 대비 절반)·E2E PASS. ★새 함정: launch 부모 kill -9 는 **고아 nav2 노드**를 남겨 좀비 bt_navigator 가 goal 가로채 거부("목표 거부됨→FAULT", 증상 매번 다름) → cleanup 에 `pkill -9 -f "lib/nav2[_]"` 필수. 남은 후보: BT BackUp 회복·velocity_smoother(실차). → `§18`
-- ▶ **다음 후보 (상세·우선순위 = `0707_현황.md §2` 가 정본):** ★ⓒ 중간보고서 초안(마감 有, 재료·그래프 확보 완료) → 감지 3차(지도 배경제거 — localization 정본 지도가 생겨 적기) / BT BackUp 회복 / ⓑ 역할 B `.msg` 계약(미팅 병렬) / ⓔ micro-ROS(구동부 대기). + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
+- ▶ **다음 후보 (상세·우선순위 = `0707_현황.md §2` 가 정본):** ★ⓒ 중간보고서 초안(마감 有, 재료·그래프 확보 완료) → 감지 3차(지도 배경제거 — localization 정본 지도가 생겨 적기) / BT BackUp 회복 / ⓑ 역할 B `.msg` 계약(미팅 병렬) / ⓔ micro-ROS(구동부 대기). + 학습: **정본 = `0707_학습로드맵.md`** (7단계 커리큘럼, 단계별 새 세션 프롬프트 포함) — 다음 계단 = 1단계 URDF 코드리딩.
 
 ### 런치/실행법
 - **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김). **기본 = localization 운영 모드**(저장 posegraph 위치추정, §18) — 라이브 SLAM 으로 돌리려면 `localization:=false`, 지도 재제작은 `bash tools/make_map.sh`.
@@ -191,6 +191,7 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0705_실차전_전략.md` | `~/Desktop/개발현황/` | ★ 실차 전 전략 정본: 가짜 detection 판단(계약+깡통만) + 실차 결합 5단계 로드맵 |
 | `0707_현황.md` | `~/Desktop/개발현황/` | **§1 종합 스냅샷(2F 완성 시점 수치·보고서 자산) · §2 할 일 우선순위 정본** + 07-07 이후 작업 기록 |
 | `0707_로드맵_통합계획.md` | `~/Desktop/개발현황/` | ★ 최종까지 전체 로드맵 한 장: §1 시뮬 잔여 · §2 실차 5단계+**이식 체크리스트 9종**(절대경로 2곳 포함) · §3 역할 B 통합 4단계 · §4 월별 계획+리스크 플랜 B |
+| `0707_학습로드맵.md` | `~/Desktop/개발현황/` | ★ 학습 커리큘럼 정본 (0705 §9 상속): 7단계(URDF→흐름도→EKF→SLAM→Nav2→미션→테스트), **단계별 새 세션용 프롬프트+통과 질문** 포함. 진도표로 체크 |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |
 
