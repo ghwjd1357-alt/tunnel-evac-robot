@@ -24,7 +24,10 @@ fake_follower.py — 가짜 추종자 (로봇 뒤를 따라 걷는 원기둥) �
 
 [실행]
   ros2 run tunnel_sim fake_follower --ros-args -p use_sim_time:=true
-  놓침 재현: ros2 topic pub --once /follower_cmd std_msgs/msg/String "{data: stop}"
+  (또는 ros2 launch tunnel_sim mission.launch.py 가 알아서 켬)
+  놓침 재현: ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String "{data: stop}"
+  ⚠ --once 금지 (§14.3 함정): 디스커버리 매칭 전에 쏘고 죽어 유실될 수 있음
+    → -w 1 (구독자 매칭 대기) + --times 로.
 """
 
 import math
