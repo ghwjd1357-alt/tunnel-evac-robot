@@ -1,0 +1,56 @@
+<!--
+  bt_nav_to_pose_backup_first.xml — NavigateToPose 행동트리 (BackUp 우선 회복, 07-07)
+  ============================================================
+  원본 = Humble 기본 navigate_to_pose_w_replanning_and_recovery.xml 복사본.
+  바꾼 것은 딱 하나: 회복(RoundRobin) 순서.
+
+  [왜 — 콘 쐐기 사건 (0705_현황.md §8)]
+    낮은 장애물(라이다 사각)에 물리적으로 끼면 정답은 '뒤로 빠지기'.
+    ★ 기존 기록 정정: 기본 BT 에 BackUp 이 "없는" 게 아니라 RoundRobin 의
+    **마지막(4번째)** 이었다 — 실패할 때마다 청소→Spin→Wait→BackUp 순서라,
+    끼인 로봇은 BackUp 차례가 오기 전에 Spin(끼인 상태 악화)을 먼저 겪는다.
+
+  [바꾼 순서] 청소 → ★BackUp → Spin → Wait
+    청소가 여전히 1순위인 이유: 가장 흔한 실패는 물리 끼임이 아니라
+    costmap 유령 장애물이고, 청소는 로봇이 안 움직여서 공짜(무위험)다.
+    BackUp 이 Spin 보다 앞: 물리적으로 막힌 상황에서 후진은 상황을 풀고,
+    제자리 회전은 좁은 틈에서 쐐기를 더 조인다.
+
+  [수치] backup_dist 0.30m / backup_speed 0.05m/s = Humble 기본값 유지.
+    로봇(0.5×0.4m)이 몸길이 절반쯤 물러나는 정도 — 실차에서 재튜닝 후보.
+    ⚠ BackUp 은 뒤를 라이다로 안 본다(전방 180° 시야) — dist 를 키울 땐 주의.
+
+  [연결] nav2_params.yaml 의 bt_navigator.default_nav_to_pose_bt_xml 이
+    이 파일(install 경로)을 가리킨다. 새 파일이므로 setup.py data_files 등록
+    + colcon build 필수 (§0621 함정).
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <BackUp backup_dist="0.30" backup_speed="0.05"/>
+          <Spin spin_dist="1.57"/>
+          <Wait wait_duration="5"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

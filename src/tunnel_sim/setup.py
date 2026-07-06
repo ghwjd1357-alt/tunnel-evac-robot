@@ -19,6 +19,8 @@ setup(
         (os.path.join('share', package_name, 'urdf'), glob('urdf/*.urdf')),
         # 2E: SLAM/Nav2 파라미터(yaml) 도 install/share 로 복사
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        # 07-07: 커스텀 BT XML (BackUp 우선 회복) — bt_navigator 가 install 경로로 읽음
+        (os.path.join('share', package_name, 'config'), glob('config/*.xml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
