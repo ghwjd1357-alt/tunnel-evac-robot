@@ -48,11 +48,15 @@ controller_server:
       required_movement_radius: 0.3
       movement_time_allowance: 20.0
     # 목표 도달 판정 (general goal checker)
+    # ★ 07-06 벤치 근거로 강화: SLAM 궤적오차 평균 0.027m 인데 끝점오차 0.26~0.30m
+    #   = 도달오차의 지배 요인이 tolerance('여기면 됐다' 문턱)였음 → 절반으로.
+    #   yaw 0.5rad(≈29°)도 과대 — 집결지 yaw(탈출구 응시)가 유도 출발방향이라 조임.
+    #   ⚠ 더 조일 땐 목표 근처 맴돎(진동) 확인 필수 (벤치 소요시간 비교로 감지).
     general_goal_checker:
       stateful: true
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.3
-      yaw_goal_tolerance: 0.5
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.25
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
     # RPP(Regulated Pure Pursuit) — 차동로봇 복도주행에 강건. 궤적샘플링 안 해서
@@ -163,7 +167,10 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
+      # ★ 07-06: 0.5 → 0.25 — "목표 정확히엔 경로 못 그리면 0.5m 근처로 대충" 허용폭.
+      #   goal checker 를 0.15 로 조였는데 planner 가 0.5m 옆에 경로 끝점을 찍으면
+      #   도달 자체가 불가능해짐 → 항상 goal tolerance 보다 크되 최소한으로.
+      tolerance: 0.25
       use_astar: false
       # ★ false 로 (07-05): true 면 미탐사 공간(=터널 밖 바위 속!)을 "통과 가능" 취급
       #   → 벽의 옅은 틈으로 벽 관통 경로를 그리는 사고의 공범이었음.
