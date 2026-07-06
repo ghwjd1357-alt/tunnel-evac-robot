@@ -77,7 +77,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 
 ---
 
-## 6. 현재 진행 상태 (2026-07-06 2차 갱신 — ★ 미션 상태머신 완료 + 감지 2차 + 테스트 인프라. §6은 압축본, 상세는 현황.md)
+## 6. 현재 진행 상태 (2026-07-07 갱신 — ★ 2F 시뮬 완성 + localization 운영 모드. §6은 압축본, 상세는 현황.md / **할 일 정본 = 0707_현황.md §2**)
 
 ### 상태 한눈에
 | 항목 | 상태 |
@@ -99,7 +99,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 | JetPack SDK (CUDA/cuDNN/TensorRT) | ⏸ 추후 `sudo apt install nvidia-jetpack` |
 
 ### 로드맵 & 현재 위치
-**2A** 클코 학습 ✅ → **2B** ROS2 기초 ✅ → **2C Gazebo ✅** → **2D URDF(differential) ✅** → **2E SLAM+Nav2+EKF ✅** → **2F 미션 로직 ①뼈대 ✅ ②GATHER/GUIDE ✅ ③후방감지+SEARCH_BACK ✅** (2026-07-06: 시나리오 전체 상태머신 시뮬 E2E — 실패·성공 경로 모두 실증) ◀ 현재 = 다음 선정 (후보: 집결지 계산 모듈 / 역할 B `.msg` 계약 / 중간보고서 / micro-ROS)
+**2A** 클코 학습 ✅ → **2B** ROS2 기초 ✅ → **2C Gazebo ✅** → **2D URDF(differential) ✅** → **2E SLAM+Nav2+EKF ✅** → **2F 미션 로직 ✅ 시뮬 완성** (①뼈대 ②GATHER/GUIDE ③후방감지+SEARCH_BACK + ⓐ집결지 계산 + 정확도 벤치·tolerance·localization 운영 모드, ~07-06) ◀ 현재 = 다음 선정 — **우선순위 정본: `0707_현황.md §2`** (★추천 ⓒ중간보고서 → 감지 3차 / BT BackUp / ⓑ역할 B `.msg` 계약 병렬)
 - **micro-ROS = 후순위** (구동부 진행에 맞춰, 위 로드맵과 별개 시점).
 - ★ **메인 트랙은 Gazebo 시뮬.** 실물 라이다는 `/scan`만 나오고 `/odom`(움직임)이 없어 단독 SLAM 불가 → odom은 구동부가 줄 때까지 **시뮬로 SLAM·Nav2 개발.**
 
@@ -117,7 +117,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **ⓐ 집결지 계산 (07-06 저녁)** — 고정 좌표 → **화재→탈출구 방향선 위 gather_dist(8m) 지점 계산**(`compute_gather_point` 순수 함수, yaw=탈출구 방향). 클램프·fallback(yaml gather) 포함, gather_dist=8.0 은 표준 화재(14,0)에서 기존 검증값 (6,0) 재현. pytest 18개 + E2E PASS. 한계: 직선 수식(곁복도 화재는 그래프 경유지 과제). → `§16`
 - ✅ **정확도 벤치 + tolerance 강화 (07-06 밤)** — `tools/accuracy_{sampler,bench,report}` 신설(매초 ground truth vs SLAM 오차 → CSV·그래프). ★ 실측: SLAM 궤적오차 **평균 0.027m** vs 끝점오차 0.26~0.30m = **병목은 xy_goal_tolerance(0.3)** → xy 0.15·yaw 0.25·planner 0.25 로 조임 → 끝점오차 **절반(0.12~0.17m)**, +2~3s/goal 뿐(맴돎 없음). → `§17`
 - ✅ **localization 운영 모드 (07-06 심야)** — 미션 = 저장 posegraph 위치추정(라이브 SLAM 은 지도 제작 시만). `make_map.sh`(지도 재현) + `slam_params_localization.yaml` + 런치 `localization` 인자(mission.launch 기본 true). 궤적오차 평균 **0.015m**(mapping 대비 절반)·E2E PASS. ★새 함정: launch 부모 kill -9 는 **고아 nav2 노드**를 남겨 좀비 bt_navigator 가 goal 가로채 거부("목표 거부됨→FAULT", 증상 매번 다름) → cleanup 에 `pkill -9 -f "lib/nav2[_]"` 필수. 남은 후보: BT BackUp 회복·velocity_smoother(실차). → `§18`
-- ▶ **다음 후보:** ⓑ 역할 B `.msg` 계약 합의(+funnel 연결) ⓒ 중간보고서 초안(재료 풍부) ⓔ micro-ROS(구동부 진행 시) + 감지 3차(지도 배경제거). 변경 후 회귀 = `bash tools/regression_3goals.sh` + `bash tools/mission_e2e.sh` + `pytest src/mission_manager/test/`. + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
+- ▶ **다음 후보 (상세·우선순위 = `0707_현황.md §2` 가 정본):** ★ⓒ 중간보고서 초안(마감 有, 재료·그래프 확보 완료) → 감지 3차(지도 배경제거 — localization 정본 지도가 생겨 적기) / BT BackUp 회복 / ⓑ 역할 B `.msg` 계약(미팅 병렬) / ⓔ micro-ROS(구동부 대기). + 학습: 세션 첫 30분 = **URDF 코드리딩** (로드맵: §9).
 
 ### 런치/실행법
 - **★ 미션 전체 (2F):** `ros2 launch tunnel_sim mission.launch.py` — 시뮬+SLAM+Nav2+미션노드+가짜추종자 전부 한 줄 (`gui:=false` 헤드리스 / `follower:=false` 추종자 제외 / use_sim_time 은 런치가 챙김). **기본 = localization 운영 모드**(저장 posegraph 위치추정, §18) — 라이브 SLAM 으로 돌리려면 `localization:=false`, 지도 재제작은 `bash tools/make_map.sh`.
@@ -188,6 +188,7 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0626_현황.md` | `~/Desktop/개발현황/` | 2D URDF(differential) + 2E SLAM 지도 전과정 (URDF구조·diff_drive튜닝·2휠전환·헤드리스SLAM·지도저장) |
 | `0705_현황.md` | `~/Desktop/개발현황/` | §7 EKF(9m→0.17m) · §8 회귀진단 · §10 오돔주입 · §11~12 미션설계+뼈대 · §13 ② · §14 ③(후방감지+SEARCH_BACK) · **§15 품질세션(git·RPP종결·클러스터 감지·any존·테스트 인프라·mission.launch)** · §16 집결지 계산 · §17 정확도 벤치+tolerance 강화 · §18 localization 운영 모드 |
 | `0705_실차전_전략.md` | `~/Desktop/개발현황/` | ★ 실차 전 전략 정본: 가짜 detection 판단(계약+깡통만) + 실차 결합 5단계 로드맵 |
+| `0707_현황.md` | `~/Desktop/개발현황/` | **§1 종합 스냅샷(2F 완성 시점 수치·보고서 자산) · §2 할 일 우선순위 정본** + 07-07 이후 작업 기록 |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |
 
