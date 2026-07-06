@@ -164,7 +164,10 @@ class FollowerMonitor:
         return held >= self.seen_sec
 
     def reset(self, zone='rear'):
-        """타이머 리셋 = "방금 봤다"로 간주. 재발견 → GUIDE 복귀 직후 호출:
-        안 하면 후방 타이머가 '3초 전(놓침 당시)' 그대로라 복귀 즉시 재-놓침 판정."""
+        """타이머 재무장 = lost 기산점을 '지금'으로. GUIDE 복귀 직전 두 곳에서 호출:
+        ① 재발견 복귀 — 안 하면 타이머가 '놓침 당시' 그대로라 복귀 즉시 재-놓침.
+        ② 역행 재탐색 실패 복귀 (07-07) — 안 하면 다음 tick 에 lost 즉시 참
+           → 같은 지점으로 즉시 2차 역행 (예산이 '같은 곳 두 번'으로 소진).
+        어느 쪽이든 의미는 "놓침 판정을 처음부터 다시 시작하라"."""
         self._last_seen_t[zone] = self.clock.now()
         self._first_seen_t[zone] = None

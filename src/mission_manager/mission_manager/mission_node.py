@@ -353,6 +353,12 @@ class MissionNode(Node):
                     self.get_logger().warn(
                         f'역행 재탐색 실패 ({self.search_attempts}/'
                         f'{self.wp["search_back"]["max_attempts"]}) → 유도 재개')
+                    # ★ lost 타이머 재무장 (07-07): 리셋 없이 GUIDE 로 돌아가면
+                    #   "마지막 목격 = 한참 전" 그대로라 다음 tick 에 lost 가 즉시 참
+                    #   → 방금 10초 기다리다 떠나온 같은 last_seen 으로 즉시 2차 역행,
+                    #   예산이 "같은 곳 두 번"으로 소진 (max_attempts 의 의도 붕괴).
+                    #   재무장하면 2차는 새로 lost_sec 연속 미검출을 다시 채워야 나감.
+                    self.monitor.reset('any')
                     self.state = State.GUIDE   # 놓친 채 계속 — 재놓침 판정은 GUIDE 가 함
 
         elif self.state == State.ESCAPED:

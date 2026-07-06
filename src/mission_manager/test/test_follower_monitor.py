@@ -167,6 +167,26 @@ def test_reset_prevents_immediate_relost():
     assert mon.lost('rear')                  # 그 후 다시 3초 지나면 정상 판정
 
 
+def test_reset_any_rearms_lost_after_failed_search():
+    """역행 재탐색 실패 → GUIDE 복귀 시나리오 (07-07 수정):
+    reset('any') 없이는 lost('any') 가 즉시 참 → 같은 지점 2차 역행.
+    재무장 후엔 lost_sec 을 새로 채워야만 다시 놓침 판정."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+    empty = make_scan([])
+
+    feed(mon, clock, person, 1.5)            # 유도 중 추종자 목격
+    feed(mon, clock, empty, 20.0)            # 놓침 + 역행 + 재탐색 대기 (오래 미검출)
+    assert mon.lost('any')                   # 재무장 없으면 여전히 놓침 = 즉시 2차 역행
+    mon.reset('any')                         # ★ 역행 실패 → GUIDE 복귀 시점의 재무장
+    assert not mon.lost('any')               # 복귀 직후엔 놓침 아님
+    feed(mon, clock, empty, 2.5)
+    assert not mon.lost('any')               # lost_sec(3초) 미만 — 아직 아님
+    feed(mon, clock, empty, 1.0)
+    assert mon.lost('any')                   # 3초 넘게 새로 미검출 → 이제 정당한 2차
+
+
 def test_noise_points_rejected():
     """점 1~2개(min_points 미만) 노이즈는 무시."""
     clock = FakeClock()
