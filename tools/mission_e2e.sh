@@ -7,7 +7,8 @@
 #   → /follower_cmd stop (놓침 재현) → SEARCH_BACK (역행)
 #   → /follower_cmd follow (재접근) → 재발견 → GUIDE 복귀 → ESCAPED
 #
-# 사용: bash ~/ros2_ws/tools/mission_e2e.sh [추가 런치인자...]   (약 5~8분, 헤드리스)
+# 사용: bash ~/ros2_ws/tools/mission_e2e.sh [추가 런치인자...]      (T자, 약 5~8분, 헤드리스)
+#       bash ~/ros2_ws/tools/mission_e2e.sh twin [추가 런치인자...] (쌍굴, 약 10~15분)
 #   ★ 기본 = localization 운영 모드 (07-07: 테스트는 운영 구성을 따라간다 원칙).
 #     라이브 SLAM(mapping)으로 검증하려면: bash tools/mission_e2e.sh localization:=false
 #     (뒤에 준 인자가 기본값을 덮음 — ros2 launch 는 중복 인자 시 마지막 값 적용)
@@ -24,9 +25,28 @@ source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
-EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=true)
+# --- 월드 모드 (07-07): 첫 인자 twin = 쌍굴, 아니면 T자(기존 그대로) ---
+MODE=tunnel
+if [ "${1:-}" = "twin" ]; then MODE=twin; shift; fi
+if [ "$MODE" = "twin" ]; then
+  WORLD_ARGS=(world:=tunnel_twin.world spawn_x:=-17
+              localization_params:=slam_params_localization_twin.yaml)
+  WAYPOINTS_FILE="$HOME/ros2_ws/install/mission_manager/share/mission_manager/config/waypoints_twin.yaml"
+  FIRE_X=30.0; FIRE_Y=0.0        # 1번 굴 동쪽 (map). 집결지 계산 = (22, 0)
+  ESCAPE_WORLD="(-17, 0)"        # 탈출구 = 스폰 지점 (world)
+  # 쌍굴은 순찰 루프가 길어(굴 2개 순회) 상태 대기 상한을 늘린다
+  T_GATHER=420; T_ESCAPED=600
+else
+  WORLD_ARGS=()
+  WAYPOINTS_FILE=""              # 빈값 = mission_node 기본(waypoints.yaml)
+  FIRE_X=14.0; FIRE_Y=0.0
+  ESCAPE_WORLD="(-12, 0)"
+  T_GATHER=240; T_ESCAPED=300
+fi
+
+EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=false)
 LOGDIR=$(mktemp -d /tmp/mission_e2e.XXXX)
-echo "로그: $LOGDIR"
+echo "로그: $LOGDIR (모드: $MODE)"
 
 cleanup() {
   pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
@@ -60,7 +80,8 @@ wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재�
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
+  "${WORLD_ARGS[@]}" "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
@@ -71,7 +92,9 @@ done
 sleep 5
 
 echo "== ③ 미션 노드 + 가짜 추종자 기동"
-nohup ros2 run mission_manager mission_node --ros-args -p use_sim_time:=true \
+MISSION_ARGS=(-p use_sim_time:=true)
+[ -n "$WAYPOINTS_FILE" ] && MISSION_ARGS+=(-p "waypoints_file:=$WAYPOINTS_FILE")
+nohup ros2 run mission_manager mission_node --ros-args "${MISSION_ARGS[@]}" \
   > "$LOGDIR/mission.log" 2>&1 &
 nohup ros2 run tunnel_sim fake_follower --ros-args -p use_sim_time:=true \
   > "$LOGDIR/follower.log" 2>&1 &
@@ -86,12 +109,19 @@ echo "  ✓ 추종자 스폰"
 sleep 10   # 순찰 이동 + 추종자 따라붙기 (모니터가 '봤다' 기록을 쌓게)
 
 echo "== ⑤ 🔥 화재 알람 발사 → APPROACH"
-ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
-  "{header: {frame_id: map}, pose: {position: {x: 14.0, y: 0.0}}}" >/dev/null 2>&1
+# ★ 알람은 상태 전이 확인까지 재시도 (07-07): -w 1 + --times 로도 간헐 유실 실측
+#   (mission.log 에 '알람' 0건). 전이 안 됐으면 그냥 한 번 더 쏘면 되는 멱등 신호.
+for try in 1 2 3; do
+  ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
+    "{header: {frame_id: map}, pose: {position: {x: $FIRE_X, y: $FIRE_Y}}}" >/dev/null 2>&1
+  sleep 4
+  [ "$(state)" = "APPROACH" ] && break
+  echo "  (알람 시도 $try — 아직 PATROL, 재발사)"
+done
 wait_state APPROACH 20
 
 echo "== ⑥ 집결(GATHER) → 유도(GUIDE) 대기"
-wait_state GATHER 240
+wait_state GATHER "$T_GATHER"
 wait_state GUIDE 60
 
 echo "== ⑦ 유도 15초 진행 후 놓침 재현 (follower stop)"
@@ -111,12 +141,12 @@ wait_state GUIDE 120
 grep -q "재발견" "$LOGDIR/mission.log" && echo "  ✓ 미션 로그에 '재발견' 확인"
 
 echo "== ⑩ 같이 탈출 → ESCAPED 대기"
-wait_state ESCAPED 300
+wait_state ESCAPED "$T_ESCAPED"
 
 echo "== ⑪ 최종 위치 (ground truth)"
 robot=$(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{printf "(%.2f, %.2f)", $1, $2}')
 fol=$(gz model -m fake_follower -p 2>/dev/null | tail -1 | awk '{printf "(%.2f, %.2f)", $1, $2}')
-echo "  로봇 world $robot / 추종자 world $fol  (탈출구 = world (-12, 0))"
+echo "  로봇 world $robot / 추종자 world $fol  (탈출구 = world $ESCAPE_WORLD)"
 
 cleanup
 echo "== PASS: 놓침→역행→재발견→GUIDE 복귀→탈출 전 구간 완주"

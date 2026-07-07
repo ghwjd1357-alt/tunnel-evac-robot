@@ -38,7 +38,13 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, 'launch', 'slam.launch.py')
         ),
-        launch_arguments={'gui': gui, 'localization': localization}.items(),
+        launch_arguments={'gui': gui, 'localization': localization,
+                          # 쌍굴 지원 (07-07) — 기본값이면 기존 T자 그대로
+                          'world': LaunchConfiguration('world'),
+                          'spawn_x': LaunchConfiguration('spawn_x'),
+                          'spawn_y': LaunchConfiguration('spawn_y'),
+                          'localization_params':
+                              LaunchConfiguration('localization_params')}.items(),
     )
 
     # ② Nav2 네비게이션 스택 (map_server·amcl 없이). slam 이 map→odom 줄 시간 벌려고 8초 지연.
@@ -62,6 +68,16 @@ def generate_launch_description():
                               description='true=GUI, false=헤드리스'),
         DeclareLaunchArgument('localization', default_value='false',
                               description='true=저장 지도로 위치추정만 (운영), false=지도작성'),
+        # --- 쌍굴 지원 인자 (07-07). 기본값 = 기존 T자 동작과 동일 ---
+        DeclareLaunchArgument('world', default_value='tunnel.world',
+                              description='worlds/ 안의 월드 파일명'),
+        DeclareLaunchArgument('spawn_x', default_value='-12',
+                              description='로봇 스폰 world x'),
+        DeclareLaunchArgument('spawn_y', default_value='0',
+                              description='로봇 스폰 world y'),
+        DeclareLaunchArgument('localization_params',
+                              default_value='slam_params_localization.yaml',
+                              description='config/ 안의 localization 파라미터 파일명'),
         slam,
         navigation,
     ])

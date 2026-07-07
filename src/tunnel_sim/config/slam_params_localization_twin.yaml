@@ -1,0 +1,58 @@
+# slam_params_localization_twin.yaml — 쌍굴(twin-bore) 운영 모드 (07-07)
+# ============================================================
+# 정본 slam_params_localization.yaml 과 완전히 동일하고, 딱 한 줄만 다름:
+#   map_file_name → 쌍굴 posegraph (maps/twin_localization)
+# 근거 주석은 전부 정본 파일 참조 — 여기 중복해 적으면 두 파일이 어긋난다.
+# 쌍굴 지도 재제작: bash tools/make_map.sh twin
+slam_toolbox:
+  ros__parameters:
+
+    use_sim_time: true    # ⚠ 실차 이식 시 false 로!
+
+    # --- 솔버 (정본과 동일) ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- 프레임/토픽 (정본과 동일) ---
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+
+    # ===== ★ localization 모드 핵심 3줄 (쌍굴은 지도 파일만 다름) =====
+    mode: localization
+    map_file_name: /home/minwoo/ros2_ws/maps/twin_localization
+    # 시작 위치 = map (0,0,0): 쌍굴 스폰 world(-17,0) = map(0,0)
+    map_start_pose: [0.0, 0.0, 0.0]
+
+    # --- 지도 해상도/범위 (정본과 동일) ---
+    resolution: 0.05
+    max_laser_range: 16.0
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    map_update_interval: 2.0
+
+    # --- 스캔 등록 조건 (정본과 동일) ---
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+
+    # --- 스캔 매칭 (정본과 동일 — 근거 주석은 slam_params.yaml 참조) ---
+    distance_variance_penalty: 0.02
+    correlation_search_space_dimension: 0.2
+    minimum_distance_penalty: 0.05
+    angle_variance_penalty: 0.05
+    minimum_angle_penalty: 0.1
+    coarse_search_angle_offset: 0.1
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    link_match_minimum_response_fine: 0.1
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45

@@ -7,7 +7,8 @@
 #      → maps/tunnel_localization.{posegraph,data}
 #   ② pgm+yaml 저장 (사람 눈 확인·기록용) → maps/tunnel_map_loc.{pgm,yaml}
 #
-# 사용: bash tools/make_map.sh    (약 6분)
+# 사용: bash tools/make_map.sh         (T자 터널, 약 6분)
+#       bash tools/make_map.sh twin    (쌍굴 터널 → maps/twin_localization.*, 약 12분)
 # 지도를 다시 만들 때(월드 변경 등)도 이 스크립트 한 번이면 끝 — 재현 가능.
 #
 # 노하우 박제: set -u 는 source 뒤 / pkill 브래킷 트릭 / send_goal 재전송 (§15.7)
@@ -16,9 +17,21 @@ source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
+# --- 월드 모드 (07-07): 인자 없음 = T자(기존 그대로) / twin = 쌍굴 ---
+MODE="${1:-tunnel}"
+if [ "$MODE" = "twin" ]; then
+  LAUNCH_ARGS=(world:=tunnel_twin.world spawn_x:=-17)
+  OUT_POSEGRAPH=twin_localization    # slam_params_localization_twin.yaml 이 읽는 이름
+  OUT_PGM=twin_map_loc
+else
+  LAUNCH_ARGS=()
+  OUT_POSEGRAPH=tunnel_localization
+  OUT_PGM=tunnel_map_loc
+fi
+
 MAPDIR=~/ros2_ws/maps
 LOGDIR=$(mktemp -d /tmp/makemap.XXXX)
-echo "== 지도 제작 시작 — 로그: $LOGDIR"
+echo "== 지도 제작 시작 (모드: $MODE) — 로그: $LOGDIR"
 
 cleanup() {
   pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
@@ -49,7 +62,7 @@ send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
 echo "== ① 잔여 프로세스 정리 + 기동 (mapping 모드)"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false "${LAUNCH_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
@@ -59,27 +72,48 @@ until ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/nul
 done
 sleep 5
 
-echo "== ③ 4목표 커버리지 주행 (동쪽끝·곁복도·서쪽 복귀 = 터널 전체 훑기)"
-send_goal 12.0 0.0 1.57 180  || fail "goal1(분기입구) 미도달"
-echo "  ✓ goal1 분기입구"
-send_goal 12.0 9.0 -1.57 180 || fail "goal2(곁복도) 미도달"
-echo "  ✓ goal2 곁복도"
-send_goal 13.5 0.0 3.14 240  || fail "goal3(동쪽끝) 미도달"
-echo "  ✓ goal3 동쪽끝"
-send_goal 1.0 0.0 0.0 240    || fail "goal4(서쪽 복귀) 미도달"
-echo "  ✓ goal4 서쪽 복귀 (복도 재훑기 = 지도 다지기)"
+if [ "$MODE" = "twin" ]; then
+  echo "== ③ 쌍굴 커버리지 주행 (1번 굴 왕복 + 통로 2곳 + 2번 굴 왕복)"
+  # map 좌표 치트시트: 1번 굴 y=0 (x -3~37) / 2번 굴 y=10 / 통로 x=7,17,27
+  # ★ goal 은 12m 이하 징검다리로 (07-07 실측 함정): 라이브 SLAM 지도는 로봇 주변만
+  #   그려진 채 자라므로, 멀리 있는 goal 은 "off the global costmap" 으로 계획 불가.
+  #   (T자는 goal 이 다 13.5m 이내라 이 함정이 드러난 적 없음 — 40m 굴에서 첫 검거)
+  hop() { send_goal "$1" "$2" "$3" "$4" || fail "hop($1,$2) 미도달"; echo "  ✓ hop ($1, $2)"; }
+  hop 12.0 0.0 0.0 150          # 1번 굴 동진 ①
+  hop 24.0 0.0 0.0 150          # 1번 굴 동진 ②
+  hop 35.0 0.0 1.57 150         # 1번 굴 동쪽 끝
+  hop 27.0 0.0 1.57 120         # 동쪽 통로 입구
+  hop 27.0 10.0 0.0 180         # 통로 통과 → 2번 굴
+  hop 35.0 10.0 3.14 150        # 2번 굴 동쪽 끝
+  hop 24.0 10.0 3.14 150        # 2번 굴 서진 ①
+  hop 12.0 10.0 3.14 150        # 2번 굴 서진 ②
+  hop 2.0 10.0 3.14 150         # 2번 굴 서쪽 끝
+  hop 7.0 10.0 -1.57 120        # 서쪽 통로 입구
+  hop 7.0 0.0 3.14 180          # 통로 통과 → 1번 굴 복귀
+  hop 1.0 0.0 0.0 150           # 원점 복귀 (1번 굴 서쪽 재훑기 = 지도 다지기)
+else
+  echo "== ③ 4목표 커버리지 주행 (동쪽끝·곁복도·서쪽 복귀 = 터널 전체 훑기)"
+  send_goal 12.0 0.0 1.57 180  || fail "goal1(분기입구) 미도달"
+  echo "  ✓ goal1 분기입구"
+  send_goal 12.0 9.0 -1.57 180 || fail "goal2(곁복도) 미도달"
+  echo "  ✓ goal2 곁복도"
+  send_goal 13.5 0.0 3.14 240  || fail "goal3(동쪽끝) 미도달"
+  echo "  ✓ goal3 동쪽끝"
+  send_goal 1.0 0.0 0.0 240    || fail "goal4(서쪽 복귀) 미도달"
+  echo "  ✓ goal4 서쪽 복귀 (복도 재훑기 = 지도 다지기)"
+fi
 
 echo "== ④ 저장: posegraph (localization 용) + pgm/yaml (기록용)"
 mkdir -p "$MAPDIR"
 # ⚠ 확장자 없이 — slam_toolbox 가 .posegraph/.data 를 알아서 붙임
 ros2 service call /slam_toolbox/serialize_map \
   slam_toolbox/srv/SerializePoseGraph \
-  "{filename: $HOME/ros2_ws/maps/tunnel_localization}" \
+  "{filename: $HOME/ros2_ws/maps/$OUT_POSEGRAPH}" \
   | grep -q "result=0" || fail "posegraph 저장 실패"
-echo "  ✓ posegraph: $MAPDIR/tunnel_localization.{posegraph,data}"
-timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/tunnel_map_loc" \
+echo "  ✓ posegraph: $MAPDIR/$OUT_POSEGRAPH.{posegraph,data}"
+timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/$OUT_PGM" \
   >> "$LOGDIR/mapsaver.log" 2>&1 || echo "  (pgm 저장 실패 — 기록용이라 계속)"
-ls -l "$MAPDIR"/tunnel_localization.* 2>/dev/null || fail "posegraph 파일 없음"
+ls -l "$MAPDIR/$OUT_POSEGRAPH".* 2>/dev/null || fail "posegraph 파일 없음"
 
 cleanup
 echo "== 완료 — localization 모드 재료 준비 끝"

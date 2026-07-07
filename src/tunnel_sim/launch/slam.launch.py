@@ -37,12 +37,15 @@ def generate_launch_description():
     #   실차 리허설 = slam_params:=slam_params_realodom.yaml (오돔오차 대비 완화 튜닝)
     slam_params = PathJoinSubstitution([pkg_share, 'config', LaunchConfiguration('slam_params')])
 
-    # ① 로봇 + 월드 (gui 인자 전달)
+    # ① 로봇 + 월드 (gui + 쌍굴용 world/spawn 인자 전달 — 기본값은 T자 그대로)
     robot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, 'launch', 'robot.launch.py')
         ),
-        launch_arguments={'gui': gui}.items(),
+        launch_arguments={'gui': gui,
+                          'world': LaunchConfiguration('world'),
+                          'spawn_x': LaunchConfiguration('spawn_x'),
+                          'spawn_y': LaunchConfiguration('spawn_y')}.items(),
     )
 
     # ② slam_toolbox — localization 인자로 두 모드 중 하나만 켬 (07-06 §18):
@@ -56,12 +59,15 @@ def generate_launch_description():
         parameters=[slam_params, {'use_sim_time': True}],
         condition=UnlessCondition(localization),
     )
+    # localization 파라미터 파일도 인자화 (07-07): 월드마다 읽는 posegraph 가 다르므로.
+    #   기본 = T자(slam_params_localization.yaml), 쌍굴 = slam_params_localization_twin.yaml
     slam_localization = Node(
         package='slam_toolbox',
         executable='localization_slam_toolbox_node',   # ★ 전용 실행파일이 따로 있음
         name='slam_toolbox',
         output='screen',
-        parameters=[os.path.join(pkg_share, 'config', 'slam_params_localization.yaml'),
+        parameters=[PathJoinSubstitution([pkg_share, 'config',
+                                          LaunchConfiguration('localization_params')]),
                     {'use_sim_time': True}],
         condition=IfCondition(localization),
     )
@@ -73,6 +79,16 @@ def generate_launch_description():
                               description='config/ 안의 slam 파라미터 파일명 (mapping 용)'),
         DeclareLaunchArgument('localization', default_value='false',
                               description='true=저장 지도로 위치추정만 (운영), false=지도작성'),
+        # --- 쌍굴 지원 인자 3+1개 (07-07). 기본값 = 기존 T자 동작과 동일 ---
+        DeclareLaunchArgument('world', default_value='tunnel.world',
+                              description='worlds/ 안의 월드 파일명'),
+        DeclareLaunchArgument('spawn_x', default_value='-12',
+                              description='로봇 스폰 world x'),
+        DeclareLaunchArgument('spawn_y', default_value='0',
+                              description='로봇 스폰 world y'),
+        DeclareLaunchArgument('localization_params',
+                              default_value='slam_params_localization.yaml',
+                              description='config/ 안의 localization 파라미터 파일명'),
         robot,
         slam_mapping,
         slam_localization,

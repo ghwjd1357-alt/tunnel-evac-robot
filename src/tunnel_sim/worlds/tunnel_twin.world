@@ -1,0 +1,539 @@
+<?xml version="1.0" ?>
+<!--
+  tunnel_twin.world — 쌍굴 아치 터널 (07-07, tools/gen_twin_world.py 가 생성)
+  ★ 이 파일을 손으로 고치지 말 것 — 치수 변경은 생성기에서 하고 재실행.
+
+  구조: 40m 굴 2개(폭 6m, 중심선 y=0 / y=10) + 피난연결통로 3개(x=-10,0,10, 폭 2.5m)
+  아치: 수직 1.4m + 35° 1.2m + 65° 1.0m, 꼭대기 약 2.8m 슬롯 개방 (위에서 관찰용)
+  로봇 스폰 = world(-17,0) → map(0,0).  map = world + (17,0)
+-->
+<sdf version="1.6">
+  <world name="tunnel_twin">
+
+    <!-- 모델 위치를 ROS 서비스로 읽고/쓰기 (fake_follower 가 사용) -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/gazebo</namespace>
+      </ros>
+      <update_rate>10.0</update_rate>
+    </plugin>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <model name="bore1_south">
+      <static>true</static>
+      <pose>0.0000 -3.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 0.3441 1.8915  -0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 1.1414 2.5943  -1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_north">
+      <static>true</static>
+      <pose>0.0000 13.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 -0.3441 1.8915  0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 -1.1414 2.5943  1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>40.0000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>40.0000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_north_0">
+      <static>true</static>
+      <pose>-15.6250 3.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 -0.3441 1.8915  0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 -1.1414 2.5943  1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_south_0">
+      <static>true</static>
+      <pose>-15.6250 7.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 0.3441 1.8915  -0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 1.1414 2.5943  -1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_north_1">
+      <static>true</static>
+      <pose>-5.0000 3.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 -0.3441 1.8915  0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 -1.1414 2.5943  1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_south_1">
+      <static>true</static>
+      <pose>-5.0000 7.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 0.3441 1.8915  -0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 1.1414 2.5943  -1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_north_2">
+      <static>true</static>
+      <pose>5.0000 3.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 -0.3441 1.8915  0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 -1.1414 2.5943  1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_south_2">
+      <static>true</static>
+      <pose>5.0000 7.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 0.3441 1.8915  -0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 1.1414 2.5943  -1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.5000 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_north_3">
+      <static>true</static>
+      <pose>15.6250 3.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 -0.3441 1.8915  0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 -1.1414 2.5943  1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_south_3">
+      <static>true</static>
+      <pose>15.6250 7.0000 0  0 0 0</pose>
+      <link name="base">
+        <pose>0.0000 0.0000 0.7000  0.0000 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.4000</size></box></geometry>
+          <material><ambient>0.7 0.7 0.7 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch1">
+        <pose>0.0000 0.3441 1.8915  -0.6109 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.2000</size></box></geometry>
+          <material><ambient>0.55 0.55 0.58 1</ambient></material>
+        </visual>
+      </link>
+      <link name="arch2">
+        <pose>0.0000 1.1414 2.5943  -1.1345 0.0000 0.0000</pose>
+        <collision name="collision">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.7500 0.2000 1.0000</size></box></geometry>
+          <material><ambient>0.45 0.45 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_west_end">
+      <static>true</static>
+      <pose>-20.0000 0.0000 1.2000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore1_east_end">
+      <static>true</static>
+      <pose>20.0000 0.0000 1.2000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_west_end">
+      <static>true</static>
+      <pose>-20.0000 10.0000 1.2000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bore2_east_end">
+      <static>true</static>
+      <pose>20.0000 10.0000 1.2000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.4000 0.2 2.4000</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pw10_west">
+      <static>true</static>
+      <pose>-11.2500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pw10_east">
+      <static>true</static>
+      <pose>-8.7500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pe0_west">
+      <static>true</static>
+      <pose>-1.2500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pe0_east">
+      <static>true</static>
+      <pose>1.2500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pe10_west">
+      <static>true</static>
+      <pose>8.7500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="passage_pe10_east">
+      <static>true</static>
+      <pose>11.2500 5.0000 0.7000  0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4000 0.2 1.4000</size></box></geometry>
+          <material><ambient>0.65 0.6 0.5 1</ambient></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============ 터널 안 물체 (가벼운 모델만 — GUI 함정 ②) ============ -->
+    <!-- 공사 콘: 낮은 장애물(라이다 사각) 실증용 — 남벽 근처, 경로 밖 -->
+    <include>
+      <uri>model://construction_cone</uri>
+      <name>cone_1</name>
+      <pose>5 -2.2 0  0 0 0</pose>
+    </include>
+    <!-- 배럴: 1번 굴 동쪽 장애물 -->
+    <include>
+      <uri>model://construction_barrel</uri>
+      <name>barrel_1</name>
+      <pose>8 -1.5 0  0 0 0</pose>
+    </include>
+    <!-- 대피자: 2번 굴, 순찰 경로(중심선 y=10) 살짝 비켜 북벽 쪽 -->
+    <include>
+      <uri>model://person_standing</uri>
+      <name>victim_1</name>
+      <pose>3 11.8 0  0 0 -1.5708</pose>
+    </include>
+
+  </world>
+</sdf>

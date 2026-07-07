@@ -42,6 +42,18 @@ def generate_launch_description():
         'urdf', default_value='robot.urdf',
         description='urdf/ 폴더 안의 URDF 파일명 (예: robot_odomerr.urdf = 오돔오차 실험용)')
 
+    # --- world / spawn 인자 (07-07 쌍굴 추가): 기본값 = 기존 T자 동작 그대로 ---
+    #     쌍굴은 world:=tunnel_twin.world spawn_x:=-17 (스폰 = 1번 굴 서쪽 끝 = map(0,0))
+    world_arg = DeclareLaunchArgument(
+        'world', default_value='tunnel.world',
+        description='worlds/ 안의 월드 파일명 (tunnel_twin.world=쌍굴)')
+    spawn_x_arg = DeclareLaunchArgument(
+        'spawn_x', default_value='-12',
+        description='로봇 스폰 world x (이 지점이 map 원점이 됨)')
+    spawn_y_arg = DeclareLaunchArgument(
+        'spawn_y', default_value='0',
+        description='로봇 스폰 world y')
+
     # --- URDF 를 '실행 시점'에 읽기 ---
     # 예전: 파이썬 open()으로 즉시 읽음 → 런치파일 파싱 시점에 파일명이 고정돼 인자 사용 불가.
     # 지금: Command('cat 경로') substitution → ros2 launch 가 실제 실행될 때 cat 으로 읽음
@@ -55,7 +67,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(pkg_share, 'launch', 'tunnel.launch.py')
         ),
-        launch_arguments={'gui': gui}.items(),   # gui 인자를 tunnel.launch.py 로 전달
+        launch_arguments={'gui': gui,
+                          'world': LaunchConfiguration('world')}.items(),
     )
 
     # --- ② robot_state_publisher : URDF → TF.
@@ -82,7 +95,11 @@ def generate_launch_description():
         arguments=[
             '-topic', 'robot_description',   # robot_state_publisher 가 올린 토픽에서 읽음
             '-entity', 'tunnel_robot',       # Gazebo 안에서 부를 이름
-            '-x', '-12', '-y', '0', '-z', '0.15',  # z 살짝 띄워 바닥 뚫림 방지
+            # 스폰 위치 = spawn_x/spawn_y 인자 (기본 -12,0 = T자 서쪽 입구, 기존 그대로).
+            # z 는 살짝 띄워 바닥 뚫림 방지.
+            '-x', LaunchConfiguration('spawn_x'),
+            '-y', LaunchConfiguration('spawn_y'),
+            '-z', '0.15',
         ],
     )
 
@@ -99,6 +116,9 @@ def generate_launch_description():
 
     return LaunchDescription([
         urdf_arg,
+        world_arg,
+        spawn_x_arg,
+        spawn_y_arg,
         gazebo,
         robot_state_publisher,
         spawn_entity,

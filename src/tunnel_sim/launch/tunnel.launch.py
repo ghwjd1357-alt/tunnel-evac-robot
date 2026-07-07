@@ -15,7 +15,7 @@ import os
 from ament_index_python.packages import get_package_share_directory  # 설치된 패키지 경로 찾기
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription  # 인자 선언 + 런치 포함
-from launch.substitutions import LaunchConfiguration                  # 런치 인자 값 참조
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution  # 런치 인자 값 참조
 from launch.launch_description_sources import PythonLaunchDescriptionSource  # .py 런치 읽는 해석기
 
 
@@ -25,9 +25,12 @@ def generate_launch_description():
     gui = LaunchConfiguration('gui')
 
     # ① 내 패키지(tunnel_sim)가 '설치된' 경로를 찾는다.
-    #    colcon build 하면 worlds/tunnel.world 가 install/.../share/tunnel_sim/worlds/ 로 복사됨.
+    #    colcon build 하면 worlds/*.world 가 install/.../share/tunnel_sim/worlds/ 로 복사됨.
     pkg_share = get_package_share_directory('tunnel_sim')
-    world_path = os.path.join(pkg_share, 'worlds', 'tunnel.world')
+    # world 인자 (07-07): worlds/ 안의 파일명. 기본 = 기존 T자 터널 (동작 불변).
+    #   쌍굴은 world:=tunnel_twin.world (mission_twin.launch.py 가 세팅해줌).
+    #   경로 조립은 실행 시점 값이 필요하므로 os.path.join 이 아니라 substitution 으로.
+    world_path = PathJoinSubstitution([pkg_share, 'worlds', LaunchConfiguration('world')])
 
     # ② gazebo_ros 패키지가 제공하는 표준 Gazebo 런치파일의 경로를 찾는다.
     gazebo_ros_share = get_package_share_directory('gazebo_ros')
@@ -47,5 +50,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true',
                               description='true=GUI 창, false=헤드리스(서버만)'),
+        DeclareLaunchArgument('world', default_value='tunnel.world',
+                              description='worlds/ 안의 월드 파일명 (tunnel_twin.world=쌍굴)'),
         gazebo,
     ])

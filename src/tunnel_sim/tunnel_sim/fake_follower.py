@@ -139,6 +139,21 @@ class FakeFollower(Node):
         dy = rp.y - self.pos[1]
         dist = math.hypot(dx, dy)
         keep = self.get_parameter('keep_distance').value
+
+        # ★ 비켜서기 (07-07 T자 회귀가 검거한 '불도저' 구멍):
+        #   집결지에서 로봇이 180° 돌면 추종자가 로봇 '정면'에 서고, 로봇이
+        #   출발하며 정면 원기둥을 범퍼로 민다 → 간격이 keep 밑으로 붙은 채
+        #   끝까지 밀려가 '놓침(stop)' 재현이 물리적으로 불가능해짐 (간격이
+        #   안 벌어지니 lost 판정이 영영 안 뜸 — E2E 2연속 FAIL 실측).
+        #   실제 사람은 로봇이 다가오면 비켜선다 → 로봇이 keep 보다 한참
+        #   안쪽으로 파고들면(=밀리는 중) 로봇 '뒤' keep 지점으로 즉시 이동.
+        if dist < keep - 0.4:
+            bx = rp.x - keep * math.cos(ryaw)
+            by = rp.y - keep * math.sin(ryaw)
+            self.get_logger().info(f'로봇 근접({dist:.2f}m) — 비켜서서 뒤로 ({bx:.2f}, {by:.2f})')
+            self.teleport(bx, by, ryaw)
+            return
+
         if dist <= keep:
             return                      # 충분히 가까움 — 대기 (부딪힘 방지)
         step_len = min(self.get_parameter('walk_speed').value * 0.2, dist - keep)
