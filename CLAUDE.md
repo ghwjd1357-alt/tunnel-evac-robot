@@ -134,6 +134,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 ### 2C 완료 (2026-06-23) — GUI 배치 워크플로우("마우스 배치→`gz model -m 이름 -p` 좌표→world `<include>`→build") · T자 터널(메인 30m×폭6m + 곁복도 12m) · 가상 라이다 `/scan` 검증. → `0623_현황.md §8~10`
 
 ### 매 세션 운영 규칙 (항상 적용)
+- **★ 커밋 = push 한 세트 (07-18~):** 커밋 후 항상 `git push` 까지. 원격 = `https://github.com/ghwjd1357-alt/tunnel-evac-robot` (private, gh CLI 인증 완료). Jetson 이식은 이 리포 clone/pull 로.
 - **자동 source됨:** `~/.bashrc`에 `/opt/ros/humble` + `~/ros2_ws/install` setup.bash 등록 → 새 터미널 source 불필요. 단 `colcon build`는 수동, 항상 `--symlink-install`.
 - **Jetson 작업:** 계정은 **`hanhan`** (노트북은 `minwoo`). `ssh hanhan@jetson.local` (핫스팟+mDNS). **Claude는 SSH 비번 못 침** → 사용자가 접속·붙여넣기, Claude는 명령 제공·결과 해석(협업 패턴). **노트북 빌드물은 ARM(aarch64)에서 못 씀 → Jetson에선 소스 새로 colcon build.**
 - **Gazebo 실행:** `sudo prime-select on-demand`(재부팅) 후 `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ros2 launch ...`. 종료는 **Ctrl+C** 또는 `pkill -9 gzserver`(창 X버튼만으론 gzserver 잔존). 평소엔 `sudo prime-select intel`(배터리 절약).
