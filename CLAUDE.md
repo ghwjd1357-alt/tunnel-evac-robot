@@ -92,6 +92,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 | SLAM 터널 지도 생성·저장 (`maps/tunnel_map.*`) | ✅ 2026-06-26 (2E, 헤드리스 자동주행) |
 | Nav2 자율주행 | ✅ **완전검증 (2026-07-06 갱신):** tolerance 강화 후 **끝점오차 0.12~0.17m** (병목이 goal tolerance 였음, §17). **운영 = localization 모드** (저장 posegraph, 궤적오차 평균 **0.015m**, §18) |
 | **미션 로직 (`mission_manager`)** | ✅ **①~③ + 감지 2차 완료 (2026-07-06):** PATROL→APPROACH→GATHER→GUIDE⇄SEARCH_BACK→ESCAPED+FAULT 전체 시뮬 E2E 검증. 추종감지 = 클러스터 크기 판별(GUIDE 판정 any존), 안전장치 2종, `mission.launch.py` 한 줄 실행 (상세: 0705_현황.md §12~15) |
+| **관제 데스크톱 (Operator Console)** | 🔨 **개시 (2026-07-18):** 웹 대시보드(rosbridge+roslibjs), 코드 = `~/ros2_ws/console/`(ROS 패키지 아님). C1 파이프+C2 상태패널·제어버튼 초안 작성, rosbridge 설치·검증 대기. **설계 정본 = `0718_관제시스템.md`** |
 | **테스트·회귀 인프라** | ✅ 2026-07-06: git 저장소(작업 단위 커밋) + pytest 13개 + `tools/regression_3goals.sh` + `tools/mission_e2e.sh` — **변경 후 이 3종 실행이 회귀 검증** (상세: §15.5) |
 | EKF (robot_localization, odom+IMU 융합) | ✅ 2026-07-05: 시뮬 IMU 추가 + `config/ekf.yaml` + slam 파라미터 튜닝. 12.5m 주행 시 SLAM 위치오차 **9m → 0.17m** (상세: `0705_현황.md` §7) |
 | Orbbec 카메라 (OrbbecSDK_ROS2) | ⬜ **의도적 보류** (시뮬 트랙엔 불필요, 역할 B·실차 단계에서) |
@@ -118,7 +119,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **정확도 벤치 + tolerance 강화 (07-06 밤)** — `tools/accuracy_{sampler,bench,report}` 신설(매초 ground truth vs SLAM 오차 → CSV·그래프). ★ 실측: SLAM 궤적오차 **평균 0.027m** vs 끝점오차 0.26~0.30m = **병목은 xy_goal_tolerance(0.3)** → xy 0.15·yaw 0.25·planner 0.25 로 조임 → 끝점오차 **절반(0.12~0.17m)**, +2~3s/goal 뿐(맴돎 없음). → `§17`
 - ✅ **localization 운영 모드 (07-06 심야)** — 미션 = 저장 posegraph 위치추정(라이브 SLAM 은 지도 제작 시만). `make_map.sh`(지도 재현) + `slam_params_localization.yaml` + 런치 `localization` 인자(mission.launch 기본 true). 궤적오차 평균 **0.015m**(mapping 대비 절반)·E2E PASS. ★새 함정: launch 부모 kill -9 는 **고아 nav2 노드**를 남겨 좀비 bt_navigator 가 goal 가로채 거부("목표 거부됨→FAULT", 증상 매번 다름) → cleanup 에 `pkill -9 -f "lib/nav2[_]"` 필수. 남은 후보: BT BackUp 회복·velocity_smoother(실차). → `§18`
 - ✅ **쌍굴(twin-bore) 터널 + 최종 시뮬 (07-07)** — 실제형 쌍굴 월드 신설: 40m 굴 2개(폭6m)+아치 단면(천장 슬롯 2.8m 개방, 라이다 평면은 수직벽만 봄)+**피난연결통로 3개**(10m 간격, 폭 2.5m, 왕복 통과 검증). 생성기 `tools/gen_twin_world.py` 방식(손편집 금지). **기존 T자 자산 전부 보존** — 런치 인자화(기본값=기존값) + 별도 파일(`*_twin`). 쌍굴 E2E PASS(끝점오차 0.14m)+T자 회귀 PASS. ★새 함정: **라이브 SLAM goal 은 12m 이내 징검다리**(먼 goal = "off the global costmap" 계획불가 — localization 모드는 무관). ★ **T자 회귀가 잠복버그 2건 검거**(쌍굴은 운좋게 안 밟음): fake_follower '불도저'(정면 추종자를 범퍼로 밀어 놓침 재현 불가 → 비켜서기) + `/alarm` 간헐 유실(→ 상태 확인 후 재발사). → `0707_현황.md §7`
-- ✅ **외부 검토 반영 1번 묶음 (07-19)** — ★P0 goal 취소 레이스(응답 전 cancel 되면 뒤늦게 수락된 goal 이 안 죽어 "abort 해도 주행 계속" — stale 응답을 무시가 아니라 **즉시 cancel** 로) + scan watchdog(`scan_timeout` 1.0s — /scan 끊기면 visible/lost **판단 보류**, 라이다 사망='추종 양호' 오독 방지) + `track_unknown_space:true` 명시 + package.xml 의존성 보강. pytest 23→**32개**·회귀 3종 PASS. 미반영 항목 판단 근거·실차 이식 신규 인지(실측 footprint 가 시뮬보다 큼 → 좁은 통로 여유 과대평가) = `0707_현황.md §8`
+- ✅ **외부 검토 반영 1·2·3번 묶음 (07-19)** — 다른 AI 검토 13건을 코드로 교차검증 후 반영. **①** ★P0 goal 취소 레이스(응답 전 cancel 되면 뒤늦게 수락된 goal 이 안 죽어 "abort 해도 주행 계속" — stale 응답을 무시가 아니라 **즉시 cancel**. E2E 재현 불가라 `MissionNode.__new__` 기법 단위테스트 6개가 방어선) + scan watchdog(`scan_timeout` 1.0s — /scan 끊기면 visible/lost **판단 보류**, 라이다 사망='추종 양호' 오독 방지) + `track_unknown_space:true` 명시 + package.xml 의존성 보강. **②** 실차 항목 7건을 이식 체크리스트(0707_로드맵 §2-B #6·7·9·10 신설 + 2-C)에 병합 — ★신규 인지: 실측 footprint(0.55×0.57) > 시뮬(0.50×0.40) → 좁은 통로 여유 과대평가, 치수 교체 후 좁은통로 회귀 필수. **③** **부정 회귀 신설**(`tools/regression_negative.sh` — 지도밖/벽너머/막힌 goal 은 실패 종결해야 PASS + 정상 goal 양성 대조군). pytest 23→**32개**·회귀 4종 전부 PASS. 판단 근거·학습 포인트 정본 = **`0719_현황.md`**
 - ▶ **다음 후보 (상세·우선순위 = `0707_현황.md §2` 가 정본):** ★ⓒ 중간보고서 초안(마감 有, 재료·그래프 확보 완료) → 감지 3차(지도 배경제거 — localization 정본 지도가 생겨 적기) / BT BackUp 회복 / ⓑ 역할 B `.msg` 계약(미팅 병렬) / ⓔ micro-ROS(구동부 대기). + 학습: **정본 = `0707_학습로드맵.md`** (7단계 커리큘럼, 단계별 새 세션 프롬프트 포함) — 다음 계단 = 1단계 URDF 코드리딩.
 
 ### 런치/실행법
@@ -127,9 +128,11 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
   - 화재: `ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 14.0, y: 0.0}}}"`
   - 놓침 재현: `ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String "{data: stop}"` (재개 `follow`) / 관찰: `ros2 topic echo /mission_state`. ⚠ pub 은 `--once` 금지, `-w 1` (§함정).
   - 관제 (07-07): `/mission_cmd` 에 `reset`(임무 초기화→PATROL) / `abort`(정지, FAULT 유지) — FAULT 소진 후 재가동용. 같은 pub 형식.
+- **관제 데스크톱 (07-18~):** `bash ~/ros2_ws/console/run_console.sh` (rosbridge:9090 + 웹 :8000) → 브라우저 `http://localhost:8000`. 시뮬(mission.launch)과 병행 실행. 사전 1회 `sudo apt install ros-humble-rosbridge-suite`. 상세: `0718_관제시스템.md` §5.
 - `ros2 launch tunnel_sim slam_nav2.launch.py` — 라이브SLAM+Nav2 만 (미션노드 없이 목표 실험용). 목표: `ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose "{pose: {header: {frame_id: map}, pose: {position: {x: ..., y: ...}, orientation: {w: 1.0}}}}"`
 - `ros2 launch tunnel_sim robot.launch.py` — Gazebo+로봇만 / `slam.launch.py` — +지도작성(저장: `map_saver_cli -f ~/ros2_ws/maps/tunnel_map`) / `nav2.launch.py` — 저장맵+amcl / 키보드: `teleop_twist_keyboard`
-- **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.2초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분). **07-07 부터 스크립트 2종 기본 = localization 운영 모드** (mapping 검증은 `localization:=false` 인자, 0707_현황.md §3)
+- **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.6초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분). **07-07 부터 스크립트 2종 기본 = localization 운영 모드** (mapping 검증은 `localization:=false` 인자, 0707_현황.md §3)
+- **부정 회귀 (07-19 신설 — 안전 정책·Nav2 설정 변경 시 추가 실행):** `bash tools/regression_negative.sh`(~6분) — 지도밖/벽너머/막힌 goal 이 **실패 종결**해야 PASS(성공하면 안전 정책 구멍, timeout 이면 무한 회복 의심) + 정상 goal 양성 대조군. 실측: 막힌 goal 은 BT 재시도 6회 소진까지 **~2분 걸려 ABORTED**(무한 아님 — planner tolerance 백로그의 판단 재료). ⚠ `service call` 응답 파싱은 `success=True`(repr 형식, `success: True` 아님). (0719_현황.md §8)
 - **정확도 벤치 (SLAM·Nav2 튜닝 전/후 측정):** `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/{trace.csv,summary.txt,error.png}` / 비교: `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png` (§17)
 
 ### 2C 완료 (2026-06-23) — GUI 배치 워크플로우("마우스 배치→`gz model -m 이름 -p` 좌표→world `<include>`→build") · T자 터널(메인 30m×폭6m + 곁복도 12m) · 가상 라이다 `/scan` 검증. → `0623_현황.md §8~10`
@@ -195,7 +198,10 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0705_실차전_전략.md` | `~/Desktop/개발현황/` | ★ 실차 전 전략 정본: 가짜 detection 판단(계약+깡통만) + 실차 결합 5단계 로드맵 |
 | `0707_현황.md` | `~/Desktop/개발현황/` | **§1 종합 스냅샷(2F 완성 시점 수치·보고서 자산) · §2 할 일 우선순위 정본** + 07-07 이후 작업 기록 |
 | `0707_로드맵_통합계획.md` | `~/Desktop/개발현황/` | ★ 최종까지 전체 로드맵 한 장: §1 시뮬 잔여 · §2 실차 5단계+**이식 체크리스트 9종**(절대경로 2곳 포함) · §3 역할 B 통합 4단계 · §4 월별 계획+리스크 플랜 B |
+| `0719_현황.md` | `~/Desktop/개발현황/` | ★ **외부 AI 검토 13건 교차검증 + 반영 1·2·3번 묶음 정본**: 검토를 코드로 검증하는 방법론 · P0 goal 취소 레이스(재현 경로·단위테스트 기법) · scan watchdog 설계 판단 · 반영 기각 근거(planner tolerance 트레이드오프 등) · 부정 회귀 설계. 학습용 상세 기록 |
 | `0707_학습로드맵.md` | `~/Desktop/개발현황/` | ★ 학습 커리큘럼 정본 (0705 §9 상속): **개발 시간순 11장 완주형** (URDF→첫지도→Nav2→EKF→진단→오돔주입→미션①②③→품질→운영완성→재검토), **복선→번복 추적 표 + 장별 새 세션용 프롬프트+통과 질문** 포함 |
+| `0718_구동부_배선맵핑_검증절차.md` | `~/Desktop/개발현황/` | 구동부 전달본: Teensy 4.1 핀맵 + 검증 2~5단계 + 역할 A 검토 메모 |
+| `0718_관제시스템.md` | `~/Desktop/개발현황/` | ★ 관제 데스크톱 설계 정본: 스택(웹+rosbridge)·구조도 개정본·로드맵 C1~C6·토픽 계약 |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |
 

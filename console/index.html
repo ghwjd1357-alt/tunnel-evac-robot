@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>터널 대피로봇 관제</title>
+<style>
+  /* ── 기본 레이아웃: 다크 관제 테마 ─────────────────────────── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background:#12161c; color:#dfe6ee; font-family:'Noto Sans KR',sans-serif; padding:16px; }
+  h1 { font-size:1.15rem; letter-spacing:.05em; margin-bottom:12px; }
+  .grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; max-width:1100px; }
+  .panel { background:#1b2129; border:1px solid #2a3340; border-radius:8px; padding:14px; }
+  .panel h2 { font-size:.85rem; color:#8fa3b8; margin-bottom:10px; letter-spacing:.08em; }
+  .muted { color:#5d6b7a; font-size:.8rem; }
+
+  /* 연결 상태 뱃지 */
+  #conn { float:right; font-size:.8rem; padding:2px 10px; border-radius:10px; background:#3a2020; color:#ff7b7b; }
+  #conn.ok { background:#16351f; color:#6fe08d; }
+
+  /* ── FSM 상태 표시등 ─────────────────────────────────────── */
+  .fsm { display:flex; flex-wrap:wrap; gap:6px; }
+  .fsm span { padding:6px 10px; border-radius:6px; background:#232b35; color:#5d6b7a;
+              font-size:.8rem; border:1px solid transparent; }
+  .fsm span.on  { background:#173a5e; color:#7fc4ff; border-color:#2f77b6; font-weight:700; }
+  .fsm span.on.danger { background:#5e1717; color:#ff9b9b; border-color:#b62f2f; }
+  #siren { margin-top:10px; font-size:.85rem; color:#5d6b7a; }
+  #siren.on { color:#ffb04d; font-weight:700; }
+
+  /* ── 버튼 ────────────────────────────────────────────────── */
+  button { cursor:pointer; border:0; border-radius:6px; padding:10px 14px; font-size:.9rem;
+           font-weight:700; color:#fff; }
+  button:disabled { opacity:.35; cursor:not-allowed; }
+  .btn-reset { background:#2f77b6; }
+  .btn-abort { background:#8a6d1a; }
+  .btn-estop { background:#b62f2f; width:100%; margin-top:10px; padding:14px; font-size:1rem; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=number] { width:80px; background:#12161c; border:1px solid #2a3340; color:#dfe6ee;
+                       border-radius:6px; padding:8px; }
+
+  /* ── 이벤트 로그 ─────────────────────────────────────────── */
+  #log { height:220px; overflow-y:auto; font-size:.8rem; line-height:1.6; font-family:monospace; }
+  #log .fire   { color:#ff9b6a; }
+  #log .state  { color:#7fc4ff; }
+  #log .ctrl   { color:#e5d07a; }
+
+  /* 자리만 있는 패널 (지도·영상 — C3/C5) */
+  .placeholder { display:flex; align-items:center; justify-content:center;
+                 height:120px; color:#3d4956; border:1px dashed #2a3340; border-radius:6px; }
+</style>
+</head>
+<body>
+
+<h1>🚨 지하터널 대피로봇 — 관제 콘솔 <span id="conn">연결 안 됨</span></h1>
+
+<div class="grid">
+
+  <!-- ═══ 미션 상태 패널 (C2) ═══ -->
+  <div class="panel">
+    <h2>미션 상태 (FSM)</h2>
+    <div class="fsm" id="fsm">
+      <!-- 순서 = mission_node.py State 정의 순서와 동일 -->
+      <span data-s="PATROL">순찰 PATROL</span>
+      <span data-s="APPROACH">접근 APPROACH</span>
+      <span data-s="GATHER">집결 GATHER</span>
+      <span data-s="GUIDE">유도 GUIDE</span>
+      <span data-s="SEARCH_BACK">재탐색 SEARCH_BACK</span>
+      <span data-s="ESCAPED">탈출 ESCAPED</span>
+      <span data-s="FAULT" class="danger-slot">고장 FAULT</span>
+    </div>
+    <div id="siren">📢 싸이렌: OFF</div>
+    <div class="muted" style="margin-top:8px">마지막 수신: <span id="lastseen">—</span></div>
+  </div>
+
+  <!-- ═══ 원격 제어 (C2) ═══ -->
+  <div class="panel">
+    <h2>로봇 원격 제어</h2>
+    <div class="row">
+      <button class="btn-reset" id="btnReset">임무 재시작 (reset)</button>
+      <button class="btn-abort" id="btnAbort">임무 중단 (abort)</button>
+    </div>
+    <button class="btn-estop" id="btnEstop">■ 비상 정지 (소프트)</button>
+    <div class="muted" style="margin-top:6px">
+      소프트 정지 = cmd_vel 0 + abort. 하드 정지는 구동부 Teensy 0.5s 워치독 담당.
+    </div>
+  </div>
+
+  <!-- ═══ 화재 경보 입력 (C2 — 데모 트리거) ═══ -->
+  <div class="panel">
+    <h2>화재 경보 입력 (/alarm)</h2>
+    <div class="row">
+      X <input type="number" id="fx" value="14.0" step="0.5">
+      Y <input type="number" id="fy" value="0.0" step="0.5">
+      <button class="btn-abort" style="background:#b6572f" id="btnFire">🔥 화재 발생</button>
+    </div>
+    <div class="muted" style="margin-top:6px">T자 데모 (14,0) / 쌍굴 (30,0). 지도 클릭 발행은 C3 에서.</div>
+  </div>
+
+  <!-- ═══ 이벤트 로그 (C2) ═══ -->
+  <div class="panel">
+    <h2>탐지·이벤트 로그</h2>
+    <div id="log"></div>
+  </div>
+
+  <!-- ═══ 자리 예약 패널 ═══ -->
+  <div class="panel"><h2>지도·위치 뷰</h2><div class="placeholder">C3 에서 구현 (/map + /tf)</div></div>
+  <div class="panel"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
+
+</div>
+
+<script src="roslib.min.js"></script>
+<script>
+/* ════════════════════════════════════════════════════════════════
+   관제 콘솔 C1+C2 초안 (2026-07-18)
+   - rosbridge(ws://:9090) 접속 → /mission_state·/siren 구독,
+     /mission_cmd·/alarm·/cmd_vel 발행
+   - 토픽 계약: 0718_관제시스템.md §4
+   ════════════════════════════════════════════════════════════════ */
+
+// ── 1. rosbridge 연결 (끊기면 3초마다 자동 재접속) ──────────────
+const connEl = document.getElementById('conn');
+let ros;
+function connect() {
+  ros = new ROSLIB.Ros({ url: 'ws://' + location.hostname + ':9090' });
+  ros.on('connection', () => { connEl.textContent = '연결됨';  connEl.classList.add('ok');  setupTopics(); });
+  ros.on('close',      () => { connEl.textContent = '연결 안 됨'; connEl.classList.remove('ok'); setTimeout(connect, 3000); });
+  ros.on('error',      () => {});   // close 가 뒤따르므로 별도 처리 불필요
+}
+connect();
+
+// ── 2. 이벤트 로그 ──────────────────────────────────────────────
+const logEl = document.getElementById('log');
+function log(cls, text) {
+  const t = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = `[${t}] ${text}`;
+  logEl.prepend(div);                       // 최신이 위로
+  while (logEl.children.length > 200) logEl.lastChild.remove();
+}
+
+// ── 3. 토픽 배선 ────────────────────────────────────────────────
+let cmdPub, alarmPub, cmdVelPub;
+let lastState = null;
+
+function setupTopics() {
+  // 구독: 미션 상태 (상시 발행이라 폴링 불필요)
+  new ROSLIB.Topic({ ros, name: '/mission_state', messageType: 'std_msgs/msg/String' })
+    .subscribe(msg => {
+      document.getElementById('lastseen').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
+      if (msg.data !== lastState) {          // 전이 시에만 로그 (상시 발행 스팸 방지)
+        if (lastState !== null) log('state', `상태 전이: ${lastState} → ${msg.data}`);
+        lastState = msg.data;
+        document.querySelectorAll('#fsm span').forEach(el => {
+          el.classList.toggle('on', el.dataset.s === msg.data);
+          el.classList.toggle('danger', el.dataset.s === 'FAULT' && msg.data === 'FAULT');
+        });
+      }
+    });
+
+  // 구독: 싸이렌
+  new ROSLIB.Topic({ ros, name: '/siren', messageType: 'std_msgs/msg/Bool' })
+    .subscribe(msg => {
+      const el = document.getElementById('siren');
+      el.textContent = '📢 싸이렌: ' + (msg.data ? 'ON' : 'OFF');
+      el.classList.toggle('on', msg.data);
+    });
+
+  // 발행 준비
+  cmdPub    = new ROSLIB.Topic({ ros, name: '/mission_cmd', messageType: 'std_msgs/msg/String' });
+  alarmPub  = new ROSLIB.Topic({ ros, name: '/alarm',       messageType: 'geometry_msgs/msg/PoseStamped' });
+  cmdVelPub = new ROSLIB.Topic({ ros, name: '/cmd_vel',     messageType: 'geometry_msgs/msg/Twist' });
+}
+
+// ── 4. 제어 버튼 ────────────────────────────────────────────────
+function sendCmd(cmd) {
+  if (!cmdPub) return;
+  cmdPub.publish(new ROSLIB.Message({ data: cmd }));
+  log('ctrl', `관제 명령 발행: ${cmd}`);
+}
+document.getElementById('btnReset').onclick = () => sendCmd('reset');
+document.getElementById('btnAbort').onclick = () => sendCmd('abort');
+
+// 소프트 비상정지: abort(목표 취소·FAULT 유지) + cmd_vel 0 을 짧게 연사.
+// 하드 정지는 Teensy 워치독(통신 두절 0.5s 내 정지)이 최후 안전장치.
+document.getElementById('btnEstop').onclick = () => {
+  sendCmd('abort');
+  if (!cmdVelPub) return;
+  const zero = new ROSLIB.Message({ linear:{x:0,y:0,z:0}, angular:{x:0,y:0,z:0} });
+  let n = 0;
+  const iv = setInterval(() => { cmdVelPub.publish(zero); if (++n >= 10) clearInterval(iv); }, 100);
+  log('ctrl', '비상 정지(소프트): abort + cmd_vel 0 ×10');
+};
+
+// ── 5. 화재 경보 발행 (기존 재발사 관례대로 2회) ────────────────
+document.getElementById('btnFire').onclick = () => {
+  if (!alarmPub) return;
+  const x = parseFloat(document.getElementById('fx').value);
+  const y = parseFloat(document.getElementById('fy').value);
+  const msg = new ROSLIB.Message({
+    header: { frame_id: 'map', stamp: { sec: 0, nanosec: 0 } },   // stamp=0 = 최신 TF (미션 함정 ① 관례)
+    pose: { position: { x, y, z: 0 }, orientation: { x:0, y:0, z:0, w:1 } },
+  });
+  alarmPub.publish(msg);
+  setTimeout(() => alarmPub.publish(msg), 300);   // /alarm 간헐 유실 대비 재발사
+  log('fire', `🔥 화재 경보 발행: (${x}, ${y})`);
+};
+</script>
+</body>
+</html>
