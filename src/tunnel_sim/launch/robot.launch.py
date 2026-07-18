@@ -115,6 +115,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        # ★ gui 선언 (07-07 복구): 위에서 LaunchConfiguration('gui') 를 쓰는데 정작
+        #   declare 가 빠져 있어 robot.launch.py 를 '단독' 실행하면 'gui does not exist'
+        #   에러 (상위 런치가 항상 gui 를 넘겨줘 여태 안 드러났던 잠복 누락).
+        DeclareLaunchArgument('gui', default_value='true',
+                              description='true=GUI 창, false=헤드리스(서버만)'),
         urdf_arg,
         world_arg,
         spawn_x_arg,
