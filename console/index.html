@@ -43,9 +43,13 @@
   #log .state  { color:#7fc4ff; }
   #log .ctrl   { color:#e5d07a; }
 
-  /* 자리만 있는 패널 (지도·영상 — C3/C5) */
+  /* 자리만 있는 패널 (영상 — C5) */
   .placeholder { display:flex; align-items:center; justify-content:center;
                  height:120px; color:#3d4956; border:1px dashed #2a3340; border-radius:6px; }
+
+  /* ── 지도 뷰 (C3) ─────────────────────────────────────────── */
+  .wide { grid-column: 1 / -1; }
+  #mapCanvas { width:100%; height:380px; background:#12161c; border-radius:6px; cursor:crosshair; }
 </style>
 </head>
 <body>
@@ -101,9 +105,18 @@
     <div id="log"></div>
   </div>
 
+  <!-- ═══ 지도·위치 뷰 (C3) ═══ -->
+  <div class="panel wide">
+    <h2>지도·위치 뷰</h2>
+    <canvas id="mapCanvas"></canvas>
+    <div class="muted" style="margin-top:6px">
+      🔺 로봇 · 🔥 화재 · <span style="color:#6fe08d">─</span> 계획 경로(/plan) ·
+      <b>지도 클릭 → 화재 좌표 입력칸에 반영</b> (발행은 🔥 버튼으로)
+    </div>
+  </div>
+
   <!-- ═══ 자리 예약 패널 ═══ -->
-  <div class="panel"><h2>지도·위치 뷰</h2><div class="placeholder">C3 에서 구현 (/map + /tf)</div></div>
-  <div class="panel"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
+  <div class="panel wide"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
 
 </div>
 
@@ -169,7 +182,135 @@ function setupTopics() {
   cmdPub    = new ROSLIB.Topic({ ros, name: '/mission_cmd', messageType: 'std_msgs/msg/String' });
   alarmPub  = new ROSLIB.Topic({ ros, name: '/alarm',       messageType: 'geometry_msgs/msg/PoseStamped' });
   cmdVelPub = new ROSLIB.Topic({ ros, name: '/cmd_vel',     messageType: 'geometry_msgs/msg/Twist' });
+
+  setupMap();   // C3: 지도·위치 뷰 배선
 }
+
+/* ════════════════════════════════════════════════════════════════
+   C3. 지도·위치 뷰
+   - /map: OccupancyGrid → 오프스크린 캔버스에 1회 렌더 (지도는 무겁게 재렌더 안 함)
+   - /tf : map→odom (slam) ∘ odom→base_footprint (diff_drive) 2D 합성 = 로봇 위치
+   - /plan: Nav2 계획 경로 폴리라인
+   - /alarm: CLI 발행분도 마커에 반영되도록 구독
+   ════════════════════════════════════════════════════════════════ */
+const mapCanvas = document.getElementById('mapCanvas');
+const mctx = mapCanvas.getContext('2d');
+let mapInfo = null, mapImage = null;      // 지도 메타 + 렌더 캐시
+let tfMapOdom = null, tfOdomBase = null;  // 2D 변환 {x,y,yaw}
+let robot = null, planPts = [], fireXY = null;
+
+const quatToYaw = q => Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+// 2D 변환 합성 a∘b (a 좌표계에서 본 b)
+function compose(a, b) {
+  const c = Math.cos(a.yaw), s = Math.sin(a.yaw);
+  return { x: a.x + c * b.x - s * b.y, y: a.y + s * b.x + c * b.y, yaw: a.yaw + b.yaw };
+}
+
+function renderGrid(msg) {
+  mapInfo = msg.info;
+  const w = msg.info.width, h = msg.info.height;
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const octx = off.getContext('2d');
+  const img = octx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const v = msg.data[i];
+    // 지도 row 0 = 아래쪽(y-) 인데 캔버스 y 는 아래로 증가 → 상하 반전해 저장
+    const row = (i / w) | 0, col = i % w;
+    const j = ((h - 1 - row) * w + col) * 4;
+    let c;
+    if (v === -1 || v === 255) c = [27, 33, 41];        // 미탐사
+    else if (v >= 65)          c = [207, 216, 227];     // 벽(점유)
+    else                       c = [47, 57, 71];        // 주행 가능
+    img.data[j] = c[0]; img.data[j+1] = c[1]; img.data[j+2] = c[2]; img.data[j+3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+  mapImage = off;
+}
+
+function setupMap() {
+  new ROSLIB.Topic({ ros, name: '/map', messageType: 'nav_msgs/msg/OccupancyGrid' })
+    .subscribe(m => { const first = !mapInfo; renderGrid(m); if (first) log('state', `지도 수신 (${m.info.width}×${m.info.height}, ${m.info.resolution}m/셀)`); });
+
+  // slam_toolbox 는 주기 발행이라 보통 위 구독으로 충분. 5초 내 미수신 시 서비스로 1회 요청 (안전망)
+  setTimeout(() => {
+    if (mapInfo) return;
+    new ROSLIB.Service({ ros, name: '/slam_toolbox/dynamic_map', serviceType: 'nav_msgs/srv/GetMap' })
+      .callService(new ROSLIB.ServiceRequest({}),
+        r => { renderGrid(r.map); log('state', '지도 수신 (dynamic_map 서비스 폴백)'); },
+        e => log('state', '지도 미수신 — 시뮬(mission.launch) 가동 여부 확인'));
+  }, 5000);
+
+  // /tf 는 고빈도 → 100ms 스로틀. map→odom 은 천천히 변해서 샘플링 유실 무해
+  new ROSLIB.Topic({ ros, name: '/tf', messageType: 'tf2_msgs/msg/TFMessage', throttle_rate: 100 })
+    .subscribe(m => {
+      for (const t of m.transforms) {
+        const tr = { x: t.transform.translation.x, y: t.transform.translation.y,
+                     yaw: quatToYaw(t.transform.rotation) };
+        if (t.header.frame_id === 'map'  && t.child_frame_id === 'odom') tfMapOdom = tr;
+        if (t.header.frame_id === 'odom' &&
+            (t.child_frame_id === 'base_footprint' || t.child_frame_id === 'base_link')) tfOdomBase = tr;
+      }
+      if (tfMapOdom && tfOdomBase) robot = compose(tfMapOdom, tfOdomBase);
+    });
+
+  new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/msg/Path', throttle_rate: 500 })
+    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); });
+
+  new ROSLIB.Topic({ ros, name: '/alarm', messageType: 'geometry_msgs/msg/PoseStamped' })
+    .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
+}
+
+// 지도 좌표(m) → 캔버스 픽셀
+function m2p(x, y, scale) {
+  const cx = (x - mapInfo.origin.position.x) / mapInfo.resolution;
+  const cy = (y - mapInfo.origin.position.y) / mapInfo.resolution;
+  return [cx * scale, (mapInfo.height - cy) * scale];
+}
+
+function drawMap() {
+  if (!mapImage || !mapInfo) return;
+  const cw = mapCanvas.clientWidth, ch = 380;
+  mapCanvas.width = cw; mapCanvas.height = ch;
+  const scale = Math.min(cw / mapInfo.width, ch / mapInfo.height);
+  mctx.fillStyle = '#12161c'; mctx.fillRect(0, 0, cw, ch);
+  mctx.imageSmoothingEnabled = false;
+  mctx.drawImage(mapImage, 0, 0, mapInfo.width * scale, mapInfo.height * scale);
+
+  // 계획 경로
+  if (planPts.length > 1) {
+    mctx.strokeStyle = '#6fe08d'; mctx.lineWidth = 2; mctx.beginPath();
+    planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y, scale); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
+    mctx.stroke();
+  }
+  // 화재 마커
+  if (fireXY) {
+    const [px, py] = m2p(fireXY.x, fireXY.y, scale);
+    mctx.font = '20px sans-serif'; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+    mctx.fillText('🔥', px, py);
+  }
+  // 로봇 (진행방향 삼각형 — 캔버스 y 반전이라 화면각 = -yaw)
+  if (robot) {
+    const [px, py] = m2p(robot.x, robot.y, scale);
+    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw);
+    mctx.fillStyle = '#7fc4ff'; mctx.beginPath();
+    mctx.moveTo(10, 0); mctx.lineTo(-6, 6); mctx.lineTo(-6, -6); mctx.closePath(); mctx.fill();
+    mctx.restore();
+  }
+}
+setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
+
+// 지도 클릭 → 화재 좌표 입력칸에 반영 (발행은 버튼으로 — 오클릭 방지)
+mapCanvas.addEventListener('click', ev => {
+  if (!mapInfo) return;
+  const r = mapCanvas.getBoundingClientRect();
+  const scale = Math.min(mapCanvas.width / mapInfo.width, mapCanvas.height / mapInfo.height);
+  const x = mapInfo.origin.position.x + ((ev.clientX - r.left) / scale) * mapInfo.resolution;
+  const y = mapInfo.origin.position.y + (mapInfo.height - (ev.clientY - r.top) / scale) * mapInfo.resolution;
+  document.getElementById('fx').value = x.toFixed(1);
+  document.getElementById('fy').value = y.toFixed(1);
+  log('ctrl', `지도 클릭 → 화재 후보 좌표 (${x.toFixed(1)}, ${y.toFixed(1)})`);
+});
 
 // ── 4. 제어 버튼 ────────────────────────────────────────────────
 function sendCmd(cmd) {
