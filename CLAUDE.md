@@ -92,7 +92,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 | SLAM 터널 지도 생성·저장 (`maps/tunnel_map.*`) | ✅ 2026-06-26 (2E, 헤드리스 자동주행) |
 | Nav2 자율주행 | ✅ **완전검증 (2026-07-06 갱신):** tolerance 강화 후 **끝점오차 0.12~0.17m** (병목이 goal tolerance 였음, §17). **운영 = localization 모드** (저장 posegraph, 궤적오차 평균 **0.015m**, §18) |
 | **미션 로직 (`mission_manager`)** | ✅ **①~③ + 감지 2차 완료 (2026-07-06):** PATROL→APPROACH→GATHER→GUIDE⇄SEARCH_BACK→ESCAPED+FAULT 전체 시뮬 E2E 검증. 추종감지 = 클러스터 크기 판별(GUIDE 판정 any존), 안전장치 2종, `mission.launch.py` 한 줄 실행 (상세: 0705_현황.md §12~15) |
-| **관제 데스크톱 (Operator Console)** | ✅ **C1~C3 완료 (07-19):** 웹 대시보드(rosbridge+roslibjs), 코드 = `~/ros2_ws/console/`(ROS 패키지 아님). C2 상태패널·제어·화재입력 E2E PASS + **C3 지도뷰**(/map 렌더·TF 2단합성 로봇위치·/plan·클릭→화재좌표) 데이터 경로 PASS. 남은 것: 브라우저 육안 확인 → C4 시스템 상태. **설계 정본 = `0718_관제시스템.md`** |
+| **관제 데스크톱 (Operator Console)** | ✅ **C1~C4 완료 (07-19):** 웹 대시보드(rosbridge+roslibjs), 코드 = `~/ros2_ws/console/`(ROS 패키지 아님). C2 상태패널·제어·화재입력 + C3 지도뷰(TF 2단합성) + **C4 시스템 상태**(신선도=스로틀 구독 설계 §5.5·Nav2 상태·RTT) 전부 데이터 경로 PASS. 남은 것: 브라우저 육안 확인 → C5 영상(실차)·C6 로그인. ★함정: rosbridge 서비스 타입은 `rosapi_msgs/srv/…`. **설계 정본 = `0718_관제시스템.md`** |
 | **테스트·회귀 인프라** | ✅ 2026-07-06: git 저장소(작업 단위 커밋) + pytest 13개 + `tools/regression_3goals.sh` + `tools/mission_e2e.sh` — **변경 후 이 3종 실행이 회귀 검증** (상세: §15.5) |
 | EKF (robot_localization, odom+IMU 융합) | ✅ 2026-07-05: 시뮬 IMU 추가 + `config/ekf.yaml` + slam 파라미터 튜닝. 12.5m 주행 시 SLAM 위치오차 **9m → 0.17m** (상세: `0705_현황.md` §7) |
 | Orbbec 카메라 (OrbbecSDK_ROS2) | ⬜ **의도적 보류** (시뮬 트랙엔 불필요, 역할 B·실차 단계에서) |

@@ -50,6 +50,13 @@
   /* ── 지도 뷰 (C3) ─────────────────────────────────────────── */
   .wide { grid-column: 1 / -1; }
   #mapCanvas { width:100%; height:380px; background:#12161c; border-radius:6px; cursor:crosshair; }
+
+  /* ── 시스템 상태 (C4) ─────────────────────────────────────── */
+  .sys { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; font-size:.85rem; }
+  .sys i { font-style:normal; color:#e05a5a; }        /* 기본 = 빨강(미수신) */
+  .sys i.ok   { color:#6fe08d; }
+  .sys i.warn { color:#ffb04d; }
+  .sys b { font-weight:400; color:#8fa3b8; margin-left:4px; }
 </style>
 </head>
 <body>
@@ -112,6 +119,19 @@
     <div class="muted" style="margin-top:6px">
       🔺 로봇 · 🔥 화재 · <span style="color:#6fe08d">─</span> 계획 경로(/plan) ·
       <b>지도 클릭 → 화재 좌표 입력칸에 반영</b> (발행은 🔥 버튼으로)
+    </div>
+  </div>
+
+  <!-- ═══ 시스템 상태 (C4) ═══ -->
+  <div class="panel wide">
+    <h2>시스템 상태</h2>
+    <div class="sys" id="sys">
+      <div><i id="h-scan">●</i> LiDAR <span class="muted">/scan</span> <b id="a-scan">—</b></div>
+      <div><i id="h-odom">●</i> 오도메트리 <span class="muted">/odom</span> <b id="a-odom">—</b></div>
+      <div><i id="h-imu">●</i> IMU <span class="muted">/imu/data</span> <b id="a-imu">—</b></div>
+      <div><i id="h-nav">●</i> Nav2 <b id="a-nav">목표 없음</b></div>
+      <div><i id="h-rtt">●</i> 통신 지연 <b id="a-rtt">—</b></div>
+      <div><i style="color:#3d4956">●</i> 배터리 <b class="muted">구동부 토픽 합의 대기</b></div>
     </div>
   </div>
 
@@ -183,8 +203,69 @@ function setupTopics() {
   alarmPub  = new ROSLIB.Topic({ ros, name: '/alarm',       messageType: 'geometry_msgs/msg/PoseStamped' });
   cmdVelPub = new ROSLIB.Topic({ ros, name: '/cmd_vel',     messageType: 'geometry_msgs/msg/Twist' });
 
-  setupMap();   // C3: 지도·위치 뷰 배선
+  setupMap();      // C3: 지도·위치 뷰 배선
+  setupHealth();   // C4: 시스템 상태 배선
 }
+
+/* ════════════════════════════════════════════════════════════════
+   C4. 시스템 상태
+   ★ 설계: Hz 측정 대신 "신선도" — 무거운 토픽(/scan 등)을 전량 받지 않고
+     500ms 스로틀 구독으로 "마지막 수신이 얼마나 됐나"만 판별.
+     (정밀 Hz 가 필요해지면 로봇 쪽 헬스체크 노드에서 계산해 결론만 발행이 정석)
+   - Nav2: 액션 상태 토픽(/navigate_to_pose/_action/status) 구독
+   - 통신 지연: /rosapi/get_time 서비스 왕복시간(RTT)
+   ════════════════════════════════════════════════════════════════ */
+const lastSeen = {};   // {id: 마지막 수신 시각 ms}
+
+function watchFreshness(topic, type, id) {
+  new ROSLIB.Topic({ ros, name: topic, messageType: type, throttle_rate: 500 })
+    .subscribe(() => { lastSeen[id] = Date.now(); });
+}
+
+const NAV_STATUS = { 1:'목표 접수', 2:'주행 중', 3:'취소 중', 4:'도달 ✓', 5:'취소됨', 6:'거부/실패 ✗' };
+
+function setupHealth() {
+  watchFreshness('/scan',     'sensor_msgs/msg/LaserScan', 'scan');
+  watchFreshness('/odom',     'nav_msgs/msg/Odometry',     'odom');
+  watchFreshness('/imu/data', 'sensor_msgs/msg/Imu',       'imu');
+
+  // Nav2 목표 상태 (미션 노드가 보낸 goal 의 진행 상황)
+  new ROSLIB.Topic({ ros, name: '/navigate_to_pose/_action/status',
+                     messageType: 'action_msgs/msg/GoalStatusArray' })
+    .subscribe(m => {
+      if (!m.status_list.length) return;
+      const st = m.status_list[m.status_list.length - 1].status;   // 최신 goal
+      const el = document.getElementById('a-nav');
+      el.textContent = NAV_STATUS[st] || `상태 ${st}`;
+      const dot = document.getElementById('h-nav');
+      dot.className = (st === 2 || st === 4) ? 'ok' : (st === 6 ? '' : 'warn');
+      if (st === 6) log('state', 'Nav2 목표 거부/실패 — FAULT 여부는 미션 상태 참조');
+    });
+
+  // 통신 지연: 2초마다 rosapi 서비스 왕복시간 측정
+  // ⚠ 패키지명 주의: rosapi 아님 → rosapi_msgs (틀리면 응답이 조용히 유실됨)
+  const timeSvc = new ROSLIB.Service({ ros, name: '/rosapi/get_time', serviceType: 'rosapi_msgs/srv/GetTime' });
+  setInterval(() => {
+    const t0 = performance.now();
+    timeSvc.callService(new ROSLIB.ServiceRequest({}), () => {
+      const rtt = Math.round(performance.now() - t0);
+      document.getElementById('a-rtt').textContent = rtt + ' ms';
+      document.getElementById('h-rtt').className = rtt < 100 ? 'ok' : (rtt < 500 ? 'warn' : '');
+    }, () => { document.getElementById('a-rtt').textContent = '측정 실패'; });
+  }, 2000);
+}
+
+// 신선도 표시 갱신: 🟢 <1.5s / 🟡 <4s / 🔴 그 이상·미수신
+setInterval(() => {
+  for (const id of ['scan', 'odom', 'imu']) {
+    const dot = document.getElementById('h-' + id);
+    const age = document.getElementById('a-' + id);
+    if (!lastSeen[id]) { age.textContent = '미수신'; dot.className = ''; continue; }
+    const sec = (Date.now() - lastSeen[id]) / 1000;
+    age.textContent = sec.toFixed(1) + '초 전';
+    dot.className = sec < 1.5 ? 'ok' : (sec < 4 ? 'warn' : '');
+  }
+}, 500);
 
 /* ════════════════════════════════════════════════════════════════
    C3. 지도·위치 뷰
