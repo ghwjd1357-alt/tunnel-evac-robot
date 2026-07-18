@@ -7,7 +7,20 @@
   <maintainer email="minwoo@todo.todo">minwoo</maintainer>
   <license>TODO: License declaration</license>
 
+  <!-- 실제 import 기준 명시 (07-19 검토 반영): 지금 PC 는 다른 패키지가 깔아둔 걸
+       얻어 쓰지만, 새 Jetson/CI 의 rosdep install 재현성을 위해 전부 선언 -->
   <depend>gazebo_ros</depend>
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>gazebo_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <!-- 런치가 포함하는 외부 스택 (slam.launch → slam_toolbox, nav2_bringup 등) -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

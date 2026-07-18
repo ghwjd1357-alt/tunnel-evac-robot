@@ -44,6 +44,8 @@ search_back:
   min_points: 3          # 덩어리 최소 점 수 — 미만이면 노이즈로 무시 (실물은 노이즈 많아 ↑ 후보)
   range_jump: 0.3        # 이웃 빔 거리차(m) — 이보다 크면 다른 물체로 분리
   edge_margin: 0.2       # 검출 문턱(detect_range) 경계의 슬라이버 배제 폭(m)
+  scan_timeout: 1.0      # ★ watchdog(07-19): /scan 이 이 시간(초) 넘게 끊기면 visible/lost 판정 보류
+                         #   (라이다 사망 = '추종 양호' 오독 방지. 실물 라이다 주기에 맞춰 재튜닝 후보)
   max_attempts: 2        # ★ 안전장치①: 역행 최대 횟수 — 초과 시 보고 후 단독 탈출
   min_fire_dist: 5.0     # ★ 안전장치②: 역행 목표는 화재에서 최소 이 거리(m) — 불속 재진입 금지
   refind_wait_sec: 10.0  # 역행 지점 도착 후 재탐색 대기(초) — 지나면 이번 시도 실패

@@ -54,7 +54,8 @@ class FollowerMonitor:
                  seen_sec=1.0,           # 재발견 확정에 필요한 연속 검출 시간
                  max_cluster_width=0.8,  # 사람 크기 상한(m) — 이보다 넓은 덩어리 = 벽
                  range_jump=0.3,         # 이웃 빔 거리차가 이보다 크면 다른 물체로 분리
-                 edge_margin=0.2):       # 문턱 경계 슬라이버 배제 폭(m)
+                 edge_margin=0.2,        # 문턱 경계 슬라이버 배제 폭(m)
+                 scan_timeout=1.0):      # ★ watchdog: 이 시간 넘게 /scan 없으면 판정 보류
         self.clock = clock              # 노드의 clock (sim time 따라감)
         self.cone_half = math.radians(cone_half_deg)
         self.max_range = max_range
@@ -64,16 +65,19 @@ class FollowerMonitor:
         self.max_cluster_width = max_cluster_width
         self.range_jump = range_jump
         self.edge_margin = edge_margin
+        self.scan_timeout = scan_timeout
 
         self._last_seen_t = {'rear': None, 'any': None}
         self._first_seen_t = {'rear': None, 'any': None}
         self._has_scan = False
+        self._last_scan_t = None        # 마지막 /scan 수신 시각 (watchdog 재료)
 
     # -----------------------------------------------------------
     # /scan 콜백에서 호출 — 클러스터를 찾고 구역별 검출 여부를 갱신.
     # -----------------------------------------------------------
     def update(self, scan):
         self._has_scan = True
+        self._last_scan_t = self.clock.now()
         person_like = [c for c in self._find_clusters(scan)
                        if self._is_person_like(c, scan)]
         detected_any = len(person_like) > 0
@@ -149,15 +153,32 @@ class FollowerMonitor:
     # -----------------------------------------------------------
     # mission_node 가 묻는 답 (디바운스 적용) — 인터페이스 불변
     # -----------------------------------------------------------
+    def scan_stale(self):
+        """★ watchdog (07-19): /scan 이 scan_timeout 넘게 안 왔나?
+        시뮬에선 안 끊기지만 실물 USB 라이다는 끊긴다(0623 ttyUSB 씨름 참조).
+        데이터가 죽었는데 마지막 판정을 계속 믿으면 '라이다 사망 = 추종 양호'."""
+        if self._last_scan_t is None:
+            return True     # 아직 한 장도 못 받음 = 신선한 데이터 없음
+        age = (self.clock.now() - self._last_scan_t).nanoseconds / 1e9
+        return age >= self.scan_timeout
+
     def lost(self, zone='rear'):
-        """놓침 확정? — lost_sec 연속 미검출. (GUIDE 는 rear 사용)"""
+        """놓침 확정? — lost_sec 연속 미검출. (GUIDE 는 rear 사용)
+        ★ scan 끊김 중엔 False (판단 보류): 놓침 선언은 비싼 역행(SEARCH_BACK)을
+        일으키므로 데이터 없이 내리면 안 됨 — 대피 유도는 계속하는 게 안전한 쪽."""
+        if self.scan_stale():
+            return False
         if not self._has_scan or self._last_seen_t[zone] is None:
             return False    # 한 번도 본 적 없으면 판단 보류 (시작 직후 오판 방지)
         gap = (self.clock.now() - self._last_seen_t[zone]).nanoseconds / 1e9
         return gap >= self.lost_sec
 
     def visible(self, zone='rear'):
-        """검출 확정? — seen_sec 연속 검출. (SEARCH_BACK 재발견은 zone='any')"""
+        """검출 확정? — seen_sec 연속 검출. (SEARCH_BACK 재발견은 zone='any')
+        ★ scan 끊김 중엔 False: 마지막 프레임의 '보임'을 동결 유지하면
+        라이다가 죽어도 영원히 visible=True 로 남는 구멍 (07-19 watchdog)."""
+        if self.scan_stale():
+            return False
         if self._first_seen_t[zone] is None:
             return False
         held = (self.clock.now() - self._first_seen_t[zone]).nanoseconds / 1e9

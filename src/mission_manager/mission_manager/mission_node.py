@@ -214,7 +214,10 @@ class MissionNode(Node):
             # 실물 RPLIDAR C1 전환 시 1순위 재튜닝 대상이라 yaml 로 노출 (07-07)
             min_points=int(sb.get('min_points', 3)),
             range_jump=float(sb.get('range_jump', 0.3)),
-            edge_margin=float(sb.get('edge_margin', 0.2)))
+            edge_margin=float(sb.get('edge_margin', 0.2)),
+            # ★ watchdog (07-19): /scan 이 이 시간 넘게 끊기면 visible/lost 판정 보류
+            #   (라이다 사망을 '추종 양호'로 오독 방지 — 실물 USB 라이다 대비)
+            scan_timeout=float(sb.get('scan_timeout', 1.0)))
         # ⚠ 시뮬 라이다 QoS = sensor(BestEffort) — 기본 Reliable 구독이면 한 장도 안 옴
         self.create_subscription(LaserScan, '/scan', self.on_scan,
                                  qos_profile_sensor_data)
@@ -279,9 +282,18 @@ class MissionNode(Node):
         fut.add_done_callback(partial(self.on_goal_response, seq))
 
     def on_goal_response(self, seq, future):
-        if seq != self.goal_seq:
-            return
         handle = future.result()
+        if seq != self.goal_seq:
+            # ★ 취소 레이스 수정 (07-19 P0): send_goal 응답이 오기 전에
+            #   cancel_current_goal()(알람·abort·역행)이 먼저 실행되면 그 시점엔
+            #   핸들이 없어 취소할 게 없다. 그 goal 이 뒤늦게 수락되면 Nav2 는
+            #   혼자 주행을 계속 — "abort 했는데 로봇이 안 멈춤"이 되는 구멍.
+            #   → stale 응답은 '무시'가 아니라 '수락됐으면 즉시 취소'.
+            if handle is not None and handle.accepted:
+                self.get_logger().warn(
+                    f'뒤늦게 수락된 이전 목표(seq={seq}) 즉시 취소 (현재 seq={self.goal_seq})')
+                handle.cancel_goal_async()
+            return
         if not handle.accepted:
             self.get_logger().warn('목표 거부됨 → FAULT')
             self.goal_active = False
@@ -293,6 +305,9 @@ class MissionNode(Node):
     def on_result(self, seq, future):
         if seq != self.goal_seq:
             return
+        # 끝난 goal 핸들은 즉시 비움 (07-19): 남겨두면 다음 cancel 이 '이미 끝난
+        # 핸들'을 취소하는 헛손질을 하고, 위 stale-취소 경로와 조합 시 혼동 소지.
+        self._goal_handle = None
         self.goal_active = False
         status = future.result().status
         if status == GoalStatus.STATUS_SUCCEEDED:
@@ -382,6 +397,11 @@ class MissionNode(Node):
             #   (1차 점개수 구현에선 any 가 벽 오탐 탓에 못 쓸 물건이었지만,
             #    클러스터 크기 판별로 any 가 신뢰 가능해져 이 수정이 가능해짐)
             if not self.give_up:
+                # watchdog 발동 중이면 판정 자체가 보류 상태 — 관제가 알아야 할 이상
+                if self.monitor.scan_stale():
+                    self.get_logger().warn(
+                        '⚠ /scan 끊김 — 추종감시 불가 (유도는 계속)',
+                        throttle_duration_sec=5.0)
                 if self.monitor.visible(zone='any'):
                     self.record_last_seen()       # 보이는 동안 위치 갱신
                 elif self.monitor.lost(zone='any'):

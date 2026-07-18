@@ -17,6 +17,12 @@
   <!-- ③단계: /scan 구독(후방감시) + map→base_footprint TF 조회(마지막 목격 지점) -->
   <depend>sensor_msgs</depend>
   <depend>tf2_ros_py</depend>
+  <!-- 07-19 검토 반영 — 실제 import 인데 미선언이던 3종 (Jetson/CI rosdep 재현성):
+       rcl_interfaces = set_parameters 서비스(속도 동적변경) / ament_index_python =
+       waypoints.yaml 기본경로 / python3-yaml = waypoints.yaml 파싱 -->
+  <depend>rcl_interfaces</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

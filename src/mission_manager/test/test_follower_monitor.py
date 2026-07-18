@@ -198,6 +198,51 @@ def test_noise_points_rejected():
     assert not mon.visible('rear')
 
 
+def test_scan_outage_suspends_judgement():
+    """★ watchdog (07-19): /scan 이 끊기면 visible 도 lost 도 아닌 '판단 보류'.
+    수정 전엔 마지막 프레임의 '보임'이 동결돼 라이다가 죽어도 영원히
+    visible=True — GUIDE 가 감시 없이 정상인 척 계속되는 구멍."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+
+    feed(mon, clock, person, 1.5)
+    assert mon.visible('any')                # 정상 검출 중
+    assert not mon.scan_stale()
+
+    clock.advance(5.0)                       # /scan 사망 (update 호출 없음, 5초)
+    assert mon.scan_stale()
+    assert not mon.visible('any')            # ★ '보임' 동결 금지
+    assert not mon.visible('rear')
+    # 5초 > lost_sec(3초) 지만 데이터 없이 '놓침'(=비싼 역행 유발)도 선언 금지
+    assert not mon.lost('any')
+    assert not mon.lost('rear')
+
+
+def test_scan_resume_recovers_detection():
+    """끊겼던 /scan 이 복구되면 판정도 정상 복귀."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+
+    feed(mon, clock, person, 1.5)
+    clock.advance(5.0)                       # 끊김
+    assert not mon.visible('any')
+    feed(mon, clock, person, 1.2)            # 복구 — 다시 검출
+    assert not mon.scan_stale()
+    assert mon.visible('any')
+
+
+def test_never_scanned_is_stale():
+    """시작 직후(한 장도 못 받음)도 stale — 판단 보류 상태로 출발."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    clock.advance(2.0)
+    assert mon.scan_stale()
+    assert not mon.visible('any')
+    assert not mon.lost('any')
+
+
 def test_inf_nan_ranges_safe():
     """실물 라이다의 inf/nan 빔이 섞여도 죽지 않고 정상 판정."""
     clock = FakeClock()

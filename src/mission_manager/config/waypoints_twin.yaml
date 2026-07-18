@@ -46,6 +46,7 @@ search_back:
   min_points: 3
   range_jump: 0.3
   edge_margin: 0.2
+  scan_timeout: 1.0      # ★ watchdog(07-19): /scan 이 이 시간(초) 넘게 끊기면 visible/lost 판정 보류
   max_attempts: 2
   min_fire_dist: 5.0
   refind_wait_sec: 10.0

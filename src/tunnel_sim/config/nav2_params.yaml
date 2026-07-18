@@ -142,6 +142,11 @@ global_costmap:
       #   (rolling 은 원래 '초기 /map 작음' 우회책 — allow_unknown:false 인 지금은
       #    지도 밖 목표가 어차피 거부되므로 rolling 의 존재 이유 없음)
       rolling_window: false
+      # ★ 명시 (07-19 검토 반영): unknown(미탐사) 셀을 unknown 으로 '유지'해야
+      #   planner 의 allow_unknown:false 가 의미를 가짐 — false(기본값)면 unknown 이
+      #   free 로 해석돼 "지도 밖·벽 너머 경로 차단" 정책이 기본값 하나에 매달림.
+      #   지금까지는 실측으로 동작 확인됐지만, 배포판 기본값 의존 대신 명시로 고정.
+      track_unknown_space: true
       footprint: "[ [0.25, 0.20], [0.25, -0.20], [-0.25, -0.20], [-0.25, 0.20] ]"
       # ★ static_layer 복귀 (07-05 심야): obstacle_layer(실시간 스캔)만으론 벽 마킹이
       #   띄엄띄엄 → allow_unknown 과 결합 시 planner 가 벽의 옅은 틈을 뚫고
@@ -154,6 +159,7 @@ global_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
+        track_unknown_space: true   # 레이어 자체 파라미터도 명시 (노드 레벨과 한 세트)
         observation_sources: scan
         scan:
           topic: /scan
