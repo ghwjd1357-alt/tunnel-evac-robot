@@ -73,10 +73,12 @@ class FakeFollower(Node):
         self.declare_parameter('keep_distance', 1.2)  # 로봇과 유지 거리 m
         self.declare_parameter('robot_name', 'tunnel_robot')
         # ★ S2-7 (07-19 Codex §11.6): 음수/NaN 속도·거리는 조용한 오동작 — 시작에 검거
+        #   (F5: bool 은 int 하위 타입 — True 가 1.0 으로 통과하던 구멍도 봉쇄)
         import math as _math
         for pname in ('walk_speed', 'keep_distance'):
             v = self.get_parameter(pname).value
-            if not (isinstance(v, (int, float)) and _math.isfinite(v) and v > 0):
+            if isinstance(v, bool) or not (
+                    isinstance(v, (int, float)) and _math.isfinite(v) and v > 0):
                 raise SystemExit(f'fake_follower: {pname}={v!r} — 양수 유한값이어야 함')
 
         # --- Gazebo 서비스 클라이언트 3종 ---
@@ -116,8 +118,15 @@ class FakeFollower(Node):
         # ① 로봇 위치 조회 (비동기 → 응답 콜백에서 다음 단계)
         req = GetEntityState.Request()
         req.name = self.get_parameter('robot_name').value
+        # ★ F5 (07-19 Codex §12.7): call_async '자체' 예외(Gazebo 사망 순간 등)가
+        #   새면 _pending=True 채로 남아 step() 이 영원히 건너뜀 → 복원 필수
         self._pending = True
-        self.get_cli.call_async(req).add_done_callback(self.on_robot_state)
+        try:
+            self.get_cli.call_async(req).add_done_callback(self.on_robot_state)
+        except Exception as e:
+            self._pending = False
+            self.get_logger().warn(f'상태 조회 호출 예외: {e}',
+                                   throttle_duration_sec=5.0)
 
     def on_robot_state(self, future):
         # ★ S2-7: future.result() 예외가 새면 _pending 처리와 무관하게 콜백이 죽는다
@@ -184,7 +193,13 @@ class FakeFollower(Node):
         req.initial_pose.position.y = y
         req.initial_pose.position.z = 0.5      # 원기둥 중심 (높이 1.0 의 절반)
         self._pending = True
-        fut = self.spawn_cli.call_async(req)
+        try:                                   # F5: 호출 시작 예외도 _pending 복원
+            fut = self.spawn_cli.call_async(req)
+        except Exception as e:
+            self._pending = False
+            self.get_logger().warn(f'스폰 호출 예외: {e}',
+                                   throttle_duration_sec=5.0)
+            return
 
         def done(f):
             self._pending = False
@@ -210,6 +225,11 @@ class FakeFollower(Node):
         fut.add_done_callback(done)
 
     def teleport(self, x, y, yaw):
+        # F5: 서비스가 사라진 순간(Gazebo 재시작) 호출하면 예외 → 이번 이동 생략
+        if not self.set_cli.service_is_ready():
+            self.get_logger().warn('set_entity_state 서비스 미준비 — 이동 생략',
+                                   throttle_duration_sec=5.0)
+            return
         req = SetEntityState.Request()
         req.state.name = 'fake_follower'
         req.state.pose.position.x = x
@@ -227,7 +247,12 @@ class FakeFollower(Node):
                 return
             if ok:
                 self.pos = (x, y)
-        self.set_cli.call_async(req).add_done_callback(done)
+        try:                                   # F5: 호출 시작 예외도 _pending 복원
+            self.set_cli.call_async(req).add_done_callback(done)
+        except Exception as e:
+            self._pending = False
+            self.get_logger().warn(f'이동 호출 예외: {e}',
+                                   throttle_duration_sec=5.0)
 
 
 def main(args=None):

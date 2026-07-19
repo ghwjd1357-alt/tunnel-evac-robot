@@ -30,6 +30,8 @@ case "$MODE" in
     OUT_PGM=tunnel_map_loc
     LOC_PARAMS=slam_params_localization.yaml
     SMOKE_GOAL="3.0 0.0"               # 스모크: 짧은 정상 goal 1개
+    WORLD_FILE=tunnel.world
+    SPAWN_X=-12                        # 스모크 TF-GT 오차 계산용 (map=world+offset)
     ;;
   twin)
     LAUNCH_ARGS=(world:=tunnel_twin.world spawn_x:=-17)
@@ -37,6 +39,8 @@ case "$MODE" in
     OUT_PGM=twin_map_loc
     LOC_PARAMS=slam_params_localization_twin.yaml
     SMOKE_GOAL="12.0 0.0"
+    WORLD_FILE=tunnel_twin.world
+    SPAWN_X=-17
     ;;
   *)
     echo "== FAIL: 알 수 없는 모드 '$MODE' (tunnel|twin 만 허용 — 오타가 정본을 덮어쓰지 않게 즉사)"
@@ -59,8 +63,11 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
-# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-trap cleanup INT TERM
+# ★ S2-4→F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도
+#   스크립트가 다음 단계를 계속 실행 (재검토 중 실측: 늦은 전역 cleanup 이
+#   다음 테스트의 launch 까지 사살)
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
   local qz qw out
@@ -97,9 +104,17 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
+# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효 +
+#   parameter 존재 ≠ lifecycle active → bt_navigator active 까지 확인
 t=0
-until ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "Nav2 기동 타임아웃"
+until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
+  sleep 3; t=$((t+3))
+  [ $t -ge 90 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "Nav2 기동 타임아웃"; }
+done
+# ⚠ "inactive" 에도 'active' 가 부분 문자열로 들어 있음 → 행 시작 앵커 필수
+until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
+  sleep 3; t=$((t+3))
+  [ $t -ge 120 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "bt_navigator 미활성"; }
 done
 sleep 5
 
@@ -146,7 +161,11 @@ ros2 service call /slam_toolbox/serialize_map \
   "{filename: $HOME/ros2_ws/maps/$STAGING}" \
   | grep -q "result=0" || fail "posegraph 저장 실패"
 ls -l "$MAPDIR/$STAGING".* 2>/dev/null || fail "staging posegraph 파일 없음"
-timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/$OUT_PGM" \
+# ★ F3 (Codex §12.5-1): PGM/YAML 도 staging — 기존엔 정본 이름에 직접 써서
+#   스모크 실패 런에서도 사람 확인용 지도가 이미 바뀌어 있었다
+PGM_STAGING="${OUT_PGM}_staging"
+rm -f "$MAPDIR/$PGM_STAGING".*
+timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/$PGM_STAGING" \
   >> "$LOGDIR/mapsaver.log" 2>&1 || echo "  (pgm 저장 실패 — 기록용이라 계속)"
 
 echo "== ⑤ 스모크 검증: 새 지도로 localization 기동 + goal 1개 (약 2분)"
@@ -161,32 +180,98 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   localization_params:="$SMOKE_YAML" "${LAUNCH_ARGS[@]}" \
   > "$LOGDIR/smoke.log" 2>&1 &
 t=0
-until ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
+until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
   sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "스모크 기동 타임아웃 (새 지도로 localization 불가?)"
+done
+until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
+  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "스모크 bt_navigator 미활성"
 done
 sleep 5
 read -r sx sy <<< "$SMOKE_GOAL"
 send_goal "$sx" "$sy" 0.0 120 || fail "스모크 goal($sx,$sy) 미도달 — 새 지도 품질 의심, 정본 유지"
-echo "  ✓ 스모크 통과 (새 지도로 위치추정+주행 정상)"
+# ★ F3 (F1 진단 후속): 스모크는 '도달'만이 아니라 '위치추정 정직성'까지 —
+#   TF(believed)와 gz(ground truth)가 벌어진 지도는 goal 판정 전체를 오염시킨다
+#   (blocked goal 이 성공으로 둔갑하는 류의 사고 예방)
+read -r gx gy < <(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}')
+tfl=$(timeout 6 ros2 run tf2_ros tf2_echo map base_footprint 2>/dev/null \
+      | grep -m1 Translation | sed 's/.*\[//;s/\].*//')
+tf_err=$(python3 -c "
+import sys
+try:
+    tx, ty, _ = [float(v) for v in '''$tfl'''.split(',')]
+    print(round(abs((($gx)-($SPAWN_X))-tx)+abs(($gy)-ty), 3))
+except Exception:
+    print('nan')")
+if [ "$tf_err" = "nan" ]; then
+  echo "  (TF-GT 오차 측정 실패 — 도달 판정만으로 계속)"
+elif python3 -c "exit(0 if $tf_err <= 0.3 else 1)"; then
+  echo "  ✓ 스모크 통과 (도달 + TF-GT 오차 ${tf_err}m ≤ 0.3m)"
+else
+  fail "스모크 위치추정 오차 ${tf_err}m > 0.3m — 새 지도 품질 불량, 정본 유지"
+fi
 
-echo "== ⑥ 승격: 기존 정본 백업 → staging 을 정본으로 (+manifest)"
+echo "== ⑥ 승격: 4파일 transaction (백업 확인 → 일괄 mv → 실패 시 rollback)"
 cleanup
-STAMP=$(date +%y%m%d_%H%M)
-for ext in posegraph data; do
-  [ -f "$MAPDIR/$OUT_POSEGRAPH.$ext" ] && \
-    cp "$MAPDIR/$OUT_POSEGRAPH.$ext" "$MAPDIR/$OUT_POSEGRAPH.bak_$STAMP.$ext"
-  mv "$MAPDIR/$STAGING.$ext" "$MAPDIR/$OUT_POSEGRAPH.$ext" \
-    || fail "승격 실패 ($ext)"
+# ★ F3 (Codex §12.5): ① 초 단위 스탬프 (같은 분 재실행이 백업을 덮던 구멍)
+#   ② 백업 cp 실패 시 승격 중단 (staging 은 남아 재시도 가능)
+#   ③ posegraph/data/pgm/yaml 을 쌍으로 승격, 중간 실패면 이미 옮긴 것 원복
+#      (첫 mv 성공 + 둘째 실패 = 세대가 다른 파일 쌍 방지)
+STAMP=$(date +%y%m%d_%H%M%S)
+SRCS=("$STAGING.posegraph" "$STAGING.data")
+DSTS=("$OUT_POSEGRAPH.posegraph" "$OUT_POSEGRAPH.data")
+BAKS=("$OUT_POSEGRAPH.bak_$STAMP.posegraph" "$OUT_POSEGRAPH.bak_$STAMP.data")
+if [ -f "$MAPDIR/$PGM_STAGING.pgm" ] && [ -f "$MAPDIR/$PGM_STAGING.yaml" ]; then
+  SRCS+=("$PGM_STAGING.pgm" "$PGM_STAGING.yaml")
+  DSTS+=("$OUT_PGM.pgm" "$OUT_PGM.yaml")
+  BAKS+=("$OUT_PGM.bak_$STAMP.pgm" "$OUT_PGM.bak_$STAMP.yaml")
+else
+  echo "  (pgm staging 없음 — posegraph/data 만 승격)"
+fi
+# 백업 (전 파일 성공해야 승격 개시)
+for i in "${!DSTS[@]}"; do
+  if [ -f "$MAPDIR/${DSTS[$i]}" ]; then
+    cp "$MAPDIR/${DSTS[$i]}" "$MAPDIR/${BAKS[$i]}" \
+      || fail "백업 실패(${DSTS[$i]}) — 승격 중단 (정본·staging 무손상)"
+  fi
 done
+# 일괄 승격 + 실패 시 rollback
+rollback() {
+  echo "  ★ 승격 중 실패 — 이미 옮긴 파일 원복"
+  local j
+  for j in $(seq 0 $(($1 - 1))); do
+    [ -f "$MAPDIR/${BAKS[$j]}" ] && cp "$MAPDIR/${BAKS[$j]}" "$MAPDIR/${DSTS[$j]}"
+  done
+}
+for i in "${!DSTS[@]}"; do
+  mv "$MAPDIR/${SRCS[$i]}" "$MAPDIR/${DSTS[$i]}" \
+    || { rollback "$i"; fail "승격 실패(${SRCS[$i]}) — 정본은 rollback 됨"; }
+done
+# yaml 내부 image: 경로가 staging 이름을 가리키므로 정본 이름으로 정정
+[ -f "$MAPDIR/$OUT_PGM.yaml" ] && sed -i "s|$PGM_STAGING|$OUT_PGM|" "$MAPDIR/$OUT_PGM.yaml"
+# ★ F3 (Codex §12.5-5·6): manifest 에 재현에 필요한 전부 —
+#   dirty tree 면 commit 만으로 생성 과정 재현 불가함을 명시
 {
   echo "generated: $(date -Iseconds)"
   echo "mode: $MODE"
   echo "git_commit: $(git -C ~/ros2_ws rev-parse HEAD 2>/dev/null || echo unknown)"
-  echo "smoke: goal($SMOKE_GOAL) SUCCEEDED"
-  for ext in posegraph data; do
-    echo "sha256($OUT_POSEGRAPH.$ext): $(sha256sum "$MAPDIR/$OUT_POSEGRAPH.$ext" | cut -d' ' -f1)"
+  echo "git_dirty_files: $(git -C ~/ros2_ws status --porcelain 2>/dev/null | wc -l)"
+  echo "smoke: goal($SMOKE_GOAL) SUCCEEDED, tf_gt_err=${tf_err}m"
+  for f in "${DSTS[@]}"; do
+    echo "sha256($f): $(sha256sum "$MAPDIR/$f" | cut -d' ' -f1)"
+  done
+  for f in "src/tunnel_sim/config/nav2_params.yaml" \
+           "src/tunnel_sim/config/$LOC_PARAMS" \
+           "src/tunnel_sim/config/slam_params.yaml" \
+           "src/tunnel_sim/worlds/$WORLD_FILE" \
+           "src/tunnel_sim/urdf/robot.urdf"; do
+    echo "sha256($f): $(sha256sum "$HOME/ros2_ws/$f" 2>/dev/null | cut -d' ' -f1)"
   done
 } > "$MAPDIR/$OUT_POSEGRAPH.manifest.txt"
 echo "  ✓ 정본 승격 + manifest: $MAPDIR/$OUT_POSEGRAPH.manifest.txt (백업: .bak_$STAMP)"
 
 echo "== 완료 — localization 모드 재료 준비 끝 (스모크 검증됨)"
+# ★ F1 (07-19): 스모크(정상 goal+TF 오차)를 통과한 지도가 부정 회귀에서 검거된
+#   실전 사례 — 새 지도의 위치추정 오차는 '실패 goal 회복행동 이후'에만 커져서
+#   blocked goal 이 believed 위치로 오성공했다. 승격 = 수락 아님.
+echo "⚠ 승격 후 필수 (T자): bash tools/regression_negative.sh 통과까지가 지도 수락"
+echo "   (twin 은 mission_e2e.sh twin — 부정 회귀 twin 판은 백로그)"

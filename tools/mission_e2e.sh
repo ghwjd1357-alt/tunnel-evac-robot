@@ -65,7 +65,9 @@ cleanup() {
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
 # ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-trap cleanup INT TERM
+# ★ F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도 다음 단계 계속 실행
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 state() {  # 현재 /mission_state 값 1개 읽기 (2Hz 발행이라 3초면 충분)
   timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \
@@ -73,10 +75,23 @@ state() {  # 현재 /mission_state 값 1개 읽기 (2Hz 발행이라 3초면 충
 }
 
 wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재시도는 통과시킴
-  local t=0 s
+  # ★ F7 방어 (07-19 실측): CLI echo 가 240초 내내 빈값('')인 flake —
+  #   미션 노드 로그는 전 상태 정상 진행 = 코드 아닌 ros2 CLI/데몬 결함.
+  #   빈 읽기 5연속(≈15s)이면 daemon 재시작 1회로 자가 복구 시도.
+  local t=0 s empty=0 kicked=0
   while [ "$t" -lt "$2" ]; do
     s=$(state)
     if [ "$s" = "$1" ]; then echo "  ✓ $1 도달 (${t}s)"; return 0; fi
+    if [ -z "$s" ]; then
+      empty=$((empty+1))
+      if [ "$empty" -ge 5 ] && [ "$kicked" = 0 ]; then
+        echo "  (⚠ /mission_state 빈 읽기 ${empty}연속 — ros2 daemon 재시작으로 자가 복구 시도)"
+        ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+        kicked=1
+      fi
+    else
+      empty=0
+    fi
     sleep 3; t=$((t+3))
   done
   fail "$1 대기 타임아웃(${2}s), 마지막 상태='$(state)'"
@@ -91,8 +106,14 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
 t=0
-until ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
+# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
+until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
   sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "Nav2 기동 타임아웃"
+done
+# F4 (Codex §12.10): parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인
+# ⚠ "inactive" 에 'active' 가 부분 문자열로 포함 → ^앵커 필수
+until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
+  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
 done
 sleep 5
 

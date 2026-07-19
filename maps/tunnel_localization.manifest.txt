@@ -1,6 +1,11 @@
-generated: 2026-07-19T18:33:14+09:00
+generated: 2026-07-19T22:05:59+09:00
 mode: tunnel
-git_commit: 791993f35b260858a8daacf04dac19b9b8a87102
-smoke: goal(3.0 0.0) SUCCEEDED
-sha256(tunnel_localization.posegraph): 49fcbd389b0b6e760117b9f333577bdc81573bba06f61722757e768be5af721a
-sha256(tunnel_localization.data): fa606fb87d39485d3a8d1f0575183476ea8915d0dd6b07bac28255890a874669
+note: F1 진단(07-19)으로 18:32 제작본 승격 취소 — 회복행동 후 위치추정 오차가
+  goal tolerance 를 삼켜 blocked goal 오성공 (regression_negative 3/3 재현,
+  구 지도는 3/3 정상). 검증된 07-06 세대(bak_260719_1833)로 원복.
+  불량본 보존: tunnel_localization.bak_rej260719_1832.* (forensic)
+git_commit: 21b757d667e2e9e883632bb834a33381a6110691
+restored_from: tunnel_localization.bak_260719_1833
+acceptance: regression_negative full PASS (blocked ABORTED, 대조군 0.083m)
+sha256(tunnel_localization.posegraph): a1010ff47ed5931871284f5d47ac1864e61729e574d4e0043af467a8756054cc
+sha256(tunnel_localization.data): e22f8513355d2ea63eeca64a1a47da9bfa2073889ed0b0bd44dac3fba4f0557d

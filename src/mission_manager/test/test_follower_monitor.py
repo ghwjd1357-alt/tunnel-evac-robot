@@ -647,3 +647,43 @@ def test_validate_graph_actual_yaml_files_pass():
         with open(os.path.join(base, fname)) as f:
             wp = yaml.safe_load(f)
         assert validate_waypoints(wp) == [], f'{fname} 검사 실패'
+
+
+# ============================================================
+# ★ F6 (07-19 Codex §12.4): 정수·상한·상호관계 검증
+# ============================================================
+def test_validate_float_max_attempts_rejected():
+    """max_attempts=0.5 — '반 번 시도'는 무의미, 정수 강제."""
+    wp = _valid_wp()
+    wp['search_back']['max_attempts'] = 0.5
+    assert any('max_attempts(정수 아님' in m for m in validate_waypoints(wp))
+
+
+def test_validate_float_min_points_rejected():
+    """min_points=0.5 — '반 개 점' 클러스터 기준은 무의미, 정수 강제."""
+    wp = _valid_wp()
+    wp['search_back']['min_points'] = 0.5
+    assert any('min_points(정수 아님' in m for m in validate_waypoints(wp))
+
+
+def test_validate_zero_min_points_rejected():
+    """min_points=0 — 모든 프레임이 '보임' 판정되는 무의미 기준."""
+    wp = _valid_wp()
+    wp['search_back']['min_points'] = 0
+    assert any('min_points(최소 1 미만' in m for m in validate_waypoints(wp))
+
+
+def test_validate_cone_over_180_rejected():
+    """cone_half_deg=999 — 반각이 180°를 넘으면 부채꼴 정의가 깨짐."""
+    wp = _valid_wp()
+    wp['search_back']['cone_half_deg'] = 999.0
+    assert any('cone_half_deg(0~180 범위 밖' in m for m in validate_waypoints(wp))
+
+
+def test_validate_edge_margin_ge_detect_range_rejected():
+    """edge_margin >= detect_range — 판정 존이 0 이 되어 '항상 놓침'."""
+    wp = _valid_wp()
+    wp['search_back']['detect_range'] = 2.5
+    wp['search_back']['edge_margin'] = 3.0
+    assert any('edge_margin' in m and 'detect_range' in m
+               for m in validate_waypoints(wp))
