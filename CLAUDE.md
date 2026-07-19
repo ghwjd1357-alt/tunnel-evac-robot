@@ -74,7 +74,7 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 | 입력 | `/scan` | LaserScan | RPLIDAR C1 |
 | 입력 | `/odom` | Odometry | 구동부 Teensy |
 | 입력 | `/imu/data` | Imu | 구동부 Teensy |
-| 입력 | `/detections` | 커스텀 (역할 B와 합의) | 역할 B (YOLO). ★ 계약 원칙 정밀화 (07-19 개정, 마스터플랜 §7.4): `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** (배포 후 자동 호환 아님) → 예약필드 남발 대신 **V1 최소 계약 명확 고정**(header·class·confidence + 책임경계 택1: 2D bbox / camera-frame 3D — "position" 좌표계 명시 필수), 확장은 V2 별도 메시지. map 좌표 생성은 역할 A Perception Adapter 책임. 내 쪽은 **funnel 구조**(콜백 1개→내부 dict)로 수신 (→ 0705_실차전_전략.md §1) |
+| 입력 | `/detections` | 커스텀 (역할 B와 합의) | 역할 B (YOLO). ★ 계약 원칙 정밀화 (07-19 개정, 마스터플랜 §7.4): `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** (배포 후 자동 호환 아님) → 예약필드 남발 대신 **V1 최소 계약 명확 고정**, 확장은 V2 별도 메시지. ★ **책임경계 (b) 확정 (07-20)**: YOLO 측이 depth 결합까지 담당해 **camera-frame 3D position** 제공 (V1 = header·class_name·confidence·bbox·position — frame 은 camera optical frame, 단위 m, stamp = 촬영시각). map 좌표 생성·검증은 역할 A Perception Adapter 책임. 계약 정본 = `~/Desktop/YOLO_탐지연동_합의사항.md` (구 `역할B_detection_토픽계약_전달.md` 대체). 내 쪽은 **funnel 구조**(콜백 1개→내부 dict)로 수신 (→ 0705_실차전_전략.md §1) |
 | 출력 | `/cmd_vel` | Twist | Nav2 → Teensy |
 | 출력 | `/map`, `/tf` | — | SLAM |
 
@@ -91,7 +91,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 
 ---
 
-## 6. 현재 진행 상태 (2026-07-07 갱신 — ★ 2F 시뮬 완성 + localization 운영 모드. §6은 압축본, 상세는 현황.md / **할 일 정본 = 0707_현황.md §2**)
+## 6. 현재 진행 상태 (2026-07-20 갱신 — ★ 시뮬 녹색 기준선 + 팀 전달 문서 완료, 다음 = SpeedManager. §6은 압축본, 상세는 현황.md / **다음 작업 정본 = 0719_현황.md §18 + 마스터플랜 §7.3**)
 
 ### 상태 한눈에
 | 항목 | 상태 |
@@ -141,6 +141,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - ✅ **F 묶음 — Codex §12 최종 재검토 8건 전량 반영 (07-19 심야 3차, 동결 게이트 재도전)** — ① ★**F1 blocked goal SUCCEEDED 원인 분리**(release blocker): 관측 6종 프로브+현재/백업 posegraph 교차 실행으로 재현 — 18:32 승격본은 실패 goal 회복행동 후 위치추정 오차(TF-GT 0.2~0.35m)가 tolerance(0.15)를 삼켜 물리적 도달 불가 goal 이 believed 위치로 오성공(상자 우회 실측·costmap 마킹 정상 = 지도 품질 문제). **조치: 승격 취소 → 07-06 세대 원복**(불량본 forensic 보존) + ★**지도 수락 기준 개정 — 스모크 통과 ≠ 수락, T자 지도 갱신은 regression_negative 통과까지**(자산 교체도 부정 회귀 대상 — S2 때 지도 교체 후 negative 안 돌린 게 잠복 경로). ⚠관측 함정: 이동 중 gz vs tf2_echo 나이브 비교 = 샘플링 시차(1~4s)가 가짜 드리프트 — 정지 스냅샷만 신뢰. ② **F2 GUIDE 저속 '보장'**: GATHER→GUIDE 전환을 저속 적용 '성공 응답' 콜백으로 이동(응답 전 = GATHER 정지 대기), 3회 실패/call_async 예외 = goal 취소+FAULT. **서비스 미준비 지속은 현재 GATHER 무기한 안전대기이며 최종 정책은 SpeedManager에서 확정**, `_speed_synced` 성공 콜백에서만 True, 늦은 응답의 FAULT 덮어쓰기 상태 가드. ③ **F3 make_map 4파일 transaction**: PGM/YAML 도 staging·백업 확인·일괄 mv+중간 실패 rollback(격리 하네스 검증)·초 단위 스탬프·manifest 확장(dirty tree·설정 5종 해시)·스모크에 TF-GT ≤0.3m. ④ **F4**: 셸 6종 trap `exit 130/143`(중단 후 계속 실행 봉쇄) + readiness `timeout 8`+bt_navigator lifecycle `^active`(⚠ "inactive" 부분매칭 — 앵커 필수). ⑤ F5 fake_follower `call_async` 시작 예외+`_pending` 복원. ⑥ F6 validator 정수·상한·상호관계(max_attempts 0.5·cone 999·edge_margin≥detect_range 검거)+"전 항목" 표현 정정. pytest 81→**93**. 정본 = **0719_현황.md §16**
 - ✅ **G 묶음 + ★3자 수렴 구조계획 (07-20)** — Codex §13 재검토 4건 봉합: **G1** GUIDE '실패' 응답 stale 가드(성공만 가드하던 비대칭 — reset 후 유령 FAULT 봉쇄, 토큰 정석은 SpeedManager 때) · **G2** 지도 승격을 `tools/map_promote.sh` fail-closed transaction 소도구로(★최초 생성 rollback=부재 복구·staging 보존, 격리 하네스 `test_map_promote.sh` 8검사·pgm/TF-GT 측정실패=승격 차단·yaml 경로 staging 정정) · **G3** T자 승격 전 staging 지도로 negative **자동** 수락 게이트 · **G4** readiness 를 SECONDS 실경과시간 상한으로(sleep 누적은 timeout 대기 미산입 → 90초가 실제 ~330초) + action server 확인. pytest 93→**96**·회귀 4종 전부 PASS. ★같이 확정: **마스터플랜 §7 개정 2** = 동결 2단(platform-core-freeze / mission-logic-RC / mission-v1-freeze 는 실측 후) + 순서 12단계(최종 시나리오는 실차 후 — 가상 시나리오는 실차 검증 대본으로 계속 사용) + Perception Adapter 구조(/alarm 신뢰경계는 FireEvent 수신부로 승격) + `.msg` V1 최소 계약 원칙(§4 개정). 정본 = **0719_현황.md §17**
 - ✅ **ⓒ 중간보고서 완료 (07-20, 사용자 확인)** — 구조 분리보다 마감물을 먼저 끝내는 마스터플랜 §7.2 순서 ③ 종료.
+- ✅ **팀 전달 문서 3종 + 역할 B 책임경계 (b) 확정 (07-20)** — Codex 작성·Claude 교차검증(수치·코드조각 전수 대조, 발견 4건 반영: YOLO 행 모순 통일·구 전달본 대체 배너·코드 "발췌" 표기·/odom QoS 미스매치 경고). `~/Desktop/`의 ①`미션노드_개발현황_및_실차이후계획.md`(팀 전체 공유용 현황+R0~R8 계획) ②`TEENSY_실차연동_합의사항.md`(구동부 합의표: 토픽·프레임·QoS·watchdog 0.5s·E-stop·R0~R3 절차·최종 인수 기준) ③`YOLO_탐지연동_합의사항.md`(역할 B V1 계약 정본 — §4 개정 반영). ★핵심 결정: **역할 B 책임경계 = (b) camera-frame 3D**(YOLO 측 depth 결합, §4·마스터플랜 §7.4 동기 갱신).
 - ▶ **다음 — platform-core 구조 분리 1/3, SpeedManager 한 묶음만:** `0719_실차전환_마스터플랜.md §7.3-1` + `0719_현황.md §18.3~18.4` + `CODEX 현황/0719검토현황.md §14.3`을 읽고 시작. generation/token·3회 재시도·stale 성공/실패 폐기뿐 아니라 **현재 desired speed reconcile**까지 Manager 책임. 장기 service-unready 정책도 확정하고 guide↔sync↔restore 역전·reset/abort 중 in-flight 공격 테스트를 고정. **이번 묶음에 GoalManager·FSM·인지 기능·make_map 실런을 섞지 않는다.** 완료 게이트 = pytest→colcon→negative→3goals→mission→abort 전량 PASS 후 한 커밋+push. 다음은 그 뒤 GoalManager. 병렬: 역할 B V1 계약 미팅 / micro-ROS 구동부 대기.
 
 ### 런치/실행법
@@ -224,9 +225,12 @@ Gazebo 플러그인이 만드는 "가짜 `/scan`·`/odom`·`/imu`"가 실물과 
 | `0719_현황.md` | `~/Desktop/개발현황/` | ★ 외부 검토 교차검증·반영 정본. §17 G 봉합·3자 구조계획, **§18 Codex 최종 승인과 다음 SpeedManager 인계조건** 포함 |
 | `CODEX 현황/0719검토현황.md` | `~/Desktop/개발현황/` | Codex 독립 재검토 원문. **§14 = G 묶음·마스터플랜 개정 2 승인 및 SpeedManager 잔여 완료조건** |
 | `0719_실차전환_마스터플랜.md` | `~/Desktop/개발현황/` | ★ 전수검토 이후 → 실차 이식 → 최종 시연 전 과정 정본. **§7.2 12단계, §7.3 구조 분리 순서가 현재 정본 — 다음은 §7.3-1 SpeedManager** |
-| `0707_학습로드맵.md` | `~/Desktop/개발현황/` | ★ 학습 커리큘럼 정본 (0705 §9 상속): **개발 시간순 11장 완주형** (URDF→첫지도→Nav2→EKF→진단→오돔주입→미션①②③→품질→운영완성→재검토), **복선→번복 추적 표 + 장별 새 세션용 프롬프트+통과 질문** 포함 |
+| `학습로드맵.md` (+`학습진도.md`) | `~/Desktop/개발현황/` | ★ 학습 커리큘럼 정본 (0705 §9 상속): **개발 시간순 11장 완주형** (URDF→첫지도→Nav2→EKF→진단→오돔주입→미션①②③→품질→운영완성→재검토), **복선→번복 추적 표 + 장별 새 세션용 프롬프트+통과 질문** 포함 |
 | `0718_구동부_배선맵핑_검증절차.md` | `~/Desktop/개발현황/` | 구동부 전달본: Teensy 4.1 핀맵 + 검증 2~5단계 + 역할 A 검토 메모 |
 | `0718_관제시스템.md` | `~/Desktop/개발현황/` | ★ 관제 데스크톱 설계 정본: 스택(웹+rosbridge)·구조도 개정본·로드맵 C1~C6·토픽 계약 |
+| **팀 전달 3종** (07-20) | `~/Desktop/` | ①`미션노드_개발현황_및_실차이후계획.md` ②`TEENSY_실차연동_합의사항.md` ③`YOLO_탐지연동_합의사항.md` — 팀원 공유용 정본 (Codex 작성, Claude 교차검증 완료) |
+| `역할B_detection_토픽계약_전달.md` | `~/Desktop/개발현황/` | (구) 07-08 전달본 — **YOLO_탐지연동_합의사항.md 로 대체됨** (역사 기록용) |
+| `0720_AI공통개발환경_개편_Claude확인요청.md` | `~/Desktop/개발현황/` | AI 공통 문서구조(AGENTS.md+docs/) 개편안 초안 — **Claude 검토 대기 중인 임시 문서** |
 | `NVIDIA_GPU_복구_작업브리프.md` | `~/setup-tasks/` | GPU 복구 완료 + 재빌드 레시피(`nv_rebuild_recipe.sh` 동봉) |
 | `스피커_SOF_복구_진행로그.md` | `~/setup-tasks/` | 내장 스피커 SOF 펌웨어 복구 기록 |
 
