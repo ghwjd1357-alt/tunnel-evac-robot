@@ -1056,12 +1056,24 @@ class MissionNode(Node):
                     self.get_logger().info('집결대기 종료 → GUIDE (저속 유도 시작)')
                     self.state = State.GUIDE
                 self._guide_pending = False
-        elif attempt < 3:
-            self.get_logger().warn(
-                f'속도 변경 실패({reason}) — 재시도 {attempt + 1}/3')
-            self.set_nav_speed(v, attempt + 1, purpose)
         else:
-            self._speed_final_fail(v, purpose, reason)
+            # ★ G1 (Codex §13.3): 실패 경로에도 stale 가드 — 성공 경로만 가드하던
+            #   비대칭 종결. reset/abort 로 상태가 바뀐 뒤 도착한 이전 세대 guide
+            #   실패 응답이 재시도→최종 FAULT 로 이어지면, 성공한 reset 뒤 PATROL 이
+            #   유령 FAULT 로 뒤집힌다 (Codex 축소 재현: fault_calls=1).
+            #   정석(요청 세대 토큰)은 SpeedManager 추출 때 — 마스터플랜 §7.3-1.
+            if purpose == 'guide' and not (
+                    self._guide_pending and self.state == State.GATHER):
+                self.get_logger().warn(
+                    f'늦은 guide 속도 실패 응답 무시 — 상태 변경됨'
+                    f'(현재 {self.state.name}), 재시도·FAULT 안 함')
+                return
+            if attempt < 3:
+                self.get_logger().warn(
+                    f'속도 변경 실패({reason}) — 재시도 {attempt + 1}/3')
+                self.set_nav_speed(v, attempt + 1, purpose)
+            else:
+                self._speed_final_fail(v, purpose, reason)
 
     def _speed_final_fail(self, v, purpose, reason):
         """속도 변경 3회 최종 실패 — purpose 별 안전 조치 (F2)."""

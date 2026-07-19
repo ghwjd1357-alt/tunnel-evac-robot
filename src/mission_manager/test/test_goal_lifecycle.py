@@ -421,3 +421,48 @@ def test_sync_final_failure_sets_cooldown_not_synced():
     assert not node._speed_synced
     assert not node._speed_sync_inflight          # 재요청 허용
     assert node._speed_sync_cooldown > 0
+
+
+# ============================================================
+# ★ G1 (07-19 Codex §13.3): 실패 응답에도 stale 가드 — 성공만 가드하던 비대칭 종결
+# ============================================================
+def test_guide_gate_late_failure_after_reset_ignored():
+    """Codex 축소 재현 봉쇄: guide 요청 중 reset(PATROL) → 늦은 '실패' 응답은
+    재시도도 FAULT 도 일으키면 안 됨 (기존엔 fault_calls=1 실측)."""
+    node = guide_gate_node()
+    node._guide_pending = True
+    node.set_nav_speed(0.12, purpose='guide')
+    node.state = State.PATROL                     # 관제 reset 이 먼저 성공
+    node._guide_pending = False
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 이전 세대 늦은 실패
+    assert len(node._speed_calls) == 1            # 재시도 안 함
+    assert node._faults == []                     # 유령 FAULT 없음
+    assert node._cancels == []
+    assert node.state == State.PATROL             # reset 결과 유지
+    assert any('늦은 guide' in m for m in node._logs)
+
+
+def test_guide_gate_late_third_failure_after_reset_no_final_fault():
+    """재시도 2회가 GATHER 중 이미 소모된 뒤 reset — 3회째 늦은 실패가
+    _speed_final_fail(cancel+FAULT)로 떨어지면 안 됨."""
+    node = guide_gate_node()
+    node._guide_pending = True
+    node.set_nav_speed(0.12, purpose='guide')
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 1차 실패 (GATHER 중)
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 2차 실패 (GATHER 중)
+    assert len(node._speed_calls) == 3
+    node.state = State.PATROL                     # reset 성공
+    node._guide_pending = False
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 3회째는 reset 후 도착
+    assert node._faults == []                     # 최종 FAULT 강등 없음
+    assert node._cancels == []
+    assert node.state == State.PATROL
+
+
+def test_guide_gate_failure_while_still_gather_retries():
+    """★역회귀 앵커: 상태가 그대로(GATHER+pending)면 기존 재시도 동작 유지."""
+    node = guide_gate_node()
+    node._guide_pending = True
+    node.set_nav_speed(0.12, purpose='guide')
+    node._speed_cb(fake_speed_response(False, 'rejected'))
+    assert len(node._speed_calls) == 2            # 정상 재시도는 그대로
