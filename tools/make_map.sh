@@ -109,15 +109,18 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
 echo "== ② Nav2 활성화 대기 (최대 90초)"
 # ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효 +
 #   parameter 존재 ≠ lifecycle active → bt_navigator active 까지 확인
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; t=$((t+3))
-  [ $t -ge 90 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "Nav2 기동 타임아웃"; }
+  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "Nav2 기동 타임아웃"; }
 done
 # ⚠ "inactive" 에도 'active' 가 부분 문자열로 들어 있음 → 행 시작 앵커 필수
 until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; t=$((t+3))
-  [ $t -ge 120 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "bt_navigator 미활성"; }
+  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && { grep -iE "lifecycle|Failed|Error" "$LOGDIR/launch.log" | tail -5; fail "bt_navigator 미활성"; }
+done
+# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
+#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
+until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
+  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
 done
 sleep 5
 
@@ -192,12 +195,17 @@ grep -q "$STAGING" "$SMOKE_YAML" || fail "스모크 파라미터 생성 실패 (
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   localization_params:="$SMOKE_YAML" "${LAUNCH_ARGS[@]}" \
   > "$LOGDIR/smoke.log" 2>&1 &
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "스모크 기동 타임아웃 (새 지도로 localization 불가?)"
+  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "스모크 기동 타임아웃 (새 지도로 localization 불가?)"
 done
 until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "스모크 bt_navigator 미활성"
+  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "스모크 bt_navigator 미활성"
+done
+# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
+#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
+until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
+  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
 done
 sleep 5
 read -r sx sy <<< "$SMOKE_GOAL"

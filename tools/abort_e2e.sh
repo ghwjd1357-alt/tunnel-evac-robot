@@ -56,36 +56,41 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   "${EXTRA_ARGS[@]}" > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 # ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
 until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "Nav2 기동 타임아웃"
+  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
 done
 # F4 (Codex §12.10): parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인
 # ⚠ "inactive" 에 'active' 가 부분 문자열로 포함 → ^앵커 필수
 until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
+  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
+done
+# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
+#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
+until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
+  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
 done
 sleep 5
 
 echo "== ③ 미션 노드 기동 (추종자 불필요 — 순찰 주행만 쓰면 됨)"
 nohup ros2 run mission_manager mission_node --ros-args -p use_sim_time:=true \
   > "$LOGDIR/mission.log" 2>&1 &
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 until [ "$(state)" = "PATROL" ]; do
-  sleep 3; t=$((t+3)); [ $t -ge 30 ] && fail "PATROL 대기 타임아웃"
+  sleep 3; [ $((SECONDS-T0)) -ge 30 ] && fail "PATROL 대기 타임아웃"
 done
 echo "  ✓ PATROL 진입"
 
 echo "== ④ 주행 확인 대기 — 스폰(-12,0)에서 0.5m 이상 이동해야 '주행 중 abort'"
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 while true; do
   read -r rx ry < <(robot_xy)
   moved=$(python3 -c "import math; print(math.hypot($rx+12.0, $ry-0.0))")
   if python3 -c "exit(0 if $moved > 0.5 else 1)"; then
     echo "  ✓ 주행 중 (이동 ${moved}m, world ($rx, $ry))"; break
   fi
-  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "120초 내 주행 시작 안 함 (이동 ${moved}m)"
+  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "120초 내 주행 시작 안 함 (이동 ${moved}m)"
 done
 
 echo "== ⑤ ★ abort 발사"
@@ -93,9 +98,9 @@ ros2 topic pub --times 2 -w 1 /mission_cmd std_msgs/msg/String \
   "{data: abort}" >/dev/null 2>&1
 
 echo "== ⑥ 상태 = FAULT 확인"
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 until [ "$(state)" = "FAULT" ]; do
-  sleep 2; t=$((t+2)); [ $t -ge 20 ] && fail "abort 후 FAULT 미진입 (상태='$(state)')"
+  sleep 2; [ $((SECONDS-T0)) -ge 20 ] && fail "abort 후 FAULT 미진입 (상태='$(state)')"
 done
 echo "  ✓ FAULT 진입"
 

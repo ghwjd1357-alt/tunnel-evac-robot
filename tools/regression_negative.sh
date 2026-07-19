@@ -97,14 +97,19 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
-t=0
+T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
 # ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
 until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "Nav2 기동 타임아웃"
+  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
 done
 # F4: parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인 ("inactive" 오매칭 방지 ^앵커)
 until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; t=$((t+3)); [ $t -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
+  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
+done
+# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
+#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
+until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
+  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
 done
 sleep 5   # 지도/TF 안정화
 
