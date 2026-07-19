@@ -74,7 +74,7 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 | 입력 | `/scan` | LaserScan | RPLIDAR C1 |
 | 입력 | `/odom` | Odometry | 구동부 Teensy |
 | 입력 | `/imu/data` | Imu | 구동부 Teensy |
-| 입력 | `/detections` | 커스텀 (역할 B와 합의) | 역할 B (YOLO). ★ 계약 시 "필드 **추가** 가능(기존 필드 변경 금지)" 원칙 선합의 — 후보: `mobility`(관절추정 거동판별). 내 쪽은 **funnel 구조**(콜백 1개→내부 dict, `mobility:'unknown'` 자리 예약)로 수신 (→ 0705_실차전_전략.md §1) |
+| 입력 | `/detections` | 커스텀 (역할 B와 합의) | 역할 B (YOLO). ★ 계약 원칙 정밀화 (07-19 개정, 마스터플랜 §7.4): `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** (배포 후 자동 호환 아님) → 예약필드 남발 대신 **V1 최소 계약 명확 고정**(header·class·confidence + 책임경계 택1: 2D bbox / camera-frame 3D — "position" 좌표계 명시 필수), 확장은 V2 별도 메시지. map 좌표 생성은 역할 A Perception Adapter 책임. 내 쪽은 **funnel 구조**(콜백 1개→내부 dict)로 수신 (→ 0705_실차전_전략.md §1) |
 | 출력 | `/cmd_vel` | Twist | Nav2 → Teensy |
 | 출력 | `/map`, `/tf` | — | SLAM |
 
