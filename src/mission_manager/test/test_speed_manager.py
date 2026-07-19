@@ -1,0 +1,445 @@
+# -*- coding: utf-8 -*-
+"""
+test_speed_manager.py — 속도 변경 비동기 수명주기 공격 테스트 (07-20 구조 분리 1/3)
+============================================================
+[무엇을 잡나 — 0719_현황.md §18.3 완료조건 5]
+  guide↔sync↔restore 응답 순서 역전, reset/abort 중 in-flight 요청,
+  늦은 성공·실패, 3회 실패, call_async 예외, 장기 service-unready,
+  그리고 reconcile 자체의 stale 방지(최신 세대만 유효 — 핑퐁 금지).
+
+[이관 이력]
+  기존 test_goal_lifecycle.py 의 S1-5·F2·G1 속도 테스트 12개 시나리오를
+  SpeedManager 이음새로 이관 — 동작 불변 앵커로 전부 유지.
+
+[테스트 기법]
+  MissionNode.__new__ 로 껍데기 노드를 만들고(무거운 __init__ 우회 — §12),
+  진짜 SpeedManager 를 가짜 서비스 클라이언트·손으로 돌리는 시계와 함께
+  붙인다. 응답 콜백을 임의 순서로 주입해 실서비스로는 재현 불가능한
+  ms 단위 레이스를 결정적으로 재현한다.
+"""
+
+import types
+
+from mission_manager.mission_node import MissionNode, State
+from mission_manager.speed_manager import SpeedManager
+
+
+# ============================================================
+# 가짜 부품
+# ============================================================
+def ok_resp():
+    res = types.SimpleNamespace(results=[
+        types.SimpleNamespace(successful=True, reason='')])
+    return types.SimpleNamespace(result=lambda: res)
+
+
+def fail_resp(reason='rejected'):
+    res = types.SimpleNamespace(results=[
+        types.SimpleNamespace(successful=False, reason=reason)])
+    return types.SimpleNamespace(result=lambda: res)
+
+
+def make_env(ready=True, state=State.GATHER, timeout=30.0):
+    """껍데기 MissionNode + 진짜 SpeedManager + 가짜 서비스/시계.
+
+    반환 node 에 계측 필드:
+      node._logs / node._faults / node._cancels
+      node._calls  = call_async 로 나간 속도값 리스트 (요청 순서)
+      node._cbs    = (속도값, 응답콜백) 리스트 — 임의 순서 주입용
+      node._ready  = {'ready': bool} 서비스 준비 토글
+      node._clock  = {'t': float} monotonic 시계 (손으로 전진)
+    """
+    node = MissionNode.__new__(MissionNode)
+    logs = []
+    logger = types.SimpleNamespace(
+        warn=lambda msg, **kw: logs.append(msg),
+        info=lambda msg, **kw: logs.append(msg),
+        error=lambda msg, **kw: logs.append(msg))
+    node.get_logger = lambda: logger
+    node._logs = logs
+    node.state = state
+    node._guide_pending = False
+    node._faults = []
+    node._cancels = []
+    node.cancel_current_goal = lambda: node._cancels.append(1)
+    node.enter_fault = lambda: node._faults.append(1)
+
+    calls, cbs = [], []
+    ready_box = {'ready': ready}
+    clock = {'t': 0.0}
+
+    def call_async(req):
+        v = req.parameters[0].value.double_value
+        calls.append(v)
+        fut = types.SimpleNamespace()
+        fut.add_done_callback = lambda cb: cbs.append((v, cb))
+        return fut
+
+    cli = types.SimpleNamespace(
+        service_is_ready=lambda: ready_box['ready'],
+        call_async=call_async)
+    node.speed = SpeedManager(
+        cli, logger,
+        on_guide_confirmed=node._on_guide_speed_ok,
+        on_guide_failed=node._on_guide_speed_fail,
+        unready_timeout_sec=timeout,
+        now_fn=lambda: clock['t'])
+    node._calls = calls
+    node._cbs = cbs
+    node._ready = ready_box
+    node._clock = clock
+    return node
+
+
+def respond(node, idx, resp):
+    """idx 번째로 나간 요청의 응답을 주입 (임의 순서 = 역전 재현)."""
+    node._cbs[idx][1](resp)
+
+
+# ============================================================
+# S1-5 이관: 속도 변경은 '요청'이 아니라 '확인'까지
+# ============================================================
+def test_speed_change_confirmed_on_success():
+    node = make_env()
+    node.speed.request_restore(0.26)
+    assert node._calls == [0.26]
+    respond(node, 0, ok_resp())
+    assert any('변경 확인' in m for m in node._logs)
+
+
+def test_speed_change_retries_then_errors():
+    """실패 응답 → 재시도 2회 → 3회째도 실패면 에러 보고 (조용한 실패 금지)."""
+    node = make_env()
+    node.speed.request_restore(0.26)
+    respond(node, 0, fail_resp())            # 1차 실패 → 재시도
+    assert len(node._calls) == 2
+    respond(node, 1, fail_resp())            # 2차 실패 → 재시도
+    assert len(node._calls) == 3
+    respond(node, 2, fail_resp())            # 3차 실패 → 포기+에러
+    assert len(node._calls) == 3             # 더 안 쏨
+    assert any('3회 실패' in m for m in node._logs)
+    assert node._faults == []                # restore 실패는 FAULT 아님
+
+
+# ============================================================
+# F2 이관: GUIDE 는 저속 '확인' 전 주행 금지
+# ============================================================
+def test_guide_gate_service_not_ready_no_guide():
+    """서비스 미준비 — 요청이 안 나가고 GUIDE 진입 없음 (timeout 대기 모드).
+
+    07-20 정책 변경: 기존 '즉시 생략 후 tick 재시도(무기한)' 대신
+    Manager 가 timeout 까지 준비를 감시한다 — GATHER 정지 유지는 동일."""
+    node = make_env(ready=False)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    assert node.state == State.GATHER        # 주행 안 함
+    assert node._calls == []                 # 요청 자체가 안 나감
+    assert any('준비 대기' in m for m in node._logs)
+
+
+def test_guide_gate_success_enters_guide():
+    """저속 적용 성공 확인 → 그때서야 GATHER→GUIDE 전환."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    assert node.state == State.GATHER        # 응답 전엔 전환 금지
+    respond(node, 0, ok_resp())
+    assert node.state == State.GUIDE
+    assert not node._guide_pending
+
+
+def test_guide_gate_three_failures_fault_not_guide():
+    """3회 실패 — GUIDE 진입 대신 goal 취소+FAULT (평시 속도 유도 금지)."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    for i in range(3):
+        respond(node, i, fail_resp())
+    assert node.state == State.GATHER        # GUIDE 로 안 감
+    assert node._faults == [1]
+    assert node._cancels == [1]
+    assert not node._guide_pending
+
+
+def test_guide_gate_call_exception_fault_not_guide():
+    """call_async 자체 예외 3연속 — 전파 금지 + FAULT (Codex §12.3 재현 봉쇄)."""
+    node = make_env()
+
+    def explode(req):
+        raise RuntimeError('service gone')
+    node.speed._cli.call_async = explode
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 예외가 새면 여기서 터짐
+    assert node.state == State.GATHER
+    assert node._faults == [1]
+
+
+def test_guide_gate_late_confirm_after_abort_no_transition():
+    """확인 대기 중 abort — 늦은 성공 응답이 GUIDE 로 덮으면 안 됨.
+    + 늦게 적용된 값 == desired 라 reconcile 도 안 나감 (불필요 재요청 금지)."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node.state = State.FAULT                 # abort 가 먼저 도착
+    node._guide_pending = False
+    node.speed.cancel_pending('abort')       # 진행 중 요청 stale 화
+    respond(node, 0, ok_resp())              # 늦은 성공 응답
+    assert node.state == State.FAULT         # 그대로
+    assert len(node._calls) == 1             # v==desired → reconcile 불필요
+
+
+def test_sync_true_only_after_confirmed():
+    """synced 는 성공 '응답'에서만 True — 요청 직후 True 금지 (Codex §12.3)."""
+    node = make_env()
+    node.speed.ensure_sync(0.26)
+    assert node._calls == [0.26]
+    assert not node.speed.synced             # 응답 전
+    node.speed.ensure_sync(0.26)             # inflight 중 중복 요청 금지 (멱등)
+    assert len(node._calls) == 1
+    respond(node, 0, ok_resp())
+    assert node.speed.synced
+
+
+def test_sync_final_failure_sets_cooldown_not_synced():
+    """sync 3회 실패 — synced False 유지, cooldown 소진 후에만 재요청."""
+    node = make_env()
+    node.speed.ensure_sync(0.26)
+    for i in range(3):
+        respond(node, i, fail_resp())
+    assert not node.speed.synced
+    node.speed.ensure_sync(0.26)             # cooldown 중 — 재요청 금지
+    assert len(node._calls) == 3
+    for _ in range(SpeedManager.SYNC_COOLDOWN_TICKS):
+        node.speed.tick()
+    node.speed.ensure_sync(0.26)             # cooldown 소진 — 재요청 허용
+    assert len(node._calls) == 4
+
+
+# ============================================================
+# G1 이관: 늦은 '실패' 응답도 stale 구분 (유령 FAULT 정석 봉쇄 — 세대 토큰)
+# ============================================================
+def test_guide_late_failure_after_reset_ignored():
+    """guide 요청 중 reset(PATROL) → 늦은 실패 응답은 재시도·FAULT 금지."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node.state = State.PATROL                # 관제 reset 이 먼저 성공
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    respond(node, 0, fail_resp())            # 이전 세대 늦은 실패
+    assert len(node._calls) == 1             # 재시도 안 함
+    assert node._faults == []                # 유령 FAULT 없음
+    assert node._cancels == []
+    assert node.state == State.PATROL        # reset 결과 유지
+    assert any('늦은 guide 속도 실패' in m for m in node._logs)
+
+
+def test_guide_late_third_failure_after_reset_no_final_fault():
+    """재시도 2회가 GATHER 중 이미 소모된 뒤 reset — 3회째 늦은 실패가
+    최종처리(cancel+FAULT)로 떨어지면 안 됨."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    respond(node, 0, fail_resp())            # 1차 실패 (GATHER 중)
+    respond(node, 1, fail_resp())            # 2차 실패 (GATHER 중)
+    assert len(node._calls) == 3
+    node.state = State.PATROL                # reset 성공
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    respond(node, 2, fail_resp())            # 3회째는 reset 후 도착
+    assert node._faults == []                # 최종 FAULT 강등 없음
+    assert node._cancels == []
+    assert node.state == State.PATROL
+
+
+def test_guide_failure_while_still_gather_retries():
+    """★역회귀 앵커: 상태가 그대로(GATHER+pending)면 기존 재시도 동작 유지."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    respond(node, 0, fail_resp())
+    assert len(node._calls) == 2             # 정상 재시도는 그대로
+
+
+# ============================================================
+# ★ 신규: 응답 역전 + reconcile (Codex §14.3 — 무시로 끝내지 않는다)
+# ============================================================
+def test_reversed_sync_guide_success_reconciles():
+    """sync(0.26)·guide(0.12) 동시 in-flight, 응답 역전 —
+    guide 성공(GUIDE 진입) 뒤 stale sync 성공이 오면 controller 는 0.26 으로
+    뒤늦게 덮인 것 → desired 0.12 로 reconcile 재요청이 나가야 한다."""
+    node = make_env()
+    node.speed.ensure_sync(0.26)             # 요청 0
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 1 (세대 교체 — sync 는 stale)
+    respond(node, 1, ok_resp())              # guide 성공 먼저 → GUIDE
+    assert node.state == State.GUIDE
+    respond(node, 0, ok_resp())              # ★ 늦은 sync 성공 = 0.26 늦게 적용
+    assert node._calls == [0.26, 0.12, 0.12]  # reconcile 로 0.12 재요청
+    assert any('재조정' in m for m in node._logs)
+    respond(node, 2, ok_resp())              # reconcile 확인 — 추가 요청 없음
+    assert len(node._calls) == 3
+
+
+def test_reconcile_skipped_when_current_request_inflight():
+    """stale 성공 도착 시 현재 세대 요청이 응답 대기 중이면 reconcile 생략
+    (그 요청이 곧 desired 를 덮는다 — 중복 발사 금지)."""
+    node = make_env()
+    node.speed.ensure_sync(0.26)             # 요청 0
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 1 — 아직 응답 대기
+    respond(node, 0, ok_resp())              # stale sync 성공 먼저 도착
+    assert len(node._calls) == 2             # reconcile 안 나감
+    assert any('재조정 생략' in m for m in node._logs)
+    respond(node, 1, ok_resp())              # 현재 요청이 정상 확인 → GUIDE
+    assert node.state == State.GUIDE
+    assert len(node._calls) == 2
+
+
+def test_stale_reconcile_respects_latest_generation_no_pingpong():
+    """reconcile 자체도 '최신 세대만 유효' — 낡은 reconcile 성공이
+    새 desired 를 또 덮어쓰는 핑퐁 금지."""
+    node = make_env()
+    node.speed.ensure_sync(0.26)             # 요청 0
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 1
+    respond(node, 1, ok_resp())              # GUIDE 진입
+    respond(node, 0, ok_resp())              # stale sync → 요청 2 = reconcile(0.12)
+    assert node._calls == [0.26, 0.12, 0.12]
+    node.speed.request_restore(0.26)         # 요청 3 — 세대 교체 (reconcile stale 화)
+    respond(node, 2, ok_resp())              # 낡은 reconcile 성공 (0.12 늦게 적용)
+    # 현재 세대(restore 0.26)가 응답 대기 중 → 추가 reconcile 없이 그 요청에 위임
+    assert len(node._calls) == 4
+    respond(node, 3, ok_resp())              # restore 확인 — 종결, 추가 요청 없음
+    assert len(node._calls) == 4
+
+
+def test_late_applied_old_speed_after_restore_confirmed_reconciles():
+    """reset 완료(restore 0.26 확인) 뒤에야 낡은 guide 성공이 도착 —
+    controller 가 0.12 로 뒤늦게 덮였으므로 0.26 reconcile 이 나가야 한다
+    (Codex §14.3 의 원 시나리오: 상태 전이는 막아도 값이 0.12 로 남는 구멍)."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 0
+    node.state = State.PATROL                # reset
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    node.speed.request_restore(0.26)         # 요청 1
+    respond(node, 1, ok_resp())              # restore 확인 완료
+    respond(node, 0, ok_resp())              # ★ 그 뒤에 낡은 guide 성공 도착
+    assert node._calls == [0.12, 0.26, 0.26]  # 요청 2 = reconcile(0.26)
+    assert node.state == State.PATROL        # 상태는 불변
+
+
+def test_reconcile_final_failure_error_log_only():
+    """reconcile 3회 실패 — 에러 보고만, FAULT 아님 (정지/종결 국면)."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node.state = State.PATROL
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    node.speed.request_restore(0.26)
+    respond(node, 1, ok_resp())              # restore 확인
+    respond(node, 0, ok_resp())              # 낡은 guide 성공 → reconcile(0.26)
+    respond(node, 2, fail_resp())
+    respond(node, 3, fail_resp())
+    respond(node, 4, fail_resp())            # reconcile 3회 실패
+    assert any('3회 실패' in m for m in node._logs)
+    assert node._faults == []
+    assert node.state == State.PATROL
+
+
+# ============================================================
+# ★ 신규: 장기 service-unready (07-20 사용자 결정 = timeout 후 FAULT)
+# ============================================================
+def test_unready_guide_sends_when_service_appears():
+    """timeout 안에 서비스가 뜨면 — 그때 요청이 나가고 정상 GUIDE 진입."""
+    node = make_env(ready=False, timeout=30.0)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node._clock['t'] = 10.0
+    node.speed.tick()                        # 아직 미준비 — 대기 유지
+    assert node._calls == []
+    assert node._faults == []
+    node._ready['ready'] = True
+    node._clock['t'] = 20.0
+    node.speed.tick()                        # 준비됨 — 이제 발사
+    assert node._calls == [0.12]
+    respond(node, 0, ok_resp())
+    assert node.state == State.GUIDE
+
+
+def test_unready_guide_timeout_faults():
+    """★ 정책 고정: timeout 소진까지 미준비 — FAULT (무기한 GATHER 은폐 금지)."""
+    node = make_env(ready=False, timeout=30.0)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node._clock['t'] = 29.9
+    node.speed.tick()
+    assert node._faults == []                # 아직 timeout 전
+    node._clock['t'] = 30.0
+    node.speed.tick()
+    assert node._faults == [1]               # timeout → FAULT
+    assert node._cancels == [1]
+    assert not node._guide_pending
+    assert any('미준비' in m and 'FAULT' in m for m in node._logs)
+    node._clock['t'] = 60.0
+    node.speed.tick()                        # 대기는 1회로 정리 — 중복 FAULT 금지
+    assert node._faults == [1]
+
+
+def test_unready_wait_cancelled_by_reset_no_fault():
+    """미준비 대기 중 reset — 대기가 무효화되고 timeout 이 지나도 FAULT 없음."""
+    node = make_env(ready=False, timeout=30.0)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node.state = State.PATROL
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    node._clock['t'] = 100.0
+    node.speed.tick()
+    assert node._faults == []
+    assert node.state == State.PATROL
+
+
+def test_restore_unready_skipped_with_warning():
+    """restore 는 미준비면 경고 후 생략 (기존 동작 유지 — 정지 국면)."""
+    node = make_env(ready=False)
+    node.speed.request_restore(0.26)
+    assert node._calls == []
+    assert any('생략' in m for m in node._logs)
+
+
+def test_sync_unready_waits_silently_then_fires():
+    """sync 는 미준비면 조용히 대기 — 준비된 tick 의 ensure_sync 가 발사."""
+    node = make_env(ready=False)
+    node.speed.ensure_sync(0.26)
+    assert node._calls == []
+    node._ready['ready'] = True
+    node.speed.ensure_sync(0.26)
+    assert node._calls == [0.26]
+
+
+def test_sync_not_refired_after_guide_confirmed():
+    """guide 성공 확인 뒤 ensure_sync 가 0.26 을 쏘면 GUIDE 저속을 덮는다 —
+    성공 확인된 어떤 요청이든 시작 동기화 목적을 충족한 것으로 간주."""
+    node = make_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    respond(node, 0, ok_resp())              # GUIDE 진입
+    node.speed.ensure_sync(0.26)
+    assert len(node._calls) == 1             # sync 재발사 없음 (0.12 보존)
+
+
+def test_guide_wait_not_overwritten_by_sync():
+    """guide 미준비 대기 중 ensure_sync 가 세대를 덮으면 대기가 무효화된다 —
+    대기 중엔 sync 발사 금지."""
+    node = make_env(ready=False)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 대기 모드
+    node._ready['ready'] = True              # 서비스가 방금 떴다
+    node.speed.ensure_sync(0.26)             # tick 순서상 sync 검사가 먼저 올 수 있음
+    assert node._calls == []                 # sync 가 가로채면 안 됨
+    node.speed.tick()
+    assert node._calls == [0.12]             # guide 대기가 정상 발사

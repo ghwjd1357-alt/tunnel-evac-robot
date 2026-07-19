@@ -61,12 +61,12 @@ from sensor_msgs.msg import LaserScan
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
 from rcl_interfaces.srv import SetParameters
-from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 
 import tf2_ros
 
 from ament_index_python.packages import get_package_share_directory
 from mission_manager.follower_monitor import FollowerMonitor
+from mission_manager.speed_manager import SpeedManager
 
 
 class State(Enum):
@@ -327,6 +327,9 @@ def validate_waypoints(wp):
     need_num(wp, 'gather_dist', 'gather_dist', positive=True, optional=True)
     need_num(wp, 'alarm_max_projection_dist', 'alarm_max_projection_dist',
              positive=True, optional=True)
+    # 07-20: GUIDE 저속 서비스 미준비 timeout(초) — 없으면 코드 기본 30초
+    need_num(wp, 'speed_unready_timeout_sec', 'speed_unready_timeout_sec',
+             positive=True, optional=True)
     patrol = need(wp, 'patrol', 'patrol')
     if patrol is not None:
         if not isinstance(patrol, list) or not patrol:
@@ -509,11 +512,17 @@ class MissionNode(Node):
         self.siren_on = False
         self.fire = None                # funnel 번역된 화재 정보
         self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
-        self._speed_synced = False      # 시작 속도 동기화 '확인' 완료 여부 (아래 tick 참조)
-        # ★ F2 (07-19 Codex §12.3): 속도 변경은 '확인'까지가 완결 —
-        #   sync 는 성공 응답에서만 True, GUIDE 진입은 저속 적용 확인 후에만.
-        self._speed_sync_inflight = False   # sync 요청 진행 중 (tick 중복 요청 방지)
-        self._speed_sync_cooldown = 0       # sync 최종 실패 후 재시도 대기 (tick 수)
+        # ★ 속도 변경의 비동기 수명주기(요청·확인·3회 재시도·stale 세대 구분·
+        #   reconcile)는 전부 SpeedManager 소유 (07-20 구조 분리 1/3).
+        #   이 노드에는 "어떤 상태에서 어떤 속도를 원한다"는 정책 + 콜백만 남긴다.
+        #   F2 불변조건 유지: GUIDE 진입은 저속 '성공 확인' 후에만 (콜백이 전환).
+        #   07-20 사용자 결정: 서비스 장기 미준비는 timeout(기본 30초) 후 FAULT.
+        self.speed = SpeedManager(
+            self.param_cli, self.get_logger(),
+            on_guide_confirmed=self._on_guide_speed_ok,
+            on_guide_failed=self._on_guide_speed_fail,
+            unready_timeout_sec=float(
+                self.wp.get('speed_unready_timeout_sec', 30.0)))
         self._guide_pending = False         # GUIDE 저속 적용 확인 대기 중 (GATHER 유지)
 
         # --- SEARCH_BACK 관리 ---
@@ -692,7 +701,7 @@ class MissionNode(Node):
 
         elif self.state == State.GUIDE:
             self.set_siren(False)
-            self.set_nav_speed(float(self.wp['normal_speed']))
+            self.speed.request_restore(float(self.wp['normal_speed']))
             self.state = State.ESCAPED
 
         elif self.state == State.SEARCH_BACK:
@@ -708,17 +717,10 @@ class MissionNode(Node):
         #   원격 파라미터라, GUIDE(0.12) 도중 미션 노드만 재시작하면 새 PATROL 이
         #   저속을 물려받는다 (Nav2 가 계속 떠 있는 실차 운영 패턴에서 발생).
         #   → "PATROL 시작 = normal_speed" 전제를 남에게 맡기지 않고 직접 선언.
-        #   서비스가 늦게 뜰 수 있어 준비될 때까지 tick 재시도 (블로킹 금지 §12.2).
+        #   inflight/cooldown/준비 감시는 SpeedManager 내부 (ensure_sync 는 멱등).
         #   상태 전환의 속도 변경보다 같은 tick 안에서 항상 먼저 실행 → 덮어쓰기 없음.
-        #   ★ F2: '요청했다'가 아니라 '성공 응답을 받았다'가 동기화 완료 —
-        #   _speed_synced 는 _on_speed_result(purpose='sync') 성공에서만 True.
-        #   최종 실패 시엔 cooldown(10 tick = 5초) 후 처음부터 재요청.
-        if self._speed_sync_cooldown > 0:
-            self._speed_sync_cooldown -= 1
-        elif (not self._speed_synced and not self._speed_sync_inflight
-                and self.param_cli.service_is_ready()):
-            self._speed_sync_inflight = True
-            self.set_nav_speed(float(self.wp['normal_speed']), purpose='sync')
+        self.speed.tick()
+        self.speed.ensure_sync(float(self.wp['normal_speed']))
 
         # 상태·싸이렌 상시 발행
         m = String()
@@ -741,18 +743,14 @@ class MissionNode(Node):
             elapsed = (self.get_clock().now() - self.gather_since).nanoseconds / 1e9
             if elapsed >= float(self.wp['gather_wait_sec']) and not self._guide_pending:
                 # ★ F2 (Codex §12.3): GUIDE 진입은 저속 '적용 확인' 후 —
-                #   전환은 _on_speed_result(purpose='guide') 성공 콜백이 한다.
-                #   실패(3회/예외/미준비 지속)면 평시 0.26 으로 유도하는 대신 FAULT.
+                #   전환은 _on_guide_speed_ok 성공 콜백이 한다.
+                #   실패(3회/예외/미준비 timeout)면 평시 0.26 으로 유도하는 대신 FAULT.
                 #   확인까지 로봇은 GATHER 로 정지 상태 = 안전.
-                if self.param_cli.service_is_ready():
-                    self._guide_pending = True
-                    self.get_logger().info(
-                        '집결대기 종료 — GUIDE 저속 적용 요청 (확인 후 유도 시작)')
-                    self.set_nav_speed(float(self.wp['guide_speed']), purpose='guide')
-                else:
-                    self.get_logger().warn(
-                        'controller_server 파라미터 서비스 미준비 — GUIDE 진입 보류',
-                        throttle_duration_sec=5.0)
+                #   서비스 미준비 대기·timeout 판정은 SpeedManager 가 담당.
+                self._guide_pending = True
+                self.get_logger().info(
+                    '집결대기 종료 — GUIDE 저속 적용 요청 (확인 후 유도 시작)')
+                self.speed.request_guide(float(self.wp['guide_speed']))
 
         elif self.state == State.GUIDE:
             if not self.goal_active:
@@ -966,13 +964,17 @@ class MissionNode(Node):
             self.fault_since = None
             self.resume_state = None
             self._guide_pending = False   # F2: 응답 유실로 남은 게이트 잔재 청소
+            # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
+            # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
+            self.speed.cancel_pending('reset')
             self.set_siren(False)
-            self.set_nav_speed(float(self.wp['normal_speed']))
+            self.speed.request_restore(float(self.wp['normal_speed']))
         elif cmd == 'abort':
             # 즉시 정지, 자동 재시도 없이 FAULT 유지 (복구는 reset 으로)
             self.get_logger().error('★ 관제 abort — 목표 취소, 정지 (재가동은 reset)')
             self.cancel_current_goal()
             self._guide_pending = False   # F2: 늦은 저속 확인이 FAULT 를 덮지 않게
+            self.speed.cancel_pending('abort')   # 진행 중 속도 요청 stale 화
             self.set_siren(False)
             self.fault_retries = self.MAX_RETRIES   # 자동 재시도 차단
             self.resume_state = None
@@ -990,106 +992,41 @@ class MissionNode(Node):
             self.get_logger().error(
                 f'FAULT — 재시도 {self.MAX_RETRIES}회 소진, 정지. (사람 개입 필요)')
             # 정지로 끝나도 속도는 평시값 복원 — GUIDE 저속(0.12) 채로 남기지 않기 (07-07)
-            self.set_nav_speed(float(self.wp['normal_speed']))
+            self.speed.request_restore(float(self.wp['normal_speed']))
         else:
             self.get_logger().warn(f'FAULT — {self.RETRY_WAIT}초 후 재시도 예정')
 
     def set_siren(self, on: bool):
         self.siren_on = on              # 발행은 tick 이 매번 반복
 
-    def set_nav_speed(self, v: float, attempt=1, purpose='restore'):
-        """RPP 순항속도 동적 변경 (비동기 — 블로킹 금지).
+    # ===========================================================
+    # 속도 정책 콜백 (SpeedManager → 노드) — 비동기 수명주기는 Manager 소유
+    # ===========================================================
+    def _on_guide_speed_ok(self):
+        """GUIDE 저속 '성공 확인' 콜백 — 이때만 GATHER→GUIDE 전환 (F2).
 
-        ★ S1-5 (07-19 Codex §9.4): '요청하고 잊기' 금지 — 응답의
-        results[].successful 까지 확인해야 "GUIDE 저속(0.12) 요청이 조용히
-        실패해 사람 걸음 배려 없이 평시 0.26 으로 유도" 구멍이 막힌다.
-        ★ F2 (Codex §12.3): 실패의 '결과'가 purpose 별로 다르다 —
-          'guide'   GUIDE 진입 게이트: 성공해야 GATHER→GUIDE 전환,
-                    최종 실패면 goal 취소+FAULT (저속 미적용 주행 금지)
-          'sync'    시작 동기화: 성공에서만 _speed_synced=True,
-                    최종 실패면 cooldown 후 tick 이 재요청
-          'restore' 평시 복원(ESCAPED·reset·FAULT 정지): 실패는 에러 로그
-                    (이때 로봇은 정지/종결 국면 — 주행 위험 없음)
-        call_async 자체 예외(서비스 소멸 순간 등)도 시도 실패로 계산."""
-        if not self.param_cli.service_is_ready():
-            self.get_logger().warn('controller_server 파라미터 서비스 없음 — 속도 변경 생략')
-            if purpose == 'guide':
-                self._guide_pending = False     # tick 이 GATHER 에서 재시도
-            if purpose == 'sync':
-                self._speed_sync_inflight = False
+        stale(낡은 세대) 응답은 SpeedManager 가 이미 걸러 여기 안 오지만,
+        상태 검사를 한 겹 더 둔다 — 콜백 대기 중 다른 경로(FAULT 등)로
+        상태가 바뀌었으면 전환하지 않음 (늦은 응답이 상태를 덮으면 안 됨)."""
+        if self._guide_pending and self.state == State.GATHER:
+            self.get_logger().info('집결대기 종료 → GUIDE (저속 유도 시작)')
+            self.state = State.GUIDE
+        self._guide_pending = False
+
+    def _on_guide_speed_fail(self, reason):
+        """GUIDE 저속 최종 실패(3회/예외/미준비 timeout) 콜백 — goal 취소+FAULT.
+
+        저속 보장 불가 → 평시 속도로 사람을 유도하는 대신 정지(FAULT).
+        enter_fault 의 재시도 경로가 GATHER 를 resume → 처음부터 재요청."""
+        if not (self._guide_pending and self.state == State.GATHER):
+            self.get_logger().warn(
+                f'늦은 guide 속도 실패 통보({reason}) 무시 — 상태 변경됨'
+                f'(현재 {self.state.name}), FAULT 안 함')
             return
-        p = Parameter()
-        p.name = 'FollowPath.desired_linear_vel'
-        p.value = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=v)
-        try:
-            fut = self.param_cli.call_async(SetParameters.Request(parameters=[p]))
-        except Exception as e:
-            # ★ F2: 호출 자체 예외 — 콜백 밖 전파 금지, 시도 1회 소모로 취급
-            if attempt < 3:
-                self.get_logger().warn(
-                    f'속도 변경 호출 예외({e}) — 재시도 {attempt + 1}/3')
-                self.set_nav_speed(v, attempt + 1, purpose)
-            else:
-                self._speed_final_fail(v, purpose, str(e))
-            return
-        fut.add_done_callback(partial(self._on_speed_result, v, attempt, purpose))
-        self.get_logger().info(f'주행속도 변경 요청 → {v} m/s (시도 {attempt})')
-
-    def _on_speed_result(self, v, attempt, purpose, future):
-        """속도 변경 응답 확인 콜백 (S1-5 + F2 purpose 분기)."""
-        try:
-            res = future.result()
-            ok = bool(res.results) and all(r.successful for r in res.results)
-            reason = '' if ok else '; '.join(
-                r.reason for r in res.results if not r.successful)
-        except Exception as e:
-            ok, reason = False, str(e)
-        if ok:
-            self.get_logger().info(f'주행속도 변경 확인 → {v} m/s')
-            if purpose == 'sync':
-                self._speed_synced = True
-                self._speed_sync_inflight = False
-            elif purpose == 'guide':
-                # ★ F2: 저속 '확인' 후에만 GUIDE 진입. 대기 중 abort/reset 으로
-                #   상태가 바뀌었으면 전환하지 않음 (늦은 응답이 FAULT 를 덮으면 안 됨)
-                if self._guide_pending and self.state == State.GATHER:
-                    self.get_logger().info('집결대기 종료 → GUIDE (저속 유도 시작)')
-                    self.state = State.GUIDE
-                self._guide_pending = False
-        else:
-            # ★ G1 (Codex §13.3): 실패 경로에도 stale 가드 — 성공 경로만 가드하던
-            #   비대칭 종결. reset/abort 로 상태가 바뀐 뒤 도착한 이전 세대 guide
-            #   실패 응답이 재시도→최종 FAULT 로 이어지면, 성공한 reset 뒤 PATROL 이
-            #   유령 FAULT 로 뒤집힌다 (Codex 축소 재현: fault_calls=1).
-            #   정석(요청 세대 토큰)은 SpeedManager 추출 때 — 마스터플랜 §7.3-1.
-            if purpose == 'guide' and not (
-                    self._guide_pending and self.state == State.GATHER):
-                self.get_logger().warn(
-                    f'늦은 guide 속도 실패 응답 무시 — 상태 변경됨'
-                    f'(현재 {self.state.name}), 재시도·FAULT 안 함')
-                return
-            if attempt < 3:
-                self.get_logger().warn(
-                    f'속도 변경 실패({reason}) — 재시도 {attempt + 1}/3')
-                self.set_nav_speed(v, attempt + 1, purpose)
-            else:
-                self._speed_final_fail(v, purpose, reason)
-
-    def _speed_final_fail(self, v, purpose, reason):
-        """속도 변경 3회 최종 실패 — purpose 별 안전 조치 (F2)."""
-        self.get_logger().error(
-            f'★ 속도 변경 3회 실패({reason}) — 현재 주행속도가 요청값 {v} 와 '
-            f'다를 수 있음 (GUIDE 저속 미적용 위험, 관제 확인 필요)')
-        if purpose == 'guide':
-            # 저속 보장 불가 → 평시 속도로 사람을 유도하는 대신 정지(FAULT).
-            # enter_fault 의 재시도 경로가 GATHER 를 resume → 처음부터 재요청.
-            self._guide_pending = False
-            self.get_logger().error('GUIDE 저속 적용 실패 — 유도 진입 중단, FAULT')
-            self.cancel_current_goal()
-            self.enter_fault()
-        elif purpose == 'sync':
-            self._speed_sync_inflight = False
-            self._speed_sync_cooldown = 10   # 10 tick(5초) 후 재요청
+        self._guide_pending = False
+        self.get_logger().error('GUIDE 저속 적용 실패 — 유도 진입 중단, FAULT')
+        self.cancel_current_goal()
+        self.enter_fault()
 
 
 def main(args=None):
