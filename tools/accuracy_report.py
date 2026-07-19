@@ -35,11 +35,17 @@ for font in ('NanumGothic', 'Noto Sans CJK KR'):
 
 def load(path):
     """CSV → (경과시간 리스트, 오차 리스트). 경과시간은 첫 샘플 기준 0초."""
+    import math
     ts, errs = [], []
     with open(path) as f:
-        for row in csv.DictReader(f):
-            ts.append(float(row['t']))
-            errs.append(float(row['err']))
+        for i, row in enumerate(csv.DictReader(f)):
+            t, e = float(row['t']), float(row['err'])
+            # ★ S2-3 (Codex §11.5): NaN/Inf 가 섞이면 mean/p95 가 통째로 오염 —
+            #   조용히 이상 통계를 내느니 어느 행이 문제인지 말하고 죽는다
+            if not (math.isfinite(t) and math.isfinite(e)):
+                raise SystemExit(f'{path} {i + 2}행: 비유한값 (t={t}, err={e})')
+            ts.append(t)
+            errs.append(e)
     if not ts:
         raise SystemExit(f'{path}: 샘플 없음')
     t0 = ts[0]
@@ -64,6 +70,11 @@ def main():
     ap.add_argument('-o', '--out', default='accuracy.png')
     args = ap.parse_args()
 
+    # ★ S2-3 (Codex §11.5 표적시험이 재현): zip 은 짧은 쪽에 맞춰 '조용히' 자른다 —
+    #   CSV 2개+라벨 1개면 두 번째 CSV 가 오류 없이 누락된 그래프가 나왔다. 개수 강제.
+    if args.labels and len(args.labels) != len(args.csvs):
+        ap.error(f'CSV {len(args.csvs)}개 vs 라벨 {len(args.labels)}개 — '
+                 f'개수가 다르면 zip 이 조용히 누락시킴. 라벨을 CSV 수만큼 줄 것')
     labels = args.labels or [f'run{i+1}' for i in range(len(args.csvs))]
 
     plt.figure(figsize=(9, 4.5))

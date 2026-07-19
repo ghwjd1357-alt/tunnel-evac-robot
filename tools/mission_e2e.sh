@@ -21,6 +21,9 @@
 # ============================================================
 # ⚠ set -u 는 source 뒤에! — ROS setup.bash 내부가 미정의 변수를 참조해서
 #   set -u 상태로 source 하면 "AMENT_TRACE_SETUP_FILES: unbound variable" 로 즉사.
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
@@ -61,6 +64,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 state() {  # 현재 /mission_state 값 1개 읽기 (2Hz 발행이라 3초면 충분)
   timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \

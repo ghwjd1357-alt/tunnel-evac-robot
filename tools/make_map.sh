@@ -13,21 +13,36 @@
 #
 # 노하우 박제: set -u 는 source 뒤 / pkill 브래킷 트릭 / send_goal 재전송 (§15.7)
 # ============================================================
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
-# --- 월드 모드 (07-07): 인자 없음 = T자(기존 그대로) / twin = 쌍굴 ---
+# --- 월드 모드 (07-07 → S2-1 엄격화): 인자 없음 = T자 / twin = 쌍굴 / 그 외 = 즉사 ---
+# ⚠ 기존엔 "twin 이 아니면 전부 tunnel" — `twim` 오타가 T자 정본 덮어쓰기로 흘렀다 (Codex §11.3)
 MODE="${1:-tunnel}"
-if [ "$MODE" = "twin" ]; then
-  LAUNCH_ARGS=(world:=tunnel_twin.world spawn_x:=-17)
-  OUT_POSEGRAPH=twin_localization    # slam_params_localization_twin.yaml 이 읽는 이름
-  OUT_PGM=twin_map_loc
-else
-  LAUNCH_ARGS=()
-  OUT_POSEGRAPH=tunnel_localization
-  OUT_PGM=tunnel_map_loc
-fi
+case "$MODE" in
+  tunnel)
+    LAUNCH_ARGS=()
+    OUT_POSEGRAPH=tunnel_localization
+    OUT_PGM=tunnel_map_loc
+    LOC_PARAMS=slam_params_localization.yaml
+    SMOKE_GOAL="3.0 0.0"               # 스모크: 짧은 정상 goal 1개
+    ;;
+  twin)
+    LAUNCH_ARGS=(world:=tunnel_twin.world spawn_x:=-17)
+    OUT_POSEGRAPH=twin_localization    # slam_params_localization_twin.yaml 이 읽는 이름
+    OUT_PGM=twin_map_loc
+    LOC_PARAMS=slam_params_localization_twin.yaml
+    SMOKE_GOAL="12.0 0.0"
+    ;;
+  *)
+    echo "== FAIL: 알 수 없는 모드 '$MODE' (tunnel|twin 만 허용 — 오타가 정본을 덮어쓰지 않게 즉사)"
+    exit 1
+    ;;
+esac
 
 MAPDIR=~/ros2_ws/maps
 LOGDIR=$(mktemp -d /tmp/makemap.XXXX)
@@ -44,6 +59,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
   local qz qw out
@@ -61,8 +78,22 @@ send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
 
 echo "== ① 잔여 프로세스 정리 + 기동 (mapping 모드)"
 cleanup
+# ★ mapping 탐사 오버레이 (07-19 심야 — S2-1 이 검거한 정책 충돌):
+#   운영 안전 정책 track_unknown_space:true(07-19 명시) + allow_unknown:false 는
+#   '미지 공간으로 계획 금지'라, 미지 영역으로 goal 을 보내며 지도를 넓히는
+#   mapping 세션에선 planner 가 전 goal 을 거부한다 (make_map 첫 실행이 검거 —
+#   localization 기반 회귀들은 전부 통과해서 여기서만 드러남).
+#   해법 = 07-06·07-07 지도 v3·쌍굴 제작을 성공시킨 '검증된 mapping 구성' 재현:
+#   track_unknown_space:false (당시 배포판 기본값 — 미지=자유로 취급).
+#   ⚠ allow_unknown:true 우회는 기각 — NavFn "legal potential ... This shouldn't
+#   happen" 결함으로 traceback 실패 실측 (두 번째 실행이 검거).
+MAP_PARAMS="$LOGDIR/nav2_mapping.yaml"
+sed 's/track_unknown_space: true/track_unknown_space: false  # mapping 탐사 한정 오버레이/' \
+  ~/ros2_ws/src/tunnel_sim/config/nav2_params.yaml > "$MAP_PARAMS"
+grep -q "track_unknown_space: false" "$MAP_PARAMS" || fail "mapping 오버레이 생성 실패"
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false "${LAUNCH_ARGS[@]}" \
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false \
+  nav2_params:="$MAP_PARAMS" "${LAUNCH_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
 echo "== ② Nav2 활성화 대기 (최대 90초)"
@@ -103,17 +134,59 @@ else
   echo "  ✓ goal4 서쪽 복귀 (복도 재훑기 = 지도 다지기)"
 fi
 
-echo "== ④ 저장: posegraph (localization 용) + pgm/yaml (기록용)"
+echo "== ④ 저장: staging 이름으로 (★ S2-1 — 정본은 스모크 통과 전까지 안 건드림)"
+# ⚠ 기존엔 정본에 직행 serialize — 부분 지도·나쁜 런도 result=0 이면 정본을 대체했다
+#   (Codex §11.3). 이제: staging 저장 → localization 스모크 → 통과 시에만 승격.
 mkdir -p "$MAPDIR"
+STAGING="${OUT_POSEGRAPH}_staging"
+rm -f "$MAPDIR/$STAGING".*
 # ⚠ 확장자 없이 — slam_toolbox 가 .posegraph/.data 를 알아서 붙임
 ros2 service call /slam_toolbox/serialize_map \
   slam_toolbox/srv/SerializePoseGraph \
-  "{filename: $HOME/ros2_ws/maps/$OUT_POSEGRAPH}" \
+  "{filename: $HOME/ros2_ws/maps/$STAGING}" \
   | grep -q "result=0" || fail "posegraph 저장 실패"
-echo "  ✓ posegraph: $MAPDIR/$OUT_POSEGRAPH.{posegraph,data}"
+ls -l "$MAPDIR/$STAGING".* 2>/dev/null || fail "staging posegraph 파일 없음"
 timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/$OUT_PGM" \
   >> "$LOGDIR/mapsaver.log" 2>&1 || echo "  (pgm 저장 실패 — 기록용이라 계속)"
-ls -l "$MAPDIR/$OUT_POSEGRAPH".* 2>/dev/null || fail "posegraph 파일 없음"
 
+echo "== ⑤ 스모크 검증: 새 지도로 localization 기동 + goal 1개 (약 2분)"
 cleanup
-echo "== 완료 — localization 모드 재료 준비 끝"
+# staging 파일을 읽는 임시 localization 파라미터 생성 (경로만 치환).
+# launch 의 PathJoinSubstitution 은 os.path.join 의미 — 절대경로를 주면 그대로 쓴다.
+SMOKE_YAML="$LOGDIR/smoke_localization.yaml"
+sed "s|maps/$OUT_POSEGRAPH|maps/$STAGING|" \
+  ~/ros2_ws/src/tunnel_sim/config/$LOC_PARAMS > "$SMOKE_YAML"
+grep -q "$STAGING" "$SMOKE_YAML" || fail "스모크 파라미터 생성 실패 (경로 치환 안 됨)"
+nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
+  localization_params:="$SMOKE_YAML" "${LAUNCH_ARGS[@]}" \
+  > "$LOGDIR/smoke.log" 2>&1 &
+t=0
+until ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
+  sleep 3; t=$((t+3)); [ $t -ge 90 ] && fail "스모크 기동 타임아웃 (새 지도로 localization 불가?)"
+done
+sleep 5
+read -r sx sy <<< "$SMOKE_GOAL"
+send_goal "$sx" "$sy" 0.0 120 || fail "스모크 goal($sx,$sy) 미도달 — 새 지도 품질 의심, 정본 유지"
+echo "  ✓ 스모크 통과 (새 지도로 위치추정+주행 정상)"
+
+echo "== ⑥ 승격: 기존 정본 백업 → staging 을 정본으로 (+manifest)"
+cleanup
+STAMP=$(date +%y%m%d_%H%M)
+for ext in posegraph data; do
+  [ -f "$MAPDIR/$OUT_POSEGRAPH.$ext" ] && \
+    cp "$MAPDIR/$OUT_POSEGRAPH.$ext" "$MAPDIR/$OUT_POSEGRAPH.bak_$STAMP.$ext"
+  mv "$MAPDIR/$STAGING.$ext" "$MAPDIR/$OUT_POSEGRAPH.$ext" \
+    || fail "승격 실패 ($ext)"
+done
+{
+  echo "generated: $(date -Iseconds)"
+  echo "mode: $MODE"
+  echo "git_commit: $(git -C ~/ros2_ws rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "smoke: goal($SMOKE_GOAL) SUCCEEDED"
+  for ext in posegraph data; do
+    echo "sha256($OUT_POSEGRAPH.$ext): $(sha256sum "$MAPDIR/$OUT_POSEGRAPH.$ext" | cut -d' ' -f1)"
+  done
+} > "$MAPDIR/$OUT_POSEGRAPH.manifest.txt"
+echo "  ✓ 정본 승격 + manifest: $MAPDIR/$OUT_POSEGRAPH.manifest.txt (백업: .bak_$STAMP)"
+
+echo "== 완료 — localization 모드 재료 준비 끝 (스모크 검증됨)"

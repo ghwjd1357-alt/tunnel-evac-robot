@@ -18,13 +18,30 @@
 # 노하우 박제 (0705_현황.md 함정 — regression_3goals.sh 와 동일):
 #   - set -u 는 ROS source 뒤에 / pkill 브래킷 트릭 / send_goal 재전송 / gz ground truth
 # ============================================================
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
 
 LABEL=${1:-$(date +%m%d_%H%M)}
 shift 2>/dev/null || true
-EXTRA_ARGS=("$@")           # 라벨 뒤 인자는 그대로 런치에 전달 (예: localization:=true)
+# ★ S2-2 라벨 sanitize (Codex §11.5): 경로문자·상위이동이 섞이면 bench_out 밖을 쓴다
+case "$LABEL" in
+  */*|*..*|.*) echo "== FAIL: 라벨에 경로 문자 금지 ('$LABEL')"; exit 1 ;;
+esac
+EXTRA_ARGS=("$@")           # 라벨 뒤 인자는 그대로 런치에 전달
+# ★ S2-2 기본 모드 = localization (운영 구성. Codex §11.5 — 기존엔 인자 없으면
+#   launch 기본(mapping)으로 돌아 'mapping 수치를 운영 정확도로 오인' 가능했다).
+#   mapping 측정은 명시적으로 localization:=false 를 줄 때만.
+MODE=localization
+for a in "${EXTRA_ARGS[@]}"; do
+  case "$a" in localization:=false) MODE=mapping ;; esac
+done
+if [ "$MODE" = "localization" ]; then
+  EXTRA_ARGS=(localization:=true "${EXTRA_ARGS[@]}")   # 뒤 인자가 있으면 그쪽이 이김
+fi
 OUT=~/ros2_ws/bench_out/$LABEL
 mkdir -p "$OUT"
 LOGDIR=$(mktemp -d /tmp/accbench.XXXX)
@@ -42,6 +59,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초) — SUCCEEDED 대기, 유실 대비 1회 재전송
   local qz qw out
@@ -80,7 +99,13 @@ done
 sleep 5   # SLAM 첫 지도/TF 안정화
 
 echo "== ③ 오차 샘플러 기동 (1초 주기 → trace.csv)"
-: > "$OUT/summary.txt"
+# ★ S2-2 메타 기록 (기존 백로그 'accuracy_bench 메타' 흡수): 나중에 이 수치가
+#   '어떤 조건'이었는지 — 특히 시뮬 world-odom 상한이라는 사실 — 을 파일이 증언
+{
+  echo "# mode=$MODE  world=${EXTRA_ARGS[*]:-T자기본}  date=$(date -Iseconds)"
+  echo "# git=$(git -C ~/ros2_ws rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  echo "# ⚠ Gazebo world-odom(치트 오돔) 시뮬 수치 — 실차 정확도로 인용 금지 (Codex §9.3)"
+} > "$OUT/summary.txt"
 nohup python3 ~/ros2_ws/tools/accuracy_sampler.py --ros-args \
   -p use_sim_time:=true -p csv:="$OUT/trace.csv" \
   > "$LOGDIR/sampler.log" 2>&1 &

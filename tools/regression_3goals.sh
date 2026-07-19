@@ -18,6 +18,9 @@
 # ============================================================
 # ⚠ set -u 는 source 뒤에! — ROS setup.bash 내부가 미정의 변수를 참조해서
 #   set -u 상태로 source 하면 "AMENT_TRACE_SETUP_FILES: unbound variable" 로 즉사.
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
@@ -37,6 +40,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 # --- 목표 전송: SUCCEEDED 대기, 응답유실 대비 1회 재전송 ---
 send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
@@ -83,12 +88,12 @@ echo "== ⑥ ground truth 오차 판정 (goal3 기준)"
 read -r gx gy < <(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}')
 err=$(python3 -c "import math; print(round(math.hypot(($gx+12)-13.5, $gy-0.0), 3))")
 echo "  실위치 world($gx,$gy) → 목표와 오차 ${err}m"
-pass=$(python3 -c "print('yes' if $err <= 0.6 else 'no')")
+pass=$(python3 -c "print('yes' if $err <= 0.3 else 'no')")
 
 cleanup
 if [ "$pass" = "yes" ]; then
-  echo "== PASS: 3목표 전부 SUCCEEDED, 최종 오차 ${err}m (허용 0.6m)"
+  echo "== PASS: 3목표 전부 SUCCEEDED, 최종 오차 ${err}m (허용 0.3m — S3-3: tolerance 0.15 의 2배, 07-19 강화)"
 else
-  echo "== FAIL: 도달은 했으나 실위치 오차 ${err}m > 0.6m (believed vs 실제 어긋남 의심)"
+  echo "== FAIL: 도달은 했으나 실위치 오차 ${err}m > 0.3m (believed vs 실제 어긋남 의심)"
   exit 1
 fi

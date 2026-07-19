@@ -105,7 +105,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 | slam_toolbox + Nav2 + robot_localization (노트북 apt) | ✅ 2026-06-26 설치 |
 | SLAM 터널 지도 생성·저장 (`maps/tunnel_map.*`) | ✅ 2026-06-26 (2E, 헤드리스 자동주행) |
 | Nav2 자율주행 | ✅ **완전검증 (2026-07-06 갱신):** tolerance 강화 후 **끝점오차 0.12~0.17m** (병목이 goal tolerance 였음, §17). **운영 = localization 모드** (저장 posegraph, 궤적오차 평균 **0.015m**, §18) |
-| **미션 로직 (`mission_manager`)** | ✅ **①~③ + 감지 2차 완료 (2026-07-06):** PATROL→APPROACH→GATHER→GUIDE⇄SEARCH_BACK→ESCAPED+FAULT 전체 시뮬 E2E 검증. 추종감지 = 클러스터 크기 판별(GUIDE 판정 any존), 안전장치 2종, `mission.launch.py` 한 줄 실행 (상세: 0705_현황.md §12~15) |
+| **미션 로직 (`mission_manager`)** | ✅ **①~③ + 감지 2차 완료 (2026-07-06):** PATROL→APPROACH→GATHER→GUIDE⇄SEARCH_BACK→ESCAPED+FAULT 전체 시뮬 E2E 검증. ★근거리 물체 추종감시 = 클러스터 크기 판별(GUIDE 판정 any존 — S3-1 명칭 제한: 사람/물체 구분 불가, 역할 B 융합·실측 혼동행렬 전까지 "사람 인식"으로 부르지 않기), 안전장치 2종, `mission.launch.py` 한 줄 실행 (상세: 0705_현황.md §12~15) |
 | **관제 데스크톱 (Operator Console)** | ✅ **C1~C4 완료 (07-19):** 웹 대시보드(rosbridge+roslibjs), 코드 = `~/ros2_ws/console/`(ROS 패키지 아님). C2 상태패널·제어·화재입력 + C3 지도뷰(TF 2단합성) + **C4 시스템 상태**(신선도=스로틀 구독 설계 §5.5·Nav2 상태·RTT) 전부 데이터 경로 PASS. 남은 것: 브라우저 육안 확인 → C5 영상(실차)·C6 로그인. ★함정: rosbridge 서비스 타입은 `rosapi_msgs/srv/…`. **설계 정본 = `0718_관제시스템.md`** |
 | **테스트·회귀 인프라** | ✅ 2026-07-06: git 저장소(작업 단위 커밋) + pytest 13개 + `tools/regression_3goals.sh` + `tools/mission_e2e.sh` — **변경 후 이 3종 실행이 회귀 검증** (상세: §15.5) |
 | EKF (robot_localization, odom+IMU 융합) | ✅ 2026-07-05: 시뮬 IMU 추가 + `config/ekf.yaml` + slam 파라미터 튜닝. 12.5m 주행 시 SLAM 위치오차 **9m → 0.17m** (상세: `0705_현황.md` §7) |
@@ -151,7 +151,7 @@ micro-ROS 에이전트 실행 (브리지 1줄) 은 내가 띄운다. (단 시점
 - **★ 변경 후 회귀 3종:** `python3 -m pytest src/mission_manager/test/ -q`(0.6초) + `bash tools/regression_3goals.sh`(~4분) + `bash tools/mission_e2e.sh`(~3분). **07-07 부터 스크립트 2종 기본 = localization 운영 모드** (mapping 검증은 `localization:=false` 인자, 0707_현황.md §3)
 - **abort 정지 검증 (07-19 밤 신설 — goal 취소/미션 명령 로직 변경 시 추가 실행):** `bash tools/abort_e2e.sh`(~3분) — 주행 중 abort → FAULT 진입 + ground truth 실정지(5초간 ≤0.10m) + /cmd_vel 잠잠 + '취소 접수 확인' 로그까지 검증. "취소를 호출했다"와 "로봇이 멈췄다"는 다른 명제(0719_현황.md §12.3).
 - **부정 회귀 (07-19 신설 — 안전 정책·Nav2 설정 변경 시 추가 실행):** `bash tools/regression_negative.sh`(~6분) — 지도밖/벽너머/막힌 goal 이 **실패 종결**해야 PASS(성공하면 안전 정책 구멍, timeout 이면 무한 회복 의심) + 정상 goal 양성 대조군. 실측: 막힌 goal 은 BT 재시도 6회 소진까지 **~2분 걸려 ABORTED**(무한 아님 — planner tolerance 백로그의 판단 재료). ⚠ `service call` 응답 파싱은 `success=True`(repr 형식, `success: True` 아님). (0719_현황.md §8)
-- **정확도 벤치 (SLAM·Nav2 튜닝 전/후 측정):** `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/{trace.csv,summary.txt,error.png}` / 비교: `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png` (§17)
+- **정확도 벤치 (SLAM·Nav2 튜닝 전/후 측정):** `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/{trace.csv,summary.txt,error.png}` / 비교: `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png` (§17). ★S3-2: 벤치 수치는 **Gazebo world-odom(치트 오돔) 시뮬 상한** — 실차 정확도로 인용 금지, tolerance 강화 효과도 "끝점 정확도"에 한정(궤적 평균은 소폭 증가 — Codex §9.6 재현)
 
 ### 2C 완료 (2026-06-23) — GUI 배치 워크플로우("마우스 배치→`gz model -m 이름 -p` 좌표→world `<include>`→build") · T자 터널(메인 30m×폭6m + 곁복도 12m) · 가상 라이다 `/scan` 검증. → `0623_현황.md §8~10`
 

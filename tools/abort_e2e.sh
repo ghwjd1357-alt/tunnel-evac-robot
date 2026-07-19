@@ -12,6 +12,9 @@
 # 판정: 마지막 줄 PASS / FAIL. ★ 기본 = localization 운영 모드.
 # ============================================================
 # ⚠ set -u 는 source 뒤에! (setup.bash 가 미정의 변수 참조)
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
@@ -32,6 +35,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 state() {
   timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \
@@ -111,14 +116,18 @@ EOF
 echo "  ✓ /cmd_vel 잠잠"
 
 echo "== ⑨ 미션 로그의 취소 감시 확인 (cancel 응답 확인 콜백이 실제로 돌았나)"
+# ★ S2-5 (Codex §8.3): PASS 문구는 실제로 확인된 것만 말한다 — '접수 안 됨' 분기로
+#   통과했는데 마지막 줄이 "취소 접수 확인"이라고 과장하던 불일치 수정
 if grep -q "취소 접수 확인" "$LOGDIR/mission.log"; then
   echo "  ✓ '취소 접수 확인' 로그 존재 (Nav2 가 취소를 수락)"
+  CANCEL_NOTE="취소 접수 확인"
 elif grep -q "취소 접수 안 됨" "$LOGDIR/mission.log"; then
   # goal 이 abort 직전에 이미 끝난 드문 타이밍 — 정지 자체(⑦)는 이미 검증됨
   echo "  (참고: '취소 접수 안 됨' — goal 이 이미 종결된 타이밍이었을 수 있음)"
+  CANCEL_NOTE="취소 접수는 미확인(이미 종결 추정) — 실정지로 판정"
 else
   fail "미션 로그에 취소 응답 확인 흔적 없음 (감시 콜백 미동작 의심)"
 fi
 
 cleanup
-echo "== PASS: 주행 중 abort → FAULT + 실정지(${drift}m) + cmd_vel 잠잠 + 취소 접수 확인"
+echo "== PASS: 주행 중 abort → FAULT + 실정지(${drift}m) + cmd_vel 잠잠 + ${CANCEL_NOTE}"

@@ -23,6 +23,9 @@
 #   - 검증은 believed(TF) 아닌 ground truth(gz model) 로
 # ============================================================
 # ⚠ set -u 는 source 뒤에! (setup.bash 가 미정의 변수 참조 → unbound variable 즉사)
+# ⚠ 전용 시뮬 PC 전용 (S2-4, Codex §11.4): cleanup 이 전역 pkill 로 gzserver·
+#   nav2·slam 등을 프로세스 이름으로 죽인다 — 다른 ROS 작업이 도는 PC/Jetson
+#   에서 실행 금지. Ctrl+C 중단 시에도 trap 이 좀비를 정리한다.
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
@@ -42,6 +45,8 @@ cleanup() {
   sleep 1
 }
 fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
+# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
+trap cleanup INT TERM
 
 # --- 부정 목표 전송: '성공하면 안 되고, 제한시간 안에 끝나야(무한 회복 금지)' ---
 send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨

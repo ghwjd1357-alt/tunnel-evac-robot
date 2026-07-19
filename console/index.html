@@ -244,8 +244,12 @@ function setupHealth() {
 
   // 통신 지연: 2초마다 rosapi 서비스 왕복시간 측정
   // ⚠ 패키지명 주의: rosapi 아님 → rosapi_msgs (틀리면 응답이 조용히 유실됨)
+  // ★ S2-6 (07-19 Codex §9.9): 재접속마다 setInterval 이 하나씩 '누적'되던 누수 —
+  //   구 구독은 소켓과 함께 죽지만 JS 타이머는 영원히 산다. 이전 타이머를 먼저 해제.
+  //   (window.rttTimer 전역 보관 — setupHealth 는 접속 성공 때마다 다시 불리므로)
+  if (window.rttTimer) clearInterval(window.rttTimer);
   const timeSvc = new ROSLIB.Service({ ros, name: '/rosapi/get_time', serviceType: 'rosapi_msgs/srv/GetTime' });
-  setInterval(() => {
+  window.rttTimer = setInterval(() => {
     const t0 = performance.now();
     timeSvc.callService(new ROSLIB.ServiceRequest({}), () => {
       const rtt = Math.round(performance.now() - t0);

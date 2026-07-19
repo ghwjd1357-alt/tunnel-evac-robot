@@ -17,3 +17,4 @@ src/sllidar_ros2/
 __pycache__/
 *.pyc
 bench_out/
+maps/*.bak_*

@@ -1,0 +1,6 @@
+generated: 2026-07-19T18:33:14+09:00
+mode: tunnel
+git_commit: 791993f35b260858a8daacf04dac19b9b8a87102
+smoke: goal(3.0 0.0) SUCCEEDED
+sha256(tunnel_localization.posegraph): 49fcbd389b0b6e760117b9f333577bdc81573bba06f61722757e768be5af721a
+sha256(tunnel_localization.data): fa606fb87d39485d3a8d1f0575183476ea8915d0dd6b07bac28255890a874669

@@ -72,6 +72,12 @@ class FakeFollower(Node):
         self.declare_parameter('walk_speed', 0.8)     # 사람 걸음 속도 m/s
         self.declare_parameter('keep_distance', 1.2)  # 로봇과 유지 거리 m
         self.declare_parameter('robot_name', 'tunnel_robot')
+        # ★ S2-7 (07-19 Codex §11.6): 음수/NaN 속도·거리는 조용한 오동작 — 시작에 검거
+        import math as _math
+        for pname in ('walk_speed', 'keep_distance'):
+            v = self.get_parameter(pname).value
+            if not (isinstance(v, (int, float)) and _math.isfinite(v) and v > 0):
+                raise SystemExit(f'fake_follower: {pname}={v!r} — 양수 유한값이어야 함')
 
         # --- Gazebo 서비스 클라이언트 3종 ---
         self.spawn_cli = self.create_client(SpawnEntity, '/spawn_entity')
@@ -114,8 +120,15 @@ class FakeFollower(Node):
         self.get_cli.call_async(req).add_done_callback(self.on_robot_state)
 
     def on_robot_state(self, future):
+        # ★ S2-7: future.result() 예외가 새면 _pending 처리와 무관하게 콜백이 죽는다
+        #   (Gazebo 재시작 순간 등) — 실패는 '이번 틱 건너뜀'으로 강등
         self._pending = False
-        res = future.result()
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'로봇 상태 조회 예외: {e}',
+                                   throttle_duration_sec=5.0)
+            return
         if not res.success:
             self.get_logger().warn('로봇 상태 조회 실패 (아직 스폰 전?)',
                                    throttle_duration_sec=5.0)
@@ -175,7 +188,12 @@ class FakeFollower(Node):
 
         def done(f):
             self._pending = False
-            res = f.result()
+            try:                        # S2-7: 응답 예외 = 이번 시도 실패로 강등
+                res = f.result()
+            except Exception as e:
+                self.get_logger().warn(f'스폰 응답 예외: {e}',
+                                       throttle_duration_sec=5.0)
+                return
             if res.success:
                 self.spawned = True
                 self.pos = (x, y)
@@ -203,7 +221,11 @@ class FakeFollower(Node):
 
         def done(f):
             self._pending = False
-            if f.result().success:
+            try:                        # S2-7: 응답 예외 = 이번 이동 생략 (다음 틱 재시도)
+                ok = f.result().success
+            except Exception:
+                return
+            if ok:
                 self.pos = (x, y)
         self.set_cli.call_async(req).add_done_callback(done)
 
