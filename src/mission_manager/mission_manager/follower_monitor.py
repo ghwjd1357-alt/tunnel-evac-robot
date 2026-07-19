@@ -71,11 +71,23 @@ class FollowerMonitor:
         self._first_seen_t = {'rear': None, 'any': None}
         self._has_scan = False
         self._last_scan_t = None        # 마지막 /scan 수신 시각 (watchdog 재료)
+        self._last_stamp_ns = None      # 마지막 scan 의 header.stamp (S1-6 재료)
 
     # -----------------------------------------------------------
     # /scan 콜백에서 호출 — 클러스터를 찾고 구역별 검출 여부를 갱신.
     # -----------------------------------------------------------
     def update(self, scan):
+        # ★ S1-6 (07-19 Codex §10.6-5): watchdog 이 '콜백 도착 시각'만 보면
+        #   드라이버가 멈춘 채 같은 프레임을 재전송해도 신선하다고 오인.
+        #   header.stamp 가 전진하지 않는 스캔은 통째로 무시 → 수신시각이 안
+        #   갱신되므로 scan_timeout 뒤 watchdog 이 정상적으로 stale 판정.
+        #   (stamp 의 '절대 나이' 검사는 실차 clock 동기 확인 후 과제 — 마스터플랜 R3)
+        hdr = getattr(scan, 'header', None)
+        if hdr is not None:
+            ns = hdr.stamp.sec * 1_000_000_000 + hdr.stamp.nanosec
+            if self._last_stamp_ns is not None and ns <= self._last_stamp_ns:
+                return
+            self._last_stamp_ns = ns
         now = self.clock.now()
         # ★ 복구 경계 (07-19 Codex 검토 §3.1): 단절돼 있던 시간을 debounce
         #   연속시간에 포함하면 안 된다. 리셋 없이 이어 쓰면 —

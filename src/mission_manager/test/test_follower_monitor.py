@@ -285,6 +285,43 @@ def test_never_scanned_is_stale():
     assert not mon.lost('any')
 
 
+def test_repeated_stamp_scan_not_fresh():
+    """★ S1-6 (07-19 Codex §10.6-5): 드라이버가 멈춘 채 같은 header.stamp 프레임을
+    재전송 — 도착시각만 보면 '신선'으로 오인해 watchdog 이 영영 안 울린다.
+    stamp 가 전진하지 않으면 프레임을 무시 → scan_timeout 뒤 stale 로 판정돼야."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+
+    def stamped(ns):
+        s = types.SimpleNamespace(**vars(person))
+        s.header = types.SimpleNamespace(stamp=types.SimpleNamespace(
+            sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000))
+        return s
+
+    ns = 0
+    for _ in range(12):                      # 정상: stamp 전진하며 1.2초 수신
+        clock.advance(0.1)
+        ns += 100_000_000
+        mon.update(stamped(ns))
+    assert mon.visible('rear')
+    assert not mon.scan_stale()
+
+    for _ in range(20):                      # 고장: 같은 stamp 재전송 2초
+        clock.advance(0.1)
+        mon.update(stamped(ns))              # stamp 그대로
+    assert mon.scan_stale()                  # ★ 재전송은 신선도 갱신 못 함
+    assert not mon.visible('rear')           # 판단 보류로 전환
+
+
+def test_headerless_scan_still_works():
+    """header 없는 스캔(테스트 픽스처·구형 소스)은 stamp 검사 생략 — 하위 호환."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    feed(mon, clock, make_scan([(180.0, 10, 1.5)]), 1.2)
+    assert mon.visible('rear')
+
+
 def test_inf_nan_ranges_safe():
     """실물 라이다의 inf/nan 빔이 섞여도 죽지 않고 정상 판정."""
     clock = FakeClock()
@@ -486,6 +523,56 @@ def test_validate_graph_edge_with_unknown_node():
     wp['corridor_graph'] = {'nodes': {'a': {'x': 0.0, 'y': 0.0}},
                             'edges': [['a', 'ghost']]}
     assert any('corridor_graph.edges[0]' in m for m in validate_waypoints(wp))
+
+
+# --- ★ S1-3 (07-19 Codex §10.6 공격 재현): 설정 전 항목 숫자·범위 검증 ---
+def test_validate_nan_patrol_coord_rejected():
+    """Codex 주입 재현: patrol.x=NaN — 수정 전엔 검증 통과."""
+    wp = _valid_wp()
+    wp['patrol'][0]['x'] = float('nan')
+    assert any('patrol[0].x' in m for m in validate_waypoints(wp))
+
+
+def test_validate_nan_speed_rejected():
+    """Codex 주입 재현: guide_speed=NaN — 수정 전엔 검증 통과."""
+    wp = _valid_wp()
+    wp['guide_speed'] = float('nan')
+    assert any('guide_speed' in m for m in validate_waypoints(wp))
+
+
+def test_validate_negative_wait_rejected():
+    """Codex 주입 재현: gather_wait_sec=-1 — 음수 대기시간."""
+    wp = _valid_wp()
+    wp['gather_wait_sec'] = -1
+    assert any('gather_wait_sec' in m for m in validate_waypoints(wp))
+
+
+def test_validate_negative_fire_dist_rejected():
+    """Codex 주입 재현: min_fire_dist=-5 — 음수 안전거리는 안전장치 무력화."""
+    wp = _valid_wp()
+    wp['search_back']['min_fire_dist'] = -5
+    assert any('min_fire_dist' in m for m in validate_waypoints(wp))
+
+
+def test_validate_zero_speed_rejected():
+    """속도 0 은 '영원히 도착 안 함' — 양수 강제."""
+    wp = _valid_wp()
+    wp['normal_speed'] = 0
+    assert any('normal_speed' in m for m in validate_waypoints(wp))
+
+
+def test_validate_bool_coord_rejected():
+    """bool 은 int 하위 타입 — escape.x: true 가 숫자로 통과 금지."""
+    wp = _valid_wp()
+    wp['escape']['x'] = True
+    assert any('escape.x' in m for m in validate_waypoints(wp))
+
+
+def test_validate_string_number_rejected():
+    """yaml 따옴표 실수: x: "3.0" (문자열) 도 검거."""
+    wp = _valid_wp()
+    wp['gather']['x'] = '3.0'
+    assert any('gather.x' in m for m in validate_waypoints(wp))
 
 
 # --- ★ 07-19 Codex §3.3: 그래프 fail-fast 강화 (숫자·기하·연결성) ---

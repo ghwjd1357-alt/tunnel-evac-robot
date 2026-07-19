@@ -216,3 +216,109 @@ def test_stale_goal_result_not_canceled_reports_error():
     result = types.SimpleNamespace(status=GoalStatus.STATUS_SUCCEEDED)
     late.result_cb(types.SimpleNamespace(result=lambda: result))
     assert any('취소되지 않고' in m for m in node._logs)
+
+
+# ============================================================
+# ★ S1-4 (07-19 Codex §10.6): Action 콜백 예외 방어
+#   future.result()/cancel 호출이 던지는 예외가 콜백 밖으로 새면 executor
+#   로그에만 남고 미션은 goal_active=True 로 영구 대기 — FAULT 로 정리돼야.
+# ============================================================
+def failing_future(exc=RuntimeError('rmw down')):
+    def boom():
+        raise exc
+    return types.SimpleNamespace(result=boom)
+
+
+def test_goal_response_exception_enters_fault():
+    """응답 future 가 예외 — 전파 금지 + 상태 정리 + FAULT."""
+    node = bare_node()
+    node.goal_seq = 1
+    node.goal_active = True
+    faults = []
+    node.enter_fault = lambda: faults.append(1)
+    node.on_goal_response(1, failing_future())   # 예외가 새면 여기서 터짐
+    assert faults == [1]
+    assert not node.goal_active
+    assert node._goal_handle is None
+
+
+def test_stale_goal_response_exception_quiet():
+    """지난 seq 의 응답 예외 — 현재 미션 상태를 건드리면 안 됨 (FAULT 금지)."""
+    node = bare_node()
+    node.goal_seq = 2
+    node.goal_active = True                      # 새 goal 진행 중 가정
+    faults = []
+    node.enter_fault = lambda: faults.append(1)
+    node.on_goal_response(1, failing_future())
+    assert not faults
+    assert node.goal_active                      # 현재 goal 불변
+
+
+def test_result_exception_enters_fault():
+    """결과 future 예외 — 핸들 정리 + FAULT (영구 대기 방지)."""
+    node = bare_node()
+    node.goal_seq = 3
+    handle = FakeGoalHandle(accepted=True)
+    node.on_goal_response(3, fake_future(handle))
+    faults = []
+    node.enter_fault = lambda: faults.append(1)
+    node.on_result(3, failing_future())
+    assert faults == [1]
+    assert node._goal_handle is None
+    assert not node.goal_active
+
+
+def test_cancel_call_exception_guarded():
+    """cancel_goal_async 호출 자체가 예외 — 전파 금지 + '정지 미보장' 에러 로그."""
+    class ExplodingCancelHandle(FakeGoalHandle):
+        def cancel_goal_async(self):
+            raise RuntimeError('server gone')
+
+    node = bare_node()
+    node.goal_seq = 3
+    handle = ExplodingCancelHandle(accepted=True)
+    node.on_goal_response(3, fake_future(handle))
+    node.cancel_current_goal()                   # 예외가 새면 여기서 터짐
+    assert node._goal_handle is None
+    assert any('취소 요청 실패' in m for m in node._logs)
+
+
+# ============================================================
+# ★ S1-5 (07-19 Codex §9.4): 속도 변경은 '요청'이 아니라 '확인'까지
+# ============================================================
+def speed_node():
+    node = bare_node()
+    calls = []
+    node.param_cli = types.SimpleNamespace(
+        service_is_ready=lambda: True,
+        call_async=lambda req: calls.append(req) or types.SimpleNamespace(
+            add_done_callback=lambda cb: setattr(node, '_speed_cb', cb)))
+    node._speed_calls = calls
+    return node
+
+
+def fake_speed_response(successful, reason=''):
+    res = types.SimpleNamespace(results=[
+        types.SimpleNamespace(successful=successful, reason=reason)])
+    return types.SimpleNamespace(result=lambda: res)
+
+
+def test_speed_change_confirmed_on_success():
+    node = speed_node()
+    node.set_nav_speed(0.12)
+    assert len(node._speed_calls) == 1
+    node._speed_cb(fake_speed_response(True))
+    assert any('변경 확인' in m for m in node._logs)
+
+
+def test_speed_change_retries_then_errors():
+    """실패 응답 → 재시도 2회 → 3회째도 실패면 에러 보고 (조용한 실패 금지)."""
+    node = speed_node()
+    node.set_nav_speed(0.12)
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 1차 실패 → 재시도
+    assert len(node._speed_calls) == 2
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 2차 실패 → 재시도
+    assert len(node._speed_calls) == 3
+    node._speed_cb(fake_speed_response(False, 'rejected'))   # 3차 실패 → 포기+에러
+    assert len(node._speed_calls) == 3                       # 더 안 쏨
+    assert any('3회 실패' in m for m in node._logs)

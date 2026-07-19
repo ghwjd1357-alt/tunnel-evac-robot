@@ -265,6 +265,24 @@ def compute_gather_point_graph(fx, fy, ex, ey, gather_dist, graph):
     return {'x': x1, 'y': y1, 'yaw': math.atan2(y1 - y0, x1 - x0)}
 
 
+def distance_to_graph(px, py, graph):
+    """점에서 복도 그래프(간선들)까지의 최단거리 (S1-1 알람 검증용 순수 함수).
+
+    관제 클릭이 복도에서 이만큼 떨어져 있으면 '지도 밖 오클릭'으로 의심할 근거.
+    그래프 구조가 계산 불가면 None (호출부가 검사 생략 판단)."""
+    try:
+        nodes = {n: (float(p['x']), float(p['y']))
+                 for n, p in graph['nodes'].items()}
+        edges = [(a, b) for a, b in graph['edges']
+                 if a in nodes and b in nodes]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not edges:
+        return None
+    return min(project_to_segment(px, py, *nodes[a], *nodes[b])[3]
+               for a, b in edges)
+
+
 def validate_waypoints(wp):
     """waypoints.yaml 필수 키 검사 (fail-fast, 07-07 — 순수 함수, 단위테스트 대상).
 
@@ -281,8 +299,34 @@ def validate_waypoints(wp):
             return None
         return d[key]
 
-    for k in ('gather_wait_sec', 'guide_speed', 'normal_speed'):
-        need(wp, k, k)
+    def num_ok(v):
+        # ★ bool 은 int 의 하위 타입 — true 가 숫자로 통과하는 것 차단 (그래프 검사와 동일 함정)
+        return (not isinstance(v, bool) and isinstance(v, (int, float))
+                and math.isfinite(v))
+
+    def need_num(d, key, path, positive=False, nonneg=False, optional=False):
+        """숫자 키 검사 (S1-3, 07-19 Codex §10.6 공격 재현 반영).
+
+        기존 검사는 '키 존재'만 봐서 patrol.x=NaN·guide_speed=NaN·음수 대기시간이
+        전부 통과 — 미션 한복판에서야 이상 거동. 타입·유한값·부호까지 시작에 검거."""
+        if not isinstance(d, dict) or key not in d:
+            if not optional:
+                missing.append(path)
+            return
+        v = d[key]
+        if not num_ok(v):
+            missing.append(f'{path}(숫자 아님/NaN/inf: {v!r})')
+        elif positive and v <= 0:
+            missing.append(f'{path}(양수 아님: {v!r})')
+        elif nonneg and v < 0:
+            missing.append(f'{path}(음수: {v!r})')
+
+    need_num(wp, 'gather_wait_sec', 'gather_wait_sec', nonneg=True)
+    need_num(wp, 'guide_speed', 'guide_speed', positive=True)
+    need_num(wp, 'normal_speed', 'normal_speed', positive=True)
+    need_num(wp, 'gather_dist', 'gather_dist', positive=True, optional=True)
+    need_num(wp, 'alarm_max_projection_dist', 'alarm_max_projection_dist',
+             positive=True, optional=True)
     patrol = need(wp, 'patrol', 'patrol')
     if patrol is not None:
         if not isinstance(patrol, list) or not patrol:
@@ -290,16 +334,27 @@ def validate_waypoints(wp):
         else:
             for n, p in enumerate(patrol):
                 for k in ('x', 'y'):
-                    need(p, k, f'patrol[{n}].{k}')
+                    need_num(p, k, f'patrol[{n}].{k}')
+                need_num(p, 'yaw', f'patrol[{n}].yaw', optional=True)
     for name in ('gather', 'escape'):
         pt = need(wp, name, name)
         if pt is not None:
             for k in ('x', 'y'):
-                need(pt, k, f'{name}.{k}')
+                need_num(pt, k, f'{name}.{k}')
+            need_num(pt, 'yaw', f'{name}.yaw', optional=True)
     sb = need(wp, 'search_back', 'search_back')
     if sb is not None:
-        for k in ('max_attempts', 'min_fire_dist', 'refind_wait_sec'):
-            need(sb, k, f'search_back.{k}')
+        need_num(sb, 'max_attempts', 'search_back.max_attempts', nonneg=True)
+        need_num(sb, 'min_fire_dist', 'search_back.min_fire_dist', nonneg=True)
+        need_num(sb, 'refind_wait_sec', 'search_back.refind_wait_sec',
+                 positive=True)
+        # 선택 튜닝 키 — 있으면 타입·부호까지 (라이다 물리 파라미터라 오타가 잦은 곳)
+        for k in ('cone_half_deg', 'detect_range', 'lost_sec', 'seen_sec',
+                  'cluster_max_width', 'range_jump', 'edge_margin',
+                  'scan_timeout'):
+            need_num(sb, k, f'search_back.{k}', positive=True, optional=True)
+        need_num(sb, 'min_points', 'search_back.min_points',
+                 positive=True, optional=True)
     # corridor_graph 는 선택 키 — 있으면 구조까지 검사 (07-19).
     # 오타 난 간선 이름은 '그 화재가 처음 난 순간' 조용한 fallback 으로 숨어버림 → 시작에 검거.
     cg = wp.get('corridor_graph')
@@ -474,7 +529,18 @@ class MissionNode(Node):
         fut.add_done_callback(partial(self.on_goal_response, seq))
 
     def on_goal_response(self, seq, future):
-        handle = future.result()
+        # ★ S1-4 (07-19 Codex §10.6): future.result() 예외가 콜백 밖으로 새면
+        #   rclpy executor 로그에만 남고 미션은 goal_active=True 로 영구 대기.
+        #   예외 = 응답 자체를 못 받음 → 상태 정리 + FAULT (재시도 경로로).
+        try:
+            handle = future.result()
+        except Exception as e:
+            self.get_logger().error(f'★ goal 응답 수신 실패: {e} → FAULT')
+            if seq == self.goal_seq:
+                self.goal_active = False
+                self._goal_handle = None
+                self.enter_fault()
+            return
         if seq != self.goal_seq:
             # ★ 취소 레이스 수정 (07-19 P0): send_goal 응답이 오기 전에
             #   cancel_current_goal()(알람·abort·역행)이 먼저 실행되면 그 시점엔
@@ -500,13 +566,30 @@ class MissionNode(Node):
         handle.get_result_async().add_done_callback(partial(self.on_result, seq))
 
     def on_result(self, seq, future):
+        try:
+            status = future.result().status
+        except Exception as e:          # S1-4: 결과 수신 실패도 미션을 멈추면 안 됨
+            self.get_logger().error(f'★ goal 결과 수신 실패(seq={seq}): {e}')
+            if seq == self.goal_seq:
+                self._goal_handle = None
+                self.goal_active = False
+                self.enter_fault()
+            return
         if seq != self.goal_seq:
+            # ★ S1-7 (Codex §9.5): 취소한(=지난) goal 의 최종 status 도 관찰.
+            #   cancel_current_goal 경로는 _on_stale_result 가 없어서 여기가
+            #   유일한 관찰 지점 — CANCELED 외 종결(성공/실패)은 특이 사건.
+            if status == GoalStatus.STATUS_CANCELED:
+                self.get_logger().info(f'지난 목표(seq={seq}) CANCELED 종결 확인')
+            else:
+                self.get_logger().warn(
+                    f'지난 목표(seq={seq})가 취소 아닌 status={status} 로 종결 — '
+                    f'취소 전 이미 끝났거나 취소 실패 (주행 이력 확인 권장)')
             return
         # 끝난 goal 핸들은 즉시 비움 (07-19): 남겨두면 다음 cancel 이 '이미 끝난
         # 핸들'을 취소하는 헛손질을 하고, 위 stale-취소 경로와 조합 시 혼동 소지.
         self._goal_handle = None
         self.goal_active = False
-        status = future.result().status
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.fault_retries = 0
             self.on_reached()
@@ -529,7 +612,11 @@ class MissionNode(Node):
         이미 종결) 아무도 모른 채 "abort = 정지 보장"이라 믿는 구멍.
         재시도는 안 한다: 거절의 흔한 원인이 '이미 종결'(무해)이라 재시도는
         무의미하고, 진짜 이상은 아래 경고가 관제 로그로 올라가는 게 대응."""
-        fut = handle.cancel_goal_async()
+        try:                            # S1-4: 호출 자체의 예외도 미션을 못 세우게
+            fut = handle.cancel_goal_async()
+        except Exception as e:
+            self.get_logger().error(f'★ {tag} 취소 요청 실패: {e} — 정지 미보장')
+            return
         fut.add_done_callback(partial(self._on_cancel_response, tag))
 
     def _on_cancel_response(self, tag, future):
@@ -753,29 +840,50 @@ class MissionNode(Node):
                 f'알람 수신했으나 상태 {self.state.name} — 무시 (PATROL 에서만 접수)',
                 throttle_duration_sec=5.0)
             return
+        # ★ S1-1 알람 신뢰경계 (07-19 Codex §9.2 재현 반영): 검증 통과 전엔
+        #   상태를 아무것도 바꾸지 않는다. NaN/Inf 는 그래프 투영에서 예외도 없이
+        #   '멀쩡한 집결지'로 둔갑하고(재현: NaN→(4,0)), 1km 밖 오클릭도 정상
+        #   화재처럼 처리되던 구멍 — 진입점에서 거부가 유일한 방어선.
+        fx, fy = msg.pose.position.x, msg.pose.position.y
+        if not (math.isfinite(fx) and math.isfinite(fy)):
+            self.get_logger().warn(
+                f'알람 거부: 좌표가 유한값 아님 ({fx!r}, {fy!r})')
+            return
+        if msg.header.frame_id != 'map':
+            self.get_logger().warn(
+                f'알람 거부: frame_id "{msg.header.frame_id}" (map 만 접수 — '
+                f'좌표계 불명 화재로 출동 금지)')
+            return
+        graph = self.wp.get('corridor_graph')
+        maxd = float(self.wp.get('alarm_max_projection_dist', 5.0))
+        if graph is not None:
+            d = distance_to_graph(fx, fy, graph)
+            if d is not None and d > maxd:
+                self.get_logger().warn(
+                    f'알람 거부: 복도에서 {d:.1f}m 떨어진 좌표 (허용 {maxd}m) — '
+                    f'지도 밖 오클릭 의심. 관제에서 좌표 확인 후 재발사 요망')
+                return
         self.fire = {
-            'pos': (msg.pose.position.x, msg.pose.position.y),
+            'pos': (fx, fy),
             'kind': 'fire',             # 자리 예약
         }
-        # ⓐ 집결지 계산 (07-06, 07-19 그래프판 승격): 화재→탈출구 경로 위 gather_dist 지점.
-        #   1순위 = 복도 그래프(곁복도 화재도 벽 안 뚫는 지점 보장)
-        #   2순위 = 직선 수식(그래프 미선언/계산 불가 시)
-        #   3순위 = yaml 고정값 (APPROACH tick 의 기존 fallback)
-        fx, fy = self.fire['pos']
+        # ⓐ 집결지 계산 (07-06 → 07-19 그래프판 → S1-2 정책 확정):
+        #   그래프 선언 시   = 그래프 계산, 실패하면 직선 '건너뛰고' yaml 고정값
+        #   그래프 미선언 시 = 직선 수식, 실패하면 yaml 고정값
+        #   (직선 fallback 을 그래프 실패에 쓰지 않는 이유 — Codex §8.2 재현:
+        #    화재·탈출구가 raw 좌표는 달라도 같은 그래프 끝점에 투영되면 경로
+        #    길이 0 → None 인데, 이때 직선식은 벽 안 좌표를 내놓는다. yaml
+        #    고정값은 사람이 검증한 좌표라 항상 안전한 쪽.)
         esc = self.wp['escape']
         gd = float(self.wp.get('gather_dist', 8.0))
-        graph = self.wp.get('corridor_graph')
-        self.gather_wp = None
         if graph is not None:
             self.gather_wp = compute_gather_point_graph(
                 fx, fy, float(esc['x']), float(esc['y']), gd, graph)
             if self.gather_wp is None:
-                # 정책 판단 (07-19 Codex §3.3): 그래프는 시작 검증이 숫자·연결성까지
-                # 통과시킨 상태라 여기서 None 은 사실상 '화재≈탈출구'뿐 — 그 경우
-                # 직선판도 None → yaml 고정값이 정답이므로 fallback 유지 (FAULT 아님).
                 self.get_logger().warn(
-                    '복도 그래프 집결지 계산 불가(화재≈탈출구 추정) — 직선 수식으로 대체')
-        if self.gather_wp is None:
+                    '그래프 집결지 계산 불가(화재≈탈출구 또는 동일 투영점) — '
+                    '직선 생략, yaml 검증 고정 집결지 사용')
+        else:
             self.gather_wp = compute_gather_point(
                 fx, fy, float(esc['x']), float(esc['y']), gd)
         if self.gather_wp is not None:
@@ -783,7 +891,7 @@ class MissionNode(Node):
                 f'집결지 계산: 화재({fx:.1f},{fy:.1f}) → '
                 f'({self.gather_wp["x"]:.1f}, {self.gather_wp["y"]:.1f})')
         else:
-            self.get_logger().warn('집결지 계산 불가(화재=탈출구) — yaml 고정 집결지 사용')
+            self.get_logger().warn('집결지 계산값 없음 — yaml 검증 고정 집결지 사용')
         self.get_logger().info('🔥 화재 알람 수신 → PATROL 중단, APPROACH 시작 (싸이렌 ON)')
         self.cancel_current_goal()
         self.set_siren(True)
@@ -840,16 +948,43 @@ class MissionNode(Node):
     def set_siren(self, on: bool):
         self.siren_on = on              # 발행은 tick 이 매번 반복
 
-    def set_nav_speed(self, v: float):
-        """RPP 순항속도 동적 변경 (비동기 — 블로킹 금지)."""
+    def set_nav_speed(self, v: float, attempt=1):
+        """RPP 순항속도 동적 변경 (비동기 — 블로킹 금지).
+
+        ★ S1-5 (07-19 Codex §9.4): '요청하고 잊기' 금지 — 응답의
+        results[].successful 까지 확인해야 "GUIDE 저속(0.12) 요청이 조용히
+        실패해 사람 걸음 배려 없이 평시 0.26 으로 유도" 구멍이 막힌다.
+        실패 시 최대 3회 재시도 후 에러 보고 (cancel 감시와 같은 원칙:
+        비동기 요청은 '호출'이 아니라 '완결'을 검증한다)."""
         if not self.param_cli.service_is_ready():
             self.get_logger().warn('controller_server 파라미터 서비스 없음 — 속도 변경 생략')
             return
         p = Parameter()
         p.name = 'FollowPath.desired_linear_vel'
         p.value = ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=v)
-        self.param_cli.call_async(SetParameters.Request(parameters=[p]))
-        self.get_logger().info(f'주행속도 변경 요청 → {v} m/s')
+        fut = self.param_cli.call_async(SetParameters.Request(parameters=[p]))
+        fut.add_done_callback(partial(self._on_speed_result, v, attempt))
+        self.get_logger().info(f'주행속도 변경 요청 → {v} m/s (시도 {attempt})')
+
+    def _on_speed_result(self, v, attempt, future):
+        """속도 변경 응답 확인 콜백 (S1-5)."""
+        try:
+            res = future.result()
+            ok = bool(res.results) and all(r.successful for r in res.results)
+            reason = '' if ok else '; '.join(
+                r.reason for r in res.results if not r.successful)
+        except Exception as e:
+            ok, reason = False, str(e)
+        if ok:
+            self.get_logger().info(f'주행속도 변경 확인 → {v} m/s')
+        elif attempt < 3:
+            self.get_logger().warn(
+                f'속도 변경 실패({reason}) — 재시도 {attempt + 1}/3')
+            self.set_nav_speed(v, attempt + 1)
+        else:
+            self.get_logger().error(
+                f'★ 속도 변경 3회 실패({reason}) — 현재 주행속도가 요청값 {v} 와 '
+                f'다를 수 있음 (GUIDE 저속 미적용 위험, 관제 확인 필요)')
 
 
 def main(args=None):

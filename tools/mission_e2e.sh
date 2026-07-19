@@ -125,7 +125,17 @@ wait_state GATHER "$T_GATHER"
 wait_state GUIDE 60
 
 echo "== ⑦ 유도 15초 진행 후 놓침 재현 (follower stop)"
-sleep 15
+sleep 5
+# ★ S1-5 (07-19): 상태 전이만 보지 말고 GUIDE 저속이 '실제로' 적용됐는지 —
+#   set_nav_speed 요청이 조용히 실패하면 사람 걸음 배려 없이 0.26 으로 유도하는 구멍
+v=$(ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null \
+    | grep -oE '[0-9]+\.[0-9]+')
+if [ "$v" = "0.12" ]; then
+  echo "  ✓ GUIDE 저속 0.12 m/s 실측 확인"
+else
+  fail "GUIDE 중 desired_linear_vel=$v ≠ 0.12 (속도 변경 미적용 — S1-5)"
+fi
+sleep 10
 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
   "{data: stop}" >/dev/null 2>&1
 grep -q "stop" "$LOGDIR/follower.log" || echo "  (경고: follower 로그에 stop 미확인)"
