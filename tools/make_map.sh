@@ -7,8 +7,11 @@
 #      → maps/tunnel_localization.{posegraph,data}
 #   ② pgm+yaml 저장 (사람 눈 확인·기록용) → maps/tunnel_map_loc.{pgm,yaml}
 #
-# 사용: bash tools/make_map.sh         (T자 터널, 약 6분)
+# 사용: bash tools/make_map.sh         (T자 터널, 약 11분 — 승격 전 negative 수락 게이트 포함)
 #       bash tools/make_map.sh twin    (쌍굴 터널 → maps/twin_localization.*, 약 12분)
+# 흐름(G2·G3): 주행 → staging 저장(4파일, yaml 경로 정정 포함) → 스모크(도달+TF-GT)
+#   → [T자] staging 부정 회귀 = 수락 게이트 → map_promote.sh transaction 승격 → manifest
+#   전부 fail-closed: 어느 단계가 실패해도 정본 무손상 (staging 보존 = 재시도 가능)
 # 지도를 다시 만들 때(월드 변경 등)도 이 스크립트 한 번이면 끝 — 재현 가능.
 #
 # 노하우 박제: set -u 는 source 뒤 / pkill 브래킷 트릭 / send_goal 재전송 (§15.7)
@@ -165,8 +168,18 @@ ls -l "$MAPDIR/$STAGING".* 2>/dev/null || fail "staging posegraph 파일 없음"
 #   스모크 실패 런에서도 사람 확인용 지도가 이미 바뀌어 있었다
 PGM_STAGING="${OUT_PGM}_staging"
 rm -f "$MAPDIR/$PGM_STAGING".*
+# ★ G2 (Codex §13.4-1): '기록용이라 계속' 폐지 — pgm 실패도 승격 차단.
+#   4파일 transaction 주장이 조건부가 되지 않게 fail-closed 로 통일.
 timeout 30 ros2 run nav2_map_server map_saver_cli -f "$MAPDIR/$PGM_STAGING" \
-  >> "$LOGDIR/mapsaver.log" 2>&1 || echo "  (pgm 저장 실패 — 기록용이라 계속)"
+  >> "$LOGDIR/mapsaver.log" 2>&1 || fail "pgm 저장 실패 — 승격 차단 (G2 fail-closed)"
+[ -s "$MAPDIR/$PGM_STAGING.pgm" ] && [ -s "$MAPDIR/$PGM_STAGING.yaml" ] \
+  || fail "pgm/yaml staging 파일 없음/빈파일 — 승격 차단"
+# ★ G2 (Codex §13.4-4): yaml 의 image: 경로를 staging 단계에서 정본 이름으로
+#   정정+검증 — 기존엔 승격 '후' 무검증 sed 라 실패 시 yaml 이 이동된 staging
+#   pgm 이름을 가리킨 채 남을 수 있었다. 이제 경로 정정도 transaction 안쪽.
+sed -i "s|$PGM_STAGING|$OUT_PGM|g" "$MAPDIR/$PGM_STAGING.yaml"
+grep -q "image: .*$OUT_PGM.pgm" "$MAPDIR/$PGM_STAGING.yaml" \
+  || fail "yaml image 경로 정정 실패 — 승격 차단"
 
 echo "== ⑤ 스모크 검증: 새 지도로 localization 기동 + goal 1개 (약 2분)"
 cleanup
@@ -203,51 +216,42 @@ try:
 except Exception:
     print('nan')")
 if [ "$tf_err" = "nan" ]; then
-  echo "  (TF-GT 오차 측정 실패 — 도달 판정만으로 계속)"
+  # ★ G2 (Codex §13.4-2): 측정 실패 = 통과가 아니라 차단 — F1 사고(위치추정
+  #   오차가 tolerance 를 삼켜 blocked goal 오성공)의 검사 게이트가 fail-open
+  #   이면 게이트가 아니다.
+  fail "TF-GT 오차 측정 실패 — 위치추정 정직성 미확인, 승격 차단 (G2 fail-closed)"
 elif python3 -c "exit(0 if $tf_err <= 0.3 else 1)"; then
   echo "  ✓ 스모크 통과 (도달 + TF-GT 오차 ${tf_err}m ≤ 0.3m)"
 else
   fail "스모크 위치추정 오차 ${tf_err}m > 0.3m — 새 지도 품질 불량, 정본 유지"
 fi
 
-echo "== ⑥ 승격: 4파일 transaction (백업 확인 → 일괄 mv → 실패 시 rollback)"
-cleanup
-# ★ F3 (Codex §12.5): ① 초 단위 스탬프 (같은 분 재실행이 백업을 덮던 구멍)
-#   ② 백업 cp 실패 시 승격 중단 (staging 은 남아 재시도 가능)
-#   ③ posegraph/data/pgm/yaml 을 쌍으로 승격, 중간 실패면 이미 옮긴 것 원복
-#      (첫 mv 성공 + 둘째 실패 = 세대가 다른 파일 쌍 방지)
-STAMP=$(date +%y%m%d_%H%M%S)
-SRCS=("$STAGING.posegraph" "$STAGING.data")
-DSTS=("$OUT_POSEGRAPH.posegraph" "$OUT_POSEGRAPH.data")
-BAKS=("$OUT_POSEGRAPH.bak_$STAMP.posegraph" "$OUT_POSEGRAPH.bak_$STAMP.data")
-if [ -f "$MAPDIR/$PGM_STAGING.pgm" ] && [ -f "$MAPDIR/$PGM_STAGING.yaml" ]; then
-  SRCS+=("$PGM_STAGING.pgm" "$PGM_STAGING.yaml")
-  DSTS+=("$OUT_PGM.pgm" "$OUT_PGM.yaml")
-  BAKS+=("$OUT_PGM.bak_$STAMP.pgm" "$OUT_PGM.bak_$STAMP.yaml")
+if [ "$MODE" = "tunnel" ]; then
+  echo "== ⑤.5 승격 전 수락 게이트: staging 지도로 부정 회귀 (G3 — F1 개정 자동화, 약 5분)"
+  # ★ G3 (Codex §13.4-5): "승격 후 negative 를 사람이 돌린다" 안내문은 게이트가
+  #   아니다 (잊으면 불량 지도가 정본으로 잔존 — F1 재발 경로). 승격 '전'에
+  #   staging 지도로 자동 실행 = 불량 지도는 정본 이름을 얻지 못한다.
+  #   (twin 판 negative 는 기존 백로그 유지 — twin 은 스모크+TF 게이트까지)
+  cleanup
+  bash ~/ros2_ws/tools/regression_negative.sh localization_params:="$SMOKE_YAML" \
+    || fail "staging 지도 부정 회귀 FAIL — 승격 금지 (지도 수락 기준 미달, 정본 무손상)"
 else
-  echo "  (pgm staging 없음 — posegraph/data 만 승격)"
+  echo "  (twin: negative twin 판 백로그 — 스모크+TF 게이트로 승격, mission_e2e twin 으로 사후 확인)"
 fi
-# 백업 (전 파일 성공해야 승격 개시)
-for i in "${!DSTS[@]}"; do
-  if [ -f "$MAPDIR/${DSTS[$i]}" ]; then
-    cp "$MAPDIR/${DSTS[$i]}" "$MAPDIR/${BAKS[$i]}" \
-      || fail "백업 실패(${DSTS[$i]}) — 승격 중단 (정본·staging 무손상)"
-  fi
-done
-# 일괄 승격 + 실패 시 rollback
-rollback() {
-  echo "  ★ 승격 중 실패 — 이미 옮긴 파일 원복"
-  local j
-  for j in $(seq 0 $(($1 - 1))); do
-    [ -f "$MAPDIR/${BAKS[$j]}" ] && cp "$MAPDIR/${BAKS[$j]}" "$MAPDIR/${DSTS[$j]}"
-  done
-}
-for i in "${!DSTS[@]}"; do
-  mv "$MAPDIR/${SRCS[$i]}" "$MAPDIR/${DSTS[$i]}" \
-    || { rollback "$i"; fail "승격 실패(${SRCS[$i]}) — 정본은 rollback 됨"; }
-done
-# yaml 내부 image: 경로가 staging 이름을 가리키므로 정본 이름으로 정정
-[ -f "$MAPDIR/$OUT_PGM.yaml" ] && sed -i "s|$PGM_STAGING|$OUT_PGM|" "$MAPDIR/$OUT_PGM.yaml"
+
+echo "== ⑥ 승격: 4파일 transaction → tools/map_promote.sh (G2 소도구 분리)"
+cleanup
+# ★ G2 (Codex §13.4-3): 승격 로직을 격리 테스트 가능한 소도구로 —
+#   최초 생성(기존 정본 없음) rollback 까지 하네스로 검증됨 (staging 보존 포함).
+#   초 단위 스탬프·백업 실패 중단·중간 실패 원복은 F3 정책 계승.
+STAMP=$(date +%y%m%d_%H%M%S)
+bash ~/ros2_ws/tools/map_promote.sh "$MAPDIR" "$STAMP" \
+  "$STAGING.posegraph:$OUT_POSEGRAPH.posegraph" \
+  "$STAGING.data:$OUT_POSEGRAPH.data" \
+  "$PGM_STAGING.pgm:$OUT_PGM.pgm" \
+  "$PGM_STAGING.yaml:$OUT_PGM.yaml" \
+  || fail "승격 transaction 실패 — 이전 상태로 원복됨 (staging 보존, 재시도 가능)"
+DSTS=("$OUT_POSEGRAPH.posegraph" "$OUT_POSEGRAPH.data" "$OUT_PGM.pgm" "$OUT_PGM.yaml")
 # ★ F3 (Codex §12.5-5·6): manifest 에 재현에 필요한 전부 —
 #   dirty tree 면 commit 만으로 생성 과정 재현 불가함을 명시
 {
@@ -269,9 +273,11 @@ done
 } > "$MAPDIR/$OUT_POSEGRAPH.manifest.txt"
 echo "  ✓ 정본 승격 + manifest: $MAPDIR/$OUT_POSEGRAPH.manifest.txt (백업: .bak_$STAMP)"
 
-echo "== 완료 — localization 모드 재료 준비 끝 (스모크 검증됨)"
-# ★ F1 (07-19): 스모크(정상 goal+TF 오차)를 통과한 지도가 부정 회귀에서 검거된
-#   실전 사례 — 새 지도의 위치추정 오차는 '실패 goal 회복행동 이후'에만 커져서
-#   blocked goal 이 believed 위치로 오성공했다. 승격 = 수락 아님.
-echo "⚠ 승격 후 필수 (T자): bash tools/regression_negative.sh 통과까지가 지도 수락"
-echo "   (twin 은 mission_e2e.sh twin — 부정 회귀 twin 판은 백로그)"
+# ★ F1→G3 (07-19): 스모크 통과 지도가 부정 회귀에서 검거된 실전 사례 후속 —
+#   T자는 negative 가 승격 '전' 자동 게이트로 올라감 (⑤.5). 사람 기억에 의존 안 함.
+if [ "$MODE" = "tunnel" ]; then
+  echo "== 완료 — 스모크 + 부정 회귀(수락 게이트)까지 통과한 정본 (G3 자동화)"
+else
+  echo "== 완료 — 스모크 검증된 정본 (twin: negative twin 판 백로그)"
+  echo "⚠ 권장: bash tools/mission_e2e.sh twin 으로 사후 확인"
+fi
