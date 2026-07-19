@@ -76,14 +76,27 @@ class FollowerMonitor:
     # /scan 콜백에서 호출 — 클러스터를 찾고 구역별 검출 여부를 갱신.
     # -----------------------------------------------------------
     def update(self, scan):
+        now = self.clock.now()
+        # ★ 복구 경계 (07-19 Codex 검토 §3.1): 단절돼 있던 시간을 debounce
+        #   연속시간에 포함하면 안 된다. 리셋 없이 이어 쓰면 —
+        #   · 단절 전 0.5초 본 것 + 복구 첫 사람 프레임 → 즉시 visible (가짜 재발견)
+        #   · 단절 5초가 '미검출 시간'으로 계산 → 복구 첫 빈 프레임에 즉시 lost
+        #     (빈 프레임 한 장으로 비싼 SEARCH_BACK 발동)
+        #   → 복구 순간: seen 타이머는 백지에서, lost 기산점은 '지금'으로 재무장.
+        #     (단, 한 번도 본 적 없는 zone 의 _last_seen_t=None 은 유지 —
+        #      "본 적 없으면 판단 보류" 의미를 재무장이 덮어쓰면 안 됨)
+        if self._last_scan_t is not None and \
+                (now - self._last_scan_t).nanoseconds / 1e9 >= self.scan_timeout:
+            for zone in self._first_seen_t:
+                self._first_seen_t[zone] = None
+                if self._last_seen_t[zone] is not None:
+                    self._last_seen_t[zone] = now
         self._has_scan = True
-        self._last_scan_t = self.clock.now()
+        self._last_scan_t = now
         person_like = [c for c in self._find_clusters(scan)
                        if self._is_person_like(c, scan)]
         detected_any = len(person_like) > 0
         detected_rear = any(self._in_rear_cone(c, scan) for c in person_like)
-
-        now = self.clock.now()
         for zone, det in (('rear', detected_rear), ('any', detected_any)):
             if det:
                 if self._first_seen_t[zone] is None:

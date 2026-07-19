@@ -235,6 +235,46 @@ def test_scan_resume_recovers_detection():
     assert mon.visible('any')
 
 
+def test_scan_resume_empty_requires_fresh_lost_sec():
+    """★ 07-19 Codex §3.1 재현: 사람을 보던 중 5초 단절 → 복구 첫 '빈' 프레임.
+    수정 전엔 단절 5초가 미검출 시간으로 계산돼 빈 프레임 한 장에 즉시
+    lost=True → 데이터 한 장으로 비싼 SEARCH_BACK 발동. 복구 후 lost_sec(3초)을
+    새로 채워야만 놓침 확정이어야 한다."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+    empty = make_scan([])
+
+    feed(mon, clock, person, 1.5)            # 사람을 보던 중
+    clock.advance(5.0)                       # /scan 5초 단절 (> lost_sec)
+    feed(mon, clock, empty, 0.1)             # 복구 첫 빈 프레임
+    assert not mon.lost('rear')              # ★ 즉시 놓침 금지 (수정 전 True)
+    assert not mon.lost('any')
+    feed(mon, clock, empty, 2.5)             # 복구 후 연속 미검출 2.6초 — 아직
+    assert not mon.lost('rear')
+    feed(mon, clock, empty, 0.6)             # 3.2초 — 이제 정당한 놓침
+    assert mon.lost('rear')
+
+
+def test_scan_resume_detection_requires_fresh_seen_sec():
+    """★ 07-19 Codex §3.1 재현: 0.5초만 보고(seen_sec 미달) 5초 단절 → 복구 첫
+    '사람' 프레임. 수정 전엔 단절 전 타이머가 이어져 즉시 visible=True →
+    SEARCH_BACK 이 프레임 한 장으로 재발견을 확정. 복구 후 seen_sec(1초)을
+    새로 채워야만 검출 확정이어야 한다."""
+    clock = FakeClock()
+    mon = new_monitor(clock)
+    person = make_scan([(180.0, 10, 1.5)])
+
+    feed(mon, clock, person, 0.5)            # 부분 검출 (1초 미달)
+    clock.advance(5.0)                       # 단절
+    feed(mon, clock, person, 0.1)            # 복구 첫 사람 프레임
+    assert not mon.visible('any')            # ★ 즉시 재발견 금지 (수정 전 True)
+    feed(mon, clock, person, 0.5)            # 복구 후 연속 0.6초 — 아직
+    assert not mon.visible('any')
+    feed(mon, clock, person, 0.6)            # 1.2초 — 이제 정당한 검출
+    assert mon.visible('any')
+
+
 def test_never_scanned_is_stale():
     """시작 직후(한 장도 못 받음)도 stale — 판단 보류 상태로 출발."""
     clock = FakeClock()
@@ -446,3 +486,77 @@ def test_validate_graph_edge_with_unknown_node():
     wp['corridor_graph'] = {'nodes': {'a': {'x': 0.0, 'y': 0.0}},
                             'edges': [['a', 'ghost']]}
     assert any('corridor_graph.edges[0]' in m for m in validate_waypoints(wp))
+
+
+# --- ★ 07-19 Codex §3.3: 그래프 fail-fast 강화 (숫자·기하·연결성) ---
+def _graph_wp(graph):
+    wp = _valid_wp()
+    wp['corridor_graph'] = graph
+    return wp
+
+
+def test_validate_graph_non_numeric_coord():
+    """★ Codex 재현 그대로: x: "not-a-number" — 수정 전엔 검증 통과 후
+    화재 순간 라우팅 실패 → 조용한 직선 fallback (그래프 무력화)."""
+    wp = _graph_wp({'nodes': {'a': {'x': 'not-a-number', 'y': 0.0},
+                              'b': {'x': 5.0, 'y': 0.0}},
+                    'edges': [['a', 'b']]})
+    assert any('nodes.a.x(숫자 아님' in m for m in validate_waypoints(wp))
+
+
+def test_validate_graph_nan_inf_coord():
+    """NaN/inf 좌표도 유한값 검사에 걸려야 한다 (다익스트라 거리 계산 오염 방지)."""
+    wp = _graph_wp({'nodes': {'a': {'x': float('nan'), 'y': 0.0},
+                              'b': {'x': float('inf'), 'y': 0.0}},
+                    'edges': [['a', 'b']]})
+    bad = validate_waypoints(wp)
+    assert any('nodes.a.x' in m for m in bad)
+    assert any('nodes.b.x' in m for m in bad)
+
+
+def test_validate_graph_bool_coord_rejected():
+    """파이썬 함정: bool 은 int 하위 타입 — x: true 가 숫자로 통과하면 안 됨."""
+    wp = _graph_wp({'nodes': {'a': {'x': True, 'y': 0.0},
+                              'b': {'x': 5.0, 'y': 0.0}},
+                    'edges': [['a', 'b']]})
+    assert any('nodes.a.x' in m for m in validate_waypoints(wp))
+
+
+def test_validate_graph_empty_nodes_edges():
+    """빈 nodes/edges — 선언만 하고 내용 없음 = 그래프 무력 상태를 시작에 검거."""
+    assert any('비어 있음' in m for m in validate_waypoints(
+        _graph_wp({'nodes': {}, 'edges': []})))
+
+
+def test_validate_graph_self_edge_rejected():
+    wp = _graph_wp({'nodes': {'a': {'x': 0.0, 'y': 0.0},
+                              'b': {'x': 5.0, 'y': 0.0}},
+                    'edges': [['a', 'a'], ['a', 'b']]})
+    assert any('자기 자신 간선' in m for m in validate_waypoints(wp))
+
+
+def test_validate_graph_zero_length_edge_rejected():
+    """같은 좌표의 두 노드를 잇는 길이 0 간선 — 진행 방향(yaw) 정의 불가 소지."""
+    wp = _graph_wp({'nodes': {'a': {'x': 0.0, 'y': 0.0},
+                              'b': {'x': 0.0, 'y': 0.0}},
+                    'edges': [['a', 'b']]})
+    assert any('길이 0 간선' in m for m in validate_waypoints(wp))
+
+
+def test_validate_graph_disconnected_reported():
+    """고립 구역 — 그 구역의 화재는 런타임에야 fallback 으로 새던 것을 시작에 검거."""
+    wp = _graph_wp({'nodes': {'a': {'x': 0.0, 'y': 0.0}, 'b': {'x': 5.0, 'y': 0.0},
+                              'c': {'x': 20.0, 'y': 20.0}, 'd': {'x': 25.0, 'y': 20.0}},
+                    'edges': [['a', 'b'], ['c', 'd']]})
+    assert any('비연결' in m for m in validate_waypoints(wp))
+
+
+def test_validate_graph_actual_yaml_files_pass():
+    """실제 배포 yaml 2종(T자·쌍굴)이 강화된 검사를 통과하는지 — 회귀 앵커."""
+    import os
+    import yaml
+    base = os.path.join(os.path.dirname(__file__), '..', 'config')
+    for fname in ('waypoints.yaml', 'waypoints_twin.yaml'):
+        with open(os.path.join(base, fname)) as f:
+            wp = yaml.safe_load(f)
+        assert validate_waypoints(wp) == [], f'{fname} 검사 실패'

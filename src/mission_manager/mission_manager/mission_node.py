@@ -307,19 +307,56 @@ def validate_waypoints(wp):
         nodes = need(cg, 'nodes', 'corridor_graph.nodes')
         edges = need(cg, 'edges', 'corridor_graph.edges')
         if isinstance(nodes, dict):
+            if not nodes:
+                missing.append('corridor_graph.nodes(비어 있음)')
             for n, p in nodes.items():
                 for k in ('x', 'y'):
-                    need(p, k, f'corridor_graph.nodes.{n}.{k}')
+                    v = need(p, k, f'corridor_graph.nodes.{n}.{k}')
+                    # ★ 07-19 Codex §3.3: '키 존재'만 보면 x: "not-a-number" 가
+                    #   통과 → 화재 순간 라우팅 실패 → 조용한 직선 fallback 으로
+                    #   그래프 도입 목적(벽 안 집결지 방지)이 무력화. 숫자·유한값까지.
+                    #   (bool 은 파이썬에서 int 의 하위 타입 — True 가 숫자로 통과하는 것 차단)
+                    if v is not None and (isinstance(v, bool)
+                                          or not isinstance(v, (int, float))
+                                          or not math.isfinite(v)):
+                        missing.append(
+                            f'corridor_graph.nodes.{n}.{k}(숫자 아님/NaN/inf: {v!r})')
         elif nodes is not None:
             missing.append('corridor_graph.nodes(딕셔너리 아님)')
         if isinstance(edges, list):
+            if not edges:
+                missing.append('corridor_graph.edges(비어 있음)')
             for i, e in enumerate(edges):
                 if (not isinstance(e, list) or len(e) != 2
                         or not isinstance(nodes, dict)
                         or e[0] not in nodes or e[1] not in nodes):
                     missing.append(f'corridor_graph.edges[{i}](미선언 노드/형식 오류)')
+                elif e[0] == e[1]:
+                    missing.append(f'corridor_graph.edges[{i}](자기 자신 간선: {e[0]})')
         elif edges is not None:
             missing.append('corridor_graph.edges(리스트 아님)')
+        # 구조가 멀쩡할 때만 기하·연결성 검사 (위에서 걸렸으면 좌표를 못 믿음)
+        if not any('corridor_graph' in m for m in missing):
+            coord = {n: (p['x'], p['y']) for n, p in nodes.items()}
+            adj = {n: set() for n in nodes}
+            for i, (a, b) in enumerate(edges):
+                if math.hypot(coord[a][0] - coord[b][0],
+                              coord[a][1] - coord[b][1]) < 1e-9:
+                    missing.append(f'corridor_graph.edges[{i}](길이 0 간선: {a}-{b})')
+                adj[a].add(b)
+                adj[b].add(a)
+            # 연결성: 고립 구역이 있으면 그 구역의 화재는 라우팅 실패 →
+            # 런타임에야 직선 fallback 으로 조용히 새는 걸 시작 시점에 검거
+            seen, stack = set(), [next(iter(nodes))]
+            while stack:
+                u = stack.pop()
+                if u not in seen:
+                    seen.add(u)
+                    stack.extend(adj[u] - seen)
+            isolated = sorted(set(nodes) - seen)
+            if isolated:
+                missing.append(
+                    f'corridor_graph(비연결 — 고립 노드: {", ".join(isolated)})')
     return missing
 
 
@@ -447,7 +484,12 @@ class MissionNode(Node):
             if handle is not None and handle.accepted:
                 self.get_logger().warn(
                     f'뒤늦게 수락된 이전 목표(seq={seq}) 즉시 취소 (현재 seq={self.goal_seq})')
-                handle.cancel_goal_async()
+                # ★ 07-19 Codex §3.2: '취소 요청하고 잊기'가 아니라 최종 결과까지 감시.
+                #   stale 핸들을 바로 버리면 취소 거절·통신 실패를 알 길이 없다 —
+                #   결과 콜백(클로저가 핸들 보관)이 CANCELED 아닌 종결을 에러로 보고.
+                handle.get_result_async().add_done_callback(
+                    partial(self._on_stale_result, seq))
+                self._cancel_with_confirm(handle, f'이전 목표(seq={seq})')
             return
         if not handle.accepted:
             self.get_logger().warn('목표 거부됨 → FAULT')
@@ -475,9 +517,47 @@ class MissionNode(Node):
     def cancel_current_goal(self):
         self.goal_seq += 1
         if self._goal_handle is not None:
-            self._goal_handle.cancel_goal_async()
+            self._cancel_with_confirm(self._goal_handle,
+                                      f'현재 목표(seq={self.goal_seq - 1})')
             self._goal_handle = None
         self.goal_active = False
+
+    def _cancel_with_confirm(self, handle, tag):
+        """cancel_goal_async 의 응답까지 확인 (07-19 Codex §3.2).
+
+        기존엔 취소를 '요청하고 잊기' — Nav2 가 취소를 거절해도(통신 실패·
+        이미 종결) 아무도 모른 채 "abort = 정지 보장"이라 믿는 구멍.
+        재시도는 안 한다: 거절의 흔한 원인이 '이미 종결'(무해)이라 재시도는
+        무의미하고, 진짜 이상은 아래 경고가 관제 로그로 올라가는 게 대응."""
+        fut = handle.cancel_goal_async()
+        fut.add_done_callback(partial(self._on_cancel_response, tag))
+
+    def _on_cancel_response(self, tag, future):
+        try:
+            res = future.result()
+        except Exception as e:      # 통신 실패 — 취소 접수 여부 자체를 모름
+            self.get_logger().error(f'★ {tag} 취소 응답 수신 실패: {e} — 정지 미보장')
+            return
+        if res.goals_canceling:
+            self.get_logger().info(f'{tag} 취소 접수 확인 (Nav2 정지 진행)')
+        else:
+            # 빈 응답 = 취소할 goal 이 없다는 뜻 — 대개 '이미 종결'(무해)이지만
+            # 주행이 계속된다면 이 로그가 원인 추적의 첫 단서
+            self.get_logger().warn(f'{tag} 취소 접수 안 됨 (이미 종결됐거나 거절)')
+
+    def _on_stale_result(self, seq, future):
+        """stale(취소 대상) goal 의 최종 결과 감시 — CANCELED 로 끝나야 정상."""
+        try:
+            status = future.result().status
+        except Exception as e:
+            self.get_logger().error(f'★ 이전 목표(seq={seq}) 결과 수신 실패: {e}')
+            return
+        if status == GoalStatus.STATUS_CANCELED:
+            self.get_logger().info(f'이전 목표(seq={seq}) CANCELED 종결 확인')
+        else:
+            self.get_logger().error(
+                f'★ 이전 목표(seq={seq})가 취소되지 않고 status={status} 로 종결 — '
+                f'abort/알람 시점에 로봇이 그 목표로 주행했을 수 있음 (위치 확인 필요)')
 
     # ===========================================================
     # 도달 시 상태 전이
@@ -690,7 +770,11 @@ class MissionNode(Node):
             self.gather_wp = compute_gather_point_graph(
                 fx, fy, float(esc['x']), float(esc['y']), gd, graph)
             if self.gather_wp is None:
-                self.get_logger().warn('복도 그래프 집결지 계산 불가 — 직선 수식으로 대체')
+                # 정책 판단 (07-19 Codex §3.3): 그래프는 시작 검증이 숫자·연결성까지
+                # 통과시킨 상태라 여기서 None 은 사실상 '화재≈탈출구'뿐 — 그 경우
+                # 직선판도 None → yaml 고정값이 정답이므로 fallback 유지 (FAULT 아님).
+                self.get_logger().warn(
+                    '복도 그래프 집결지 계산 불가(화재≈탈출구 추정) — 직선 수식으로 대체')
         if self.gather_wp is None:
             self.gather_wp = compute_gather_point(
                 fx, fy, float(esc['x']), float(esc['y']), gd)

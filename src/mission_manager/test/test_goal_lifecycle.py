@@ -28,9 +28,13 @@ class FakeGoalHandle:
         self.accepted = accepted
         self.cancel_called = False
         self.result_cb = None
+        self.cancel_response_cb = None   # ★ 07-19 Codex: 취소 응답 확인 콜백
 
     def cancel_goal_async(self):
         self.cancel_called = True
+        fut = types.SimpleNamespace()
+        fut.add_done_callback = lambda cb: setattr(self, 'cancel_response_cb', cb)
+        return fut
 
     def get_result_async(self):
         fut = types.SimpleNamespace()
@@ -41,6 +45,12 @@ class FakeGoalHandle:
 def fake_future(handle):
     """send_goal_async 가 돌려주는 future 흉내 — result() 가 goal 핸들."""
     return types.SimpleNamespace(result=lambda: handle)
+
+
+def fake_cancel_response(n_canceling):
+    """CancelGoal.Response 흉내 — goals_canceling 에 n개 잡힌 응답."""
+    resp = types.SimpleNamespace(goals_canceling=[object()] * n_canceling)
+    return types.SimpleNamespace(result=lambda: resp)
 
 
 def bare_node():
@@ -142,3 +152,67 @@ def test_stale_result_ignored():
     node.on_result(5, types.SimpleNamespace(result=lambda: result))
     assert node.goal_active              # 현재 goal 의 진행 상태 불변
     assert not reached
+
+
+# ============================================================
+# ★ 07-19 Codex §3.2: 취소는 '요청'이 아니라 '접수·종결 확인'까지
+# ============================================================
+def test_cancel_response_confirmed_when_accepted():
+    """취소 응답에 goals_canceling 이 잡히면 조용히 확인 로그만 (에러 없음)."""
+    node = bare_node()
+    node.goal_seq = 3
+    handle = FakeGoalHandle(accepted=True)
+    node.on_goal_response(3, fake_future(handle))
+    node.cancel_current_goal()
+    assert handle.cancel_response_cb is not None   # 응답 확인 콜백이 등록됐다
+    handle.cancel_response_cb(fake_cancel_response(1))
+    assert any('취소 접수 확인' in m for m in node._logs)
+
+
+def test_cancel_response_empty_reports_warning():
+    """취소 응답이 비었으면(거절/이미 종결) 침묵 금지 — 경고가 남아야 한다."""
+    node = bare_node()
+    node.goal_seq = 3
+    handle = FakeGoalHandle(accepted=True)
+    node.on_goal_response(3, fake_future(handle))
+    node.cancel_current_goal()
+    handle.cancel_response_cb(fake_cancel_response(0))
+    assert any('취소 접수 안 됨' in m for m in node._logs)
+
+
+def test_stale_goal_watches_final_result():
+    """stale 취소 경로: 핸들을 버리기 전에 최종 결과 콜백이 등록돼야 한다
+    (취소 거절 시 'CANCELED 아닌 종결'을 보고할 유일한 통로)."""
+    node = bare_node()
+    node.goal_seq = 2
+    late = FakeGoalHandle(accepted=True)
+    node.on_goal_response(1, fake_future(late))    # stale 수락 → 즉시 취소
+    assert late.cancel_called
+    assert late.result_cb is not None              # ★ 결과 감시 등록
+    assert late.cancel_response_cb is not None     # ★ 취소 응답 감시 등록
+
+
+def test_stale_goal_result_canceled_is_quiet():
+    """stale goal 이 정상대로 CANCELED 종결 — 확인 로그만, 에러 없음."""
+    from action_msgs.msg import GoalStatus
+    node = bare_node()
+    node.goal_seq = 2
+    late = FakeGoalHandle(accepted=True)
+    node.on_goal_response(1, fake_future(late))
+    result = types.SimpleNamespace(status=GoalStatus.STATUS_CANCELED)
+    late.result_cb(types.SimpleNamespace(result=lambda: result))
+    assert any('CANCELED 종결 확인' in m for m in node._logs)
+    assert not any('취소되지 않고' in m for m in node._logs)
+
+
+def test_stale_goal_result_not_canceled_reports_error():
+    """★ 핵심: stale goal 이 취소 안 되고 SUCCEEDED 로 끝남 = 로봇이 죽은 목표로
+    주행했다는 뜻 — 에러로 보고돼야 관제가 알 수 있다."""
+    from action_msgs.msg import GoalStatus
+    node = bare_node()
+    node.goal_seq = 2
+    late = FakeGoalHandle(accepted=True)
+    node.on_goal_response(1, fake_future(late))
+    result = types.SimpleNamespace(status=GoalStatus.STATUS_SUCCEEDED)
+    late.result_cb(types.SimpleNamespace(result=lambda: result))
+    assert any('취소되지 않고' in m for m in node._logs)

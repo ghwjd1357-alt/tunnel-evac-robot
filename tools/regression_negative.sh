@@ -45,11 +45,21 @@ fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
 
 # --- 부정 목표 전송: '성공하면 안 되고, 제한시간 안에 끝나야(무한 회복 금지)' ---
 send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨
-  local out
-  out=$(timeout "$3" ros2 action send_goal /navigate_to_pose \
-    nav2_msgs/action/NavigateToPose \
-    "{pose: {header: {frame_id: map}, pose: {position: {x: $1, y: $2}, orientation: {w: 1.0}}}}" 2>&1)
-  echo "$out" > "$LOGDIR/$4.log"
+  local out attempt
+  for attempt in 1 2; do
+    out=$(timeout "$3" ros2 action send_goal /navigate_to_pose \
+      nav2_msgs/action/NavigateToPose \
+      "{pose: {header: {frame_id: map}, pose: {position: {x: $1, y: $2}, orientation: {w: 1.0}}}}" 2>&1)
+    echo "$out" > "$LOGDIR/$4.log"
+    # ⚠ 응답 유실 함정(0705 §15.7 ③, 07-19 재발 실측): 오래 뜬 액션서버 + 새 CLI 는
+    #   goal 응답을 떨굴 수 있다(bt_navigator "Failed to send goal response" — CLI 는
+    #   영구 대기 → timeout). 수락/거부 흔적조차 없으면 '무한 회복'이 아니라
+    #   '전송 실패' = 판정 무효 → 1회 재전송. (expect_success 와 동일한 방어)
+    if echo "$out" | grep -qE "Goal accepted|rejected|REJECTED"; then
+      break
+    fi
+    echo "  (시도 $attempt: goal 응답 유실 의심 — 재전송)"
+  done
   if echo "$out" | grep -q "SUCCEEDED"; then
     fail "$4: 도달 성공 — 안전 정책 구멍! (성공하면 안 되는 목표)"
   fi

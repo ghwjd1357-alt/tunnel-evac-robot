@@ -20,7 +20,6 @@ from launch_ros.actions import Node           # '노드 하나 실행' 주문서
 
 def generate_launch_description():
     """ros2 launch 가 찾는 약속된 함수. 실행할 노드 목록을 돌려준다."""
-
     # talker 노드 실행 주문서
     talker_node = Node(
         package='my_first_pkg',   # 어느 패키지에서
