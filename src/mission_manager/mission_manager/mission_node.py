@@ -42,6 +42,7 @@ mission_node.py — 대피 유도 로봇 임무 상태머신 (③단계: 후방 
   ros2 run mission_manager mission_node --ros-args -p use_sim_time:=true
 """
 
+import heapq
 import math
 import os
 
@@ -130,6 +131,140 @@ def compute_gather_point(fx, fy, ex, ey, gather_dist):
     return {'x': gx, 'y': gy, 'yaw': yaw}
 
 
+def project_to_segment(px, py, ax, ay, bx, by):
+    """점 P 를 선분 AB 위로 '수선 투영' (07-19 그래프 모듈의 기하 부품).
+
+    수선의 발이 선분 밖이면 가까운 끝점으로 클램프 (t 를 0~1 로 제한).
+    반환: (t, qx, qy, dist)
+      t    = A→B 위 비율 (0=A, 1=B)
+      q    = 투영점 좌표
+      dist = P 에서 투영점까지 거리 (여러 선분 중 '가장 가까운 복도' 고르기 용)."""
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    if L2 < 1e-12:
+        t = 0.0                          # 길이 0 선분 — A 로 취급
+    else:
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / L2))
+    qx, qy = ax + t * dx, ay + t * dy
+    return t, qx, qy, math.hypot(px - qx, py - qy)
+
+
+def route_through_graph(sx, sy, tx, ty, graph):
+    """복도 그래프 위 최단 경로 폴리라인 (07-19 — 순수 함수, 단위테스트 대상).
+
+    왜: 직선 수식은 곁복도(분기) 화재 때 벽을 뚫는 집결지를 내놓는다(§16 한계).
+    복도 '중심선'들을 그래프로 선언해 두면, 어떤 두 점 사이든 경로가
+    항상 복도 위로만 지나간다 — Nav2 가 거부할 이유가 없는 지점만 나옴.
+
+    동작: ① 시작·끝점을 가장 가까운 간선 위로 투영(관제 클릭이 벽 안이어도 복도로 끌어옴)
+          ② 투영점을 임시 노드로 그래프에 붙이고 다익스트라 최단경로
+          ③ 좌표 폴리라인 [(x,y), ...] 반환. 그래프가 비었거나 안 이어지면 None.
+
+    graph = {'nodes': {이름: {'x','y'}}, 'edges': [[이름, 이름], ...]} (yaml 그대로)."""
+    try:
+        nodes = {n: (float(p['x']), float(p['y']))
+                 for n, p in graph['nodes'].items()}
+        edges = [(a, b) for a, b in graph['edges']
+                 if a in nodes and b in nodes]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not edges:
+        return None
+
+    # ① 시작(S)·끝(T)을 가장 가까운 간선 위로 투영
+    def nearest_on_graph(px, py):
+        best = None
+        for a, b in edges:
+            t, qx, qy, d = project_to_segment(px, py, *nodes[a], *nodes[b])
+            if best is None or d < best[0]:
+                best = (d, (a, b), (qx, qy))
+        return best[1], best[2]          # (실린 간선, 투영 좌표)
+
+    s_edge, s_pt = nearest_on_graph(sx, sy)
+    t_edge, t_pt = nearest_on_graph(tx, ty)
+
+    # ② 투영점을 임시 노드 '_S'/'_T' 로 붙인 인접 리스트 구성
+    #    (같은 간선에 둘 다 실렸으면 그 간선 위 직결도 추가)
+    adj = {n: [] for n in nodes}
+    adj['_S'], adj['_T'] = [], []
+    pos = dict(nodes, _S=s_pt, _T=t_pt)
+
+    def connect(a, b):
+        d = math.hypot(pos[a][0] - pos[b][0], pos[a][1] - pos[b][1])
+        adj[a].append((b, d))
+        adj[b].append((a, d))
+
+    for a, b in edges:
+        on = [v for v, e in (('_S', s_edge), ('_T', t_edge)) if e == (a, b)]
+        if not on:
+            connect(a, b)
+        else:                            # 간선을 투영점에서 쪼개서 연결
+            chain = sorted(on, key=lambda v: math.hypot(
+                pos[v][0] - nodes[a][0], pos[v][1] - nodes[a][1]))
+            for u, v in zip([a] + chain, chain + [b]):
+                connect(u, v)
+
+    # ③ 다익스트라 (그래프가 노드 몇 개라 성능 고려 불필요 — 정확성만)
+    dist = {'_S': 0.0}
+    prev = {}
+    pq = [(0.0, '_S')]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == '_T':
+            break
+        if d > dist.get(u, math.inf):
+            continue
+        for v, w in adj[u]:
+            nd = d + w
+            if nd < dist.get(v, math.inf):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(pq, (nd, v))
+    if '_T' not in dist:
+        return None                      # 그래프가 안 이어짐 (edges 선언 누락)
+
+    path, cur = [], '_T'
+    while True:
+        path.append(pos[cur])
+        if cur == '_S':
+            break
+        cur = prev[cur]
+    path.reverse()
+    return path
+
+
+def compute_gather_point_graph(fx, fy, ex, ey, gather_dist, graph):
+    """집결지 계산 — 복도 그래프판 (07-19, compute_gather_point 의 상위 호환).
+
+    집결지 = 화재→탈출구 '그래프 최단 경로'를 따라 화재에서 gather_dist 만큼
+    걸어간 지점. 직선판과 달리 곁복도 화재도 항상 복도 중심선 위의 도달
+    가능한 지점이 나온다. yaw = 그 지점에서 탈출구로 가는 진행 방향.
+
+    경로 전체가 gather_dist 보다 짧으면(화재가 탈출구 코앞) 탈출구로 클램프.
+    그래프 계산 불가(빈 그래프·비연결·화재=탈출구)면 None → 호출부가
+    직선판 → yaml 고정값 순으로 fallback."""
+    path = route_through_graph(fx, fy, ex, ey, graph)
+    if not path or len(path) < 2:
+        return None
+    total = sum(math.hypot(x1 - x0, y1 - y0)
+                for (x0, y0), (x1, y1) in zip(path, path[1:]))
+    if total < 1e-6:
+        return None                      # 화재≈탈출구 — 진행 방향 정의 불가
+    remaining = float(gather_dist)
+    for (x0, y0), (x1, y1) in zip(path, path[1:]):
+        seg = math.hypot(x1 - x0, y1 - y0)
+        if seg < 1e-9:
+            continue
+        if remaining <= seg:
+            r = remaining / seg
+            return {'x': x0 + (x1 - x0) * r,
+                    'y': y0 + (y1 - y0) * r,
+                    'yaw': math.atan2(y1 - y0, x1 - x0)}
+        remaining -= seg
+    (x0, y0), (x1, y1) = path[-2], path[-1]   # 경로가 짧다 — 탈출구로 클램프
+    return {'x': x1, 'y': y1, 'yaw': math.atan2(y1 - y0, x1 - x0)}
+
+
 def validate_waypoints(wp):
     """waypoints.yaml 필수 키 검사 (fail-fast, 07-07 — 순수 함수, 단위테스트 대상).
 
@@ -165,6 +300,26 @@ def validate_waypoints(wp):
     if sb is not None:
         for k in ('max_attempts', 'min_fire_dist', 'refind_wait_sec'):
             need(sb, k, f'search_back.{k}')
+    # corridor_graph 는 선택 키 — 있으면 구조까지 검사 (07-19).
+    # 오타 난 간선 이름은 '그 화재가 처음 난 순간' 조용한 fallback 으로 숨어버림 → 시작에 검거.
+    cg = wp.get('corridor_graph')
+    if cg is not None:
+        nodes = need(cg, 'nodes', 'corridor_graph.nodes')
+        edges = need(cg, 'edges', 'corridor_graph.edges')
+        if isinstance(nodes, dict):
+            for n, p in nodes.items():
+                for k in ('x', 'y'):
+                    need(p, k, f'corridor_graph.nodes.{n}.{k}')
+        elif nodes is not None:
+            missing.append('corridor_graph.nodes(딕셔너리 아님)')
+        if isinstance(edges, list):
+            for i, e in enumerate(edges):
+                if (not isinstance(e, list) or len(e) != 2
+                        or not isinstance(nodes, dict)
+                        or e[0] not in nodes or e[1] not in nodes):
+                    missing.append(f'corridor_graph.edges[{i}](미선언 노드/형식 오류)')
+        elif edges is not None:
+            missing.append('corridor_graph.edges(리스트 아님)')
     return missing
 
 
@@ -522,12 +677,23 @@ class MissionNode(Node):
             'pos': (msg.pose.position.x, msg.pose.position.y),
             'kind': 'fire',             # 자리 예약
         }
-        # ⓐ 집결지 계산 (07-06): 화재 좌표 기반 — 화재→탈출구 방향 gather_dist 지점
+        # ⓐ 집결지 계산 (07-06, 07-19 그래프판 승격): 화재→탈출구 경로 위 gather_dist 지점.
+        #   1순위 = 복도 그래프(곁복도 화재도 벽 안 뚫는 지점 보장)
+        #   2순위 = 직선 수식(그래프 미선언/계산 불가 시)
+        #   3순위 = yaml 고정값 (APPROACH tick 의 기존 fallback)
         fx, fy = self.fire['pos']
         esc = self.wp['escape']
-        self.gather_wp = compute_gather_point(
-            fx, fy, float(esc['x']), float(esc['y']),
-            float(self.wp.get('gather_dist', 8.0)))
+        gd = float(self.wp.get('gather_dist', 8.0))
+        graph = self.wp.get('corridor_graph')
+        self.gather_wp = None
+        if graph is not None:
+            self.gather_wp = compute_gather_point_graph(
+                fx, fy, float(esc['x']), float(esc['y']), gd, graph)
+            if self.gather_wp is None:
+                self.get_logger().warn('복도 그래프 집결지 계산 불가 — 직선 수식으로 대체')
+        if self.gather_wp is None:
+            self.gather_wp = compute_gather_point(
+                fx, fy, float(esc['x']), float(esc['y']), gd)
         if self.gather_wp is not None:
             self.get_logger().info(
                 f'집결지 계산: 화재({fx:.1f},{fy:.1f}) → '

@@ -24,6 +24,8 @@ import types
 from mission_manager.follower_monitor import FollowerMonitor
 from mission_manager.mission_node import (clamp_to_fire_min_dist,
                                           compute_gather_point,
+                                          compute_gather_point_graph,
+                                          route_through_graph,
                                           validate_waypoints)
 
 
@@ -357,3 +359,90 @@ def test_validate_empty_patrol_rejected():
     wp = _valid_wp()
     wp['patrol'] = []
     assert any('patrol' in m for m in validate_waypoints(wp))
+
+
+# ============================================================
+# 복도 그래프 집결지 (07-19 — 곁복도 화재 대응) 테스트
+# ============================================================
+def _t_graph():
+    """waypoints.yaml 의 T자 복도 그래프 축소판 (실제 좌표 그대로)."""
+    return {
+        'nodes': {
+            'west':   {'x': 0.0,  'y': 0.0},
+            'junc':   {'x': 12.0, 'y': 0.0},
+            'east':   {'x': 26.0, 'y': 0.0},
+            'branch': {'x': 12.0, 'y': 13.0},
+        },
+        'edges': [['west', 'junc'], ['junc', 'east'], ['junc', 'branch']],
+    }
+
+
+def test_graph_route_straight_corridor():
+    """메인복도 위 두 점 — 경로는 직선과 동일해야."""
+    path = route_through_graph(14.0, 0.0, 0.0, 0.0, _t_graph())
+    total = sum(math.hypot(x1 - x0, y1 - y0)
+                for (x0, y0), (x1, y1) in zip(path, path[1:]))
+    assert abs(total - 14.0) < 1e-6
+
+
+def test_graph_route_branch_goes_through_junction():
+    """곁복도 → 탈출구 — 분기점(12,0)을 반드시 경유 (벽 뚫는 직선 금지)."""
+    path = route_through_graph(12.0, 10.0, 0.0, 0.0, _t_graph())
+    assert any(math.hypot(x - 12.0, y - 0.0) < 1e-6 for x, y in path)
+    total = sum(math.hypot(x1 - x0, y1 - y0)
+                for (x0, y0), (x1, y1) in zip(path, path[1:]))
+    assert abs(total - 22.0) < 1e-6      # 10(남하) + 12(서진)
+
+
+def test_graph_gather_standard_fire_matches_line_version():
+    """표준 화재 (14,0): 그래프판도 기존 검증값 (6,0)·서향을 재현해야 (회귀 앵커)."""
+    g = compute_gather_point_graph(14.0, 0.0, 0.0, 0.0, 8.0, _t_graph())
+    assert abs(g['x'] - 6.0) < 1e-6 and abs(g['y']) < 1e-6
+    assert abs(abs(g['yaw']) - math.pi) < 0.01
+
+
+def test_graph_gather_branch_fire_stays_in_corridor():
+    """★ 사용자 보고 재현: 곁복도 화재 (12,10) — 직선판은 (5.9, 4.9)=벽 안
+    (복도 밖: 메인복도는 y≤3, 곁복도는 x 9~15), 그래프판은 곁복도 중심선 위
+    (12,2) 가 나와야 한다."""
+    bad = compute_gather_point(12.0, 10.0, 0.0, 0.0, 8.0)
+    assert bad['y'] > 3.0 and bad['x'] < 9.0   # 직선판이 실제로 벽 안을 내놓는지 확인
+    g = compute_gather_point_graph(12.0, 10.0, 0.0, 0.0, 8.0, _t_graph())
+    assert abs(g['x'] - 12.0) < 1e-6 and abs(g['y'] - 2.0) < 1e-6
+    assert abs(g['yaw'] - (-math.pi / 2)) < 0.01   # 진행 방향 = 남쪽(분기점으로)
+
+
+def test_graph_gather_offcorridor_click_projected():
+    """관제 클릭이 복도 밖(벽 안 12.5, 20)이어도 — 가까운 복도로 투영해 계산."""
+    g = compute_gather_point_graph(12.5, 20.0, 0.0, 0.0, 8.0, _t_graph())
+    assert abs(g['x'] - 12.0) < 1e-6 and abs(g['y'] - 5.0) < 1e-6
+
+
+def test_graph_gather_fire_near_escape_clamped():
+    """화재가 탈출구 코앞 — 탈출구 자체로 클램프 (직선판과 같은 규약)."""
+    g = compute_gather_point_graph(3.0, 0.0, 0.0, 0.0, 8.0, _t_graph())
+    assert abs(g['x']) < 1e-6 and abs(g['y']) < 1e-6
+
+
+def test_graph_gather_fire_equals_escape_gives_none():
+    """화재=탈출구 — None → 호출부가 직선판→yaml 로 fallback."""
+    assert compute_gather_point_graph(0.0, 0.0, 0.0, 0.0, 8.0, _t_graph()) is None
+
+
+def test_graph_disconnected_gives_none():
+    """간선 선언이 빠져 안 이어진 그래프 — None (조용한 오답 금지)."""
+    g = _t_graph()
+    g['edges'] = [['west', 'junc']]      # east·branch 고립
+    assert route_through_graph(12.0, 10.0, 0.0, 0.0, g) is not None  # branch 투영은 junc-east 아님
+    g2 = {'nodes': {'a': {'x': 0.0, 'y': 0.0}, 'b': {'x': 5.0, 'y': 0.0},
+                    'c': {'x': 20.0, 'y': 20.0}, 'd': {'x': 25.0, 'y': 20.0}},
+          'edges': [['a', 'b'], ['c', 'd']]}
+    assert route_through_graph(25.0, 20.0, 0.0, 0.0, g2) is None
+
+
+def test_validate_graph_edge_with_unknown_node():
+    """corridor_graph 간선이 미선언 노드를 참조 — 시작 즉시 검거 (fail-fast)."""
+    wp = _valid_wp()
+    wp['corridor_graph'] = {'nodes': {'a': {'x': 0.0, 'y': 0.0}},
+                            'edges': [['a', 'ghost']]}
+    assert any('corridor_graph.edges[0]' in m for m in validate_waypoints(wp))
