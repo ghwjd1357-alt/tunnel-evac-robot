@@ -815,6 +815,12 @@ class MissionNode(Node):
                     self.resume_state = None
                     self.get_logger().warn(
                         f'재시도 {self.fault_retries}/{self.MAX_RETRIES} → {self.state.name} 복귀')
+                    if self.state == State.GUIDE:
+                        # ★ 저속 보장은 상태와 함께 자동 복귀하지 않는다 (07-20 재검토
+                        #   자기반증). FAULT 원인이 속도였다면 controller 는 아직
+                        #   평시값이고 Manager 의 복구 예산도 소진된 상태다 —
+                        #   GUIDE 로 되돌아가기 전에 저속을 다시 확인받는다.
+                        self.speed.request_guide(float(self.wp['guide_speed']))
 
     # ===========================================================
     # SEARCH_BACK 진입 — 안전장치 2개가 여기서 작동
@@ -1018,13 +1024,23 @@ class MissionNode(Node):
 
         저속 보장 불가 → 평시 속도로 사람을 유도하는 대신 정지(FAULT).
         enter_fault 의 재시도 경로가 GATHER 를 resume → 처음부터 재요청."""
-        if not (self._guide_pending and self.state == State.GATHER):
+        if self._guide_pending and self.state == State.GATHER:
+            # ① 진입 게이트 실패 — 아직 GATHER 정지 상태. 유도를 시작하지 않는다.
+            self._guide_pending = False
+            self.get_logger().error('GUIDE 저속 적용 실패 — 유도 진입 중단, FAULT')
+        elif self.state == State.GUIDE:
+            # ② ★ 유지 실패 (07-20 Codex 재검토 P1) — 이미 사람을 앞에서 유도하며
+            #   주행 중인데 controller 속도가 평시값(0.26)으로 덮인 상태다.
+            #   과속 유도가 즉시 위험하므로 정지시킨다. 이전엔 아래 '무시' 로 빠져
+            #   경고 한 줄만 남기고 0.26 인 채 유도가 계속됐다 (재검토 §10.3).
+            self.get_logger().error(
+                f'★ GUIDE 저속 보장 상실({reason}) — 유도 중단, 정지 (FAULT)')
+        else:
+            # ③ 그 외 = 늦은 통보 (기존 stale 방어) — 상태를 덮지 않는다.
             self.get_logger().warn(
                 f'늦은 guide 속도 실패 통보({reason}) 무시 — 상태 변경됨'
                 f'(현재 {self.state.name}), FAULT 안 함')
             return
-        self._guide_pending = False
-        self.get_logger().error('GUIDE 저속 적용 실패 — 유도 진입 중단, FAULT')
         self.cancel_current_goal()
         self.enter_fault()
 

@@ -22,7 +22,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (07-20, SpeedManager P1 보완 후): pytest **116 passed** / colcon **122 tests, 0 fail, 2 skip** / E2E 4종 PASS.
+기준선 (07-20, SpeedManager 재검토 보완 후): pytest **122 passed** / colcon **128 tests, 0 fail, 2 skip** / E2E 4종 PASS.
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).
 **갱신을 잊어도 `doc_check.sh` 가 실제 개수와 대조해 잡는다** — 기억이 아니라 기계가 지키는 구조.
 `make_map.sh` 는 이 게이트에 포함하지 않는다 (지도 자산 변경 — 명시 승인 시에만).
@@ -68,3 +68,30 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 
 `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/` / 비교 `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png`.
 ★ 수치는 Gazebo world-odom **시뮬 상한** — 실차 정확도로 인용 금지. 실차는 rosbag+줄자 기준점으로 별도 측정.
+
+## 7. 검토자(Codex) 실행 범위 — 변경 표면 라우팅 (07-20 신설)
+
+> §1 은 **구현자** 기준(전량)이다. 검토자가 그대로 따라 하면 같은 커밋에 E2E 를 두 번
+> 태우게 된다. 근거: 07-20 검토 2회에서 E2E 9회가 전부 PASS 했고, **P1 3건은 전부
+> 단위 harness 가 잡았다** — E2E 재실행의 결함 검출 기여는 0건이었다.
+> 반면 `regression_negative`·`regression_3goals` 는 `mission_node` 를 **띄우지도 않는다**
+> (`grep -c "mission_manager mission_node" tools/*.sh` = 0) — 미션 로직 변경과 인과가 없다.
+
+**항상 (싸고 위조·환경의존 검출력 있음)**: `pytest` + `colcon test-result` 수치 재현 +
+`doc_check.sh --after-push`. 시간 배분의 중심은 **공격 harness** — 검토자의 실제 가치다.
+
+**E2E 는 변경 표면으로 고른다:**
+
+| 변경 표면 | 검토자 필수 E2E |
+|---|---|
+| `mission_node.py` · `speed_manager.py` · `goal_manager.py` | `mission_e2e` · `abort_e2e` |
+| Nav2 파라미터 · costmap · planner · URDF | `regression_negative` · `regression_3goals` |
+| 지도 자산 | `regression_negative` + 승격 evidence |
+| 셸 도구 · 문서 전용 | 없음 (`doc_check.sh` + `bash -n`) |
+| **동결 게이트** (platform-core-freeze · mission-logic-RC · mission-v1-freeze) | **전량 + 쌍굴 + 지도 승격 evidence** |
+
+**조기 판정**: P0/P1 을 재현했으면 **그 시점에 판정하고 남은 게이트는 생략**한다.
+불승인이 확정된 커밋에 E2E 를 더 태울 이유가 없다 — 보완 후 어차피 다시 돈다.
+
+**쌍굴 mission** 은 §1 전체 게이트에 포함되지 않는다 (동결 게이트 전용).
+실패 시 재실행 규칙은 §5 그대로 — **원인 한 줄 분류 전 재실행 금지.**

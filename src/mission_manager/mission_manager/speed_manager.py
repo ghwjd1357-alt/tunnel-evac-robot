@@ -91,9 +91,14 @@ class SpeedManager:
 
         # --- 세대 토큰 + 현재 desired ---
         self._gen = 0             # 새 요청·cancel_pending 마다 +1
-        self._desired = None      # (v, purpose) — 최신 요청의 속도 (reconcile 기준)
-        self._applied = None      # ★ controller 에 '성공 확인'된 마지막 값
+        # ★ origin(상위 정책 출처)과 in-flight purpose(지금 날아가는 요청의 종류)를
+        #   분리한다. 한 값에 겸직시켰더니 guide 에서 출발한 내부 reconcile 이
+        #   양쪽에서 오분류됐다 (07-20 Codex 재검토 P1 — 0720_현황.md §22.2).
+        self._desired = None      # (v, origin) — origin ∈ guide/sync/restore
+        self._applied = None      # controller 에 '성공 확인'된 마지막 값
         self._inflight = False    # 현재 세대 요청이 응답 대기 중인가
+        self._inflight_purpose = None   # 그 요청의 종류 (reconcile 포함)
+        self._guide_confirmed = False   # GUIDE 저속이 한 번이라도 확인됐는가
 
         # --- 종결 재평가 (0720 P1 — desired 미반영 채로 끝나는 것 금지) ---
         self._settle_cooldown = 0
@@ -144,6 +149,8 @@ class SpeedManager:
         '늦은 적용값 == desired' 인 경우 불필요한 reconcile 은 안 나간다."""
         self._gen += 1
         self._inflight = False
+        self._inflight_purpose = None
+        self._guide_confirmed = False
         self._deadline_at = None
         if self._wait_since is not None:
             self._log.info(f'guide 저속 대기 취소 ({reason})')
@@ -197,6 +204,7 @@ class SpeedManager:
         self._settle_cooldown = 0
         self._settle_rounds = 0
         self._settle_gave_up = False
+        self._guide_confirmed = False
         # 이전 guide 대기가 있었다면 새 요청이 대체 (세대 불일치로 tick 이 정리)
         if not self._cli.service_is_ready():
             if purpose == 'guide':
@@ -221,6 +229,7 @@ class SpeedManager:
         if not self._cli.service_is_ready():
             # 재시도 도중 서비스 소멸 — purpose 별 기존 정책 유지
             self._inflight = False
+            self._inflight_purpose = None
             if purpose == 'guide':
                 # 다시 대기 모드 — 단, deadline 은 재무장하지 않는다 (총 예산 유지)
                 self._wait_since = self._now()
@@ -249,6 +258,7 @@ class SpeedManager:
                 self._final_fail(v, purpose, str(e), gen)
             return
         self._inflight = (gen == self._gen)
+        self._inflight_purpose = purpose
         # ★ deadline 은 '요청이 실제로 나간 시점'에 무장하되, 이미 무장돼 있으면
         #   손대지 않는다 — 재시도가 예산을 연장하면 "총 N초" 정책이 깨진다.
         #   여기 두는 이유: _new_request 를 거치지 않는 발사 경로(_settle 재평가,
@@ -275,6 +285,7 @@ class SpeedManager:
 
         if ok:
             self._inflight = False
+            self._inflight_purpose = None
             self._deadline_at = None
             self._applied = v          # ★ controller 에 실제로 반영된 값
             self._log.info(f'주행속도 변경 확인 → {v} m/s')
@@ -282,6 +293,7 @@ class SpeedManager:
             # 시작 동기화의 목적(재시작 저속 상속 방지)은 이 시점에 충족된다.
             self.synced = True
             if purpose == 'guide':
+                self._guide_confirmed = True   # 이후 실패는 '유지 실패'로 분류
                 self._on_guide_confirmed()
         else:
             if attempt < self.MAX_ATTEMPTS:
@@ -329,14 +341,12 @@ class SpeedManager:
     def _final_fail(self, v, purpose, reason, gen):
         """3회 최종 실패 — purpose 별 안전 조치 (기존 _speed_final_fail 이관)."""
         self._inflight = False
+        self._inflight_purpose = None
         self._deadline_at = None
         self._log.error(
             f'★ 속도 변경 {self.MAX_ATTEMPTS}회 실패({reason}) — 현재 주행속도가 '
             f'요청값 {v} 와 다를 수 있음 (GUIDE 저속 미적용 위험, 관제 확인 필요)')
-        if purpose == 'guide':
-            self._on_guide_failed(reason)
-        elif purpose == 'sync':
-            self._sync_cooldown = self.SYNC_COOLDOWN_TICKS
+        self._terminate(purpose, reason)
         # restore/reconcile: FAULT 는 아니지만(정지/종결 국면) 로그로 끝내지 않는다 —
         # desired 미반영이 남으면 다음 tick 의 _settle 이 복구를 재시도한다.
 
@@ -359,10 +369,15 @@ class SpeedManager:
         if self._deadline_at is None or self._now() < self._deadline_at:
             return False
         unready = self._wait_since is not None
-        v, purpose = self._desired if self._desired else (None, '')
+        v, origin = self._desired if self._desired else (None, '')
+        # ★ '무엇이 만료했나' 는 in-flight purpose, '그래서 어떻게 종결하나' 는
+        #   origin. 겸직시켰더니 reconcile 만료를 guide 진입 실패로 오분류해
+        #   통보가 통째로 버려졌다 (재검토 §10.3).
+        kind = self._inflight_purpose or origin
 
         self._gen += 1                    # 늦은 응답을 stale 화
         self._inflight = False
+        self._inflight_purpose = None
         self._deadline_at = None
         self._wait_since = None
         self._wait_v = None
@@ -375,14 +390,29 @@ class SpeedManager:
         else:
             self._log.error(
                 f'★ 속도 변경 응답 {self._unready_timeout}초 미도착 '
-                f'({v} m/s, {purpose}) — 무응답 포기 (controller 확인 필요)')
+                f'({v} m/s, {kind}) — 무응답 포기 (controller 확인 필요)')
 
-        if purpose == 'guide':
-            self._on_guide_failed(
-                'service unready timeout' if unready else 'no response timeout')
-        elif purpose == 'sync':
-            self._sync_cooldown = self.SYNC_COOLDOWN_TICKS
+        self._terminate(
+            kind, 'service unready timeout' if unready else 'no response timeout')
         return True
+
+    def _terminate(self, kind, reason):
+        """요청 종결 시 상위 정책 조치 — '무엇이 실패했나(kind)'와
+        '무엇을 위한 요청이었나(origin)'를 나눠서 판단한다.
+
+        내부 reconcile 은 여기서 끝내지 않는다 — 예산과 최종 종결은 _settle 이
+        소유한다. 그래야 "제한 재시도 후 FAULT"(07-20 사용자 확정) 정책이
+        reconcile 1회 실패로 앞당겨지지 않는다."""
+        if kind == 'reconcile':
+            return
+        origin = self._desired[1] if self._desired else ''
+        if origin == 'guide':
+            # ★ '진입 차단'인지 '유도 중단'인지는 MissionNode 가 자기 상태로 판단한다.
+            #   Manager 가 _guide_confirmed 로 대신 판단하면, FAULT 자동 재시도로
+            #   GUIDE 에 복귀한 순간 두 관점이 어긋난다 (자기반증에서 발견).
+            self._on_guide_failed(reason)
+        elif origin == 'sync':
+            self._sync_cooldown = self.SYNC_COOLDOWN_TICKS
 
     def _settle(self):
         """종결 재평가 — desired 가 controller 에 반영 안 된 채 아무 요청도
@@ -404,8 +434,13 @@ class SpeedManager:
             return
         if self._wait_since is not None:
             return                                  # 미준비 대기 중 — tick 이 담당
-        dv, purpose = self._desired
-        if purpose not in ('restore', 'reconcile'):
+        dv, origin = self._desired
+        # 범위: restore(복구 주체가 없던 원래 구멍) + 확인된 guide(유지 보장).
+        # sync 는 cooldown+ensure_sync 가 이미 담당하므로 제외(이중 발사 금지).
+        # ★ 이전엔 origin guide 를 통째로 뺐다가, GUIDE 진입 후 stale 이 덮은
+        #   경우를 아무도 안 고쳤다 (재검토 §10.2).
+        if not (origin == 'restore'
+                or (origin == 'guide' and self._guide_confirmed)):
             return
         if self._applied == dv:
             return                                  # 이미 일치 — 할 일 없음
@@ -416,6 +451,10 @@ class SpeedManager:
             self._log.error(
                 f'★ 재조정 포기 — {dv} m/s 복구를 {self.MAX_SETTLE}회 시도했으나 '
                 f'실패, controller 속도가 {self._applied} 로 남음 (관제 확인 필요)')
+            if origin == 'guide':
+                # 07-20 사용자 확정: 제한 재시도 후에도 저속을 못 지키면
+                # 사람을 평시속도로 유도하느니 정지시킨다.
+                self._on_guide_failed('guide speed reconcile exhausted')
             return
         if not self._cli.service_is_ready():
             return                                  # 헛발사 금지 — 다음 tick 에 재시도

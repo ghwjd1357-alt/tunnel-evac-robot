@@ -676,3 +676,142 @@ def test_n7_settle_request_is_also_deadline_guarded():
         node._clock['t'] += 1.0
         node.speed.tick()
     assert len(node._calls) == before
+
+
+# ============================================================
+# ★ 0720 Codex 재검토 보완 — N8~N12 (0720_현황.md §22)
+#   신규 P1: GUIDE 진입 '후' stale 이 덮어쓴 뒤의 내부 reconcile 종결 누락.
+#   뿌리 = purpose 겸직 — 상위 정책 출처(origin)와 in-flight 요청 종류가 한 값.
+# ============================================================
+def arm_guide_then_stale_sync_overwrites(node):
+    """N8~N11 공통 전제: GUIDE 진입 확인 후 stale sync 0.26 이 controller 를 덮음.
+
+    ① sync 0.26 요청 → ② guide 0.12 요청·성공 = GUIDE 진입(applied 0.12)
+    ③ 늦은 sync 0.26 성공 도착 = controller 가 0.26 으로 덮임 → 내부 reconcile(0.12) 발사
+    이 시점에서 로봇은 '사람을 앞에서 유도하는 중'인데 속도가 평시값이다.
+    """
+    node.speed.ensure_sync(0.26)             # 요청 0
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 1
+    respond(node, 1, ok_resp())              # GUIDE 진입, applied=0.12
+    assert node.state == State.GUIDE
+    respond(node, 0, ok_resp())              # ★ 늦은 sync 성공 → applied=0.26
+    assert node._calls == [0.26, 0.12, 0.12]  # reconcile(0.12) 발사됨
+
+
+def test_n8_guide_origin_reconcile_failure_stops_guiding():
+    """N8 — GUIDE 중 저속 복구가 끝내 실패하면 유도를 계속하면 안 된다.
+
+    확정 정책(07-20 사용자): 제한 재시도 후 goal 취소 + FAULT.
+    이전엔 _settle 이 'origin 이 guide' 라는 이유로 빠져 0.26 인 채 유도가 계속됐다."""
+    node = make_env()
+    arm_guide_then_stale_sync_overwrites(node)
+    seen = drain_failures(node, 2)           # reconcile 3회 실패
+    for _ in range(500):                     # 예산 안에서 재시도 → 소진 → 종결
+        node.speed.tick()
+        seen = drain_failures(node, seen)
+    assert node._faults == [1]               # ★ FAULT 로 종결
+    assert node._cancels == [1]              # goal 취소까지
+    assert len(node._calls) < 30             # 유한 종결
+
+
+def test_n9_guide_origin_reconcile_no_response_stops_guiding():
+    """N9 — 같은 전제에서 reconcile 이 무응답이어도 동일한 안전 종결.
+    (deadline 장치가 in-flight 요청을 실제로 감시하는지)"""
+    node = make_env(timeout=30.0)
+    arm_guide_then_stale_sync_overwrites(node)   # reconcile 발사 — 응답 주지 않음
+    for i in range(500):
+        node._clock['t'] += 1.0
+        node.speed.tick()
+    assert node._faults == [1]
+    assert node._cancels == [1]
+
+
+def test_n10_deadline_classifies_by_inflight_purpose_not_origin():
+    """N10 — deadline 만료 시 '실제 만료한 요청의 종류'로 분류해야 한다.
+
+    이전엔 _desired 의 origin(guide)을 읽어, 만료한 게 reconcile 인데도
+    guide 진입 실패 콜백을 불렀다. 그 콜백은 _guide_pending=False 라 통보를
+    무시해 아무 일도 일어나지 않았다 (조용한 실종)."""
+    node = make_env(timeout=30.0)
+    arm_guide_then_stale_sync_overwrites(node)
+    node._clock['t'] = 30.0
+    node.speed.tick()                        # reconcile deadline 만료
+    # 진입 게이트 실패로 오분류되면 '늦은 guide 속도 실패 통보 ... 무시' 가 찍힌다
+    assert not any('통보' in m and '무시' in m for m in node._logs), \
+        'in-flight purpose 가 아니라 origin 으로 분류됨 (오분류)'
+    assert any('reconcile' in m for m in node._logs)
+
+
+def test_n11_forbidden_state_never_survives_any_ordering():
+    """N11 — 금지 상태: GUIDE 인데 평시속도가 적용된 채 재시도도 FAULT 도 없음.
+    응답 순서를 바꿔가며 어떤 조합에서도 남지 않아야 한다 (부정 회귀의 핵심)."""
+    for fail_at in range(3):                 # reconcile 이 몇 번째에 무너지든
+        node = make_env()
+        arm_guide_then_stale_sync_overwrites(node)
+        seen = 2
+        for i in range(fail_at):             # 일부는 성공 응답으로 흔들어 본다
+            respond(node, seen, fail_resp())
+            seen += 1
+        seen = drain_failures(node, seen)
+        for _ in range(500):
+            node.speed.tick()
+            seen = drain_failures(node, seen)
+        forbidden = (node.state == State.GUIDE
+                     and node.speed._applied != 0.12
+                     and node._faults == [])
+        assert not forbidden, f'금지 상태 잔존 (fail_at={fail_at})'
+
+
+def test_n12_unready_restore_contract_no_budget_then_resumes():
+    """N12 — 계약 확정(§10.4 P2): 서비스가 처음부터 없는 restore 는
+    '재시도 자체가 불가능한 상태'라 예산을 소모하지 않는다. 대신 복귀하면
+    즉시 재개한다 — 문서 문장과 동작을 같은 말로 고정한다."""
+    node = make_env(ready=False)
+    node.speed.request_restore(0.26)
+    node._clock['t'] = 300.0
+    for _ in range(100):
+        node.speed.tick()
+    assert node._calls == []                     # 못 쏨
+    assert node.speed._settle_rounds == 0        # 예산 미소모 (재시도 불가 상태)
+    assert not node.speed._settle_gave_up        # 포기로 굳지 않음
+    node._ready['ready'] = True
+    node.speed.tick()
+    assert node._calls == [0.26]                 # ★ 복귀 즉시 재개
+
+
+class _Stamp:
+    """tick() 의 FAULT 재시도 경과시간 계산용 최소 가짜 시각."""
+
+    def __init__(self, ns):
+        self.ns = ns
+
+    def __sub__(self, other):
+        return types.SimpleNamespace(nanoseconds=self.ns - other.ns)
+
+
+def test_n13_guide_speed_regated_on_fault_resume():
+    """N13 — 자기 논증 반증에서 발견: FAULT 자동 재시도로 GUIDE 에 복귀할 때
+    저속이 확인된 상태라고 가정하면 안 된다.
+
+    §22 의 유지-실패 종결은 FAULT 를 만들지만, MAX_RETRIES 안이면 tick 이
+    GUIDE 로 자동 복귀시킨다. 이때 controller 는 아직 0.26 이고 Manager 의
+    복구 예산(_settle_gave_up)은 소진돼 있어, 아무도 다시 고치지 않으면
+    '금지 상태'(GUIDE + 평시속도 + 재시도 0)가 부활한다."""
+    node = make_env(state=State.FAULT)
+    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12}
+    node.siren_on = False
+    node.state_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.goal_active = True
+    node.MAX_RETRIES = 2
+    node.RETRY_WAIT = 3.0
+    node.fault_retries = 0
+    node.resume_state = State.GUIDE
+    node.fault_since = _Stamp(0)
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: _Stamp(100 * 10**9))
+    node.speed.synced = True                 # sync 가 대신 쏘는 경로 배제
+
+    node.tick()
+    assert node.state == State.GUIDE          # 복귀했고
+    assert node._calls == [0.12]              # ★ 저속을 다시 확인받는다

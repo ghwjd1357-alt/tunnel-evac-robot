@@ -3,11 +3,13 @@
 > 작업 완료 시 구현자가 갱신하고 검토자가 사실관계·테스트 결과를 확인한다.
 > 이전 묶음 내용은 날짜별 현황으로 보낸다. 항상 이 한 묶음만 유지.
 
-- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager P1 보완 완료, 07-20)
-- **현재 단계**: 마스터플랜 12단계 중 4단 — platform-core 구조 분리 **2/3**
-- **직전 완료**: SpeedManager Codex 검토 3건 봉합 (`0720_현황.md §21` — desired/applied
-  분리 + 종결 재평가, 단일 deadline 통합, on_cmd wiring 테스트. pytest 108→116)
-- **이번 한 묶음 목표**: **GoalManager 동작 불변 추출** (goal 전송·cancel 확인 사슬·
+- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager 보완 2차, 07-20)
+- **현재 단계**: 마스터플랜 12단계 중 4단 — 구조 분리 **1/3 보완 2차 완료**,
+  **Codex 최종 재검토 대기**. 통과해야 2/3(GoalManager) 착수 (`CODEX 현황/0720검토현황.md §10.7`)
+- **직전 완료**: Codex 재검토 신규 P1 봉합 (`0720_현황.md §22` — origin/in-flight purpose
+  분리, GUIDE 유지 실패 = 취소+FAULT, FAULT 복귀 시 저속 재확인. pytest 116→122)
+  + 검토 강도 정책 신설 (`docs/TEST_GATES.md §7`)
+- **이번 한 묶음 목표** (★ Codex 최종 재검토 통과 후 착수): **GoalManager 동작 불변 추출** (goal 전송·cancel 확인 사슬·
   stale goal 방어를 MissionNode 에서 분리 — `docs/MASTER_PLAN.md §2-2`, "최대 수익")
 
 ## 완료조건
@@ -54,8 +56,9 @@
 동작 불변: **기존 테스트 전량**(기준선 수치 정본 = `TEST_GATES.md` §1) + 새 공격 테스트
 전부 녹색 → `TEST_GATES.md` §1 전체 게이트
 (pytest → colcon → negative → 3goals → mission → abort, 각 프로세스 완전 종료 후 순차)
-전량 PASS → 변경 파일·책임 이동표·테스트 수치·남은 위험을 `0720_현황.md` 다음 절(§22 신설)에
+전량 PASS → 변경 파일·책임 이동표·테스트 수치·남은 위험을 `0720_현황.md` 다음 절(§23 신설)에
 기록 → 한 커밋+push → `bash tools/doc_check.sh --after-push`.
+검토자 실행 범위는 `TEST_GATES.md §7` (구현자는 §1 전량 그대로).
 
 ## 완료 후 다음 단계
 
