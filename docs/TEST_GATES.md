@@ -13,10 +13,12 @@ bash tools/regression_negative.sh                        # ~6분
 bash tools/regression_3goals.sh                          # ~4분
 bash tools/mission_e2e.sh                                # ~3분
 bash tools/abort_e2e.sh                                  # ~3분
+bash tools/doc_check.sh                                  # ~1초 — 문서 동기화 (커밋 직전)
 ```
 
 기준선 (07-20, SpeedManager 추출 후 `f94da44`): pytest **108 passed** / colcon **114 tests, 0 fail, 2 skip** / E2E 4종 PASS.
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).
+**갱신을 잊어도 `doc_check.sh` 가 실제 개수와 대조해 잡는다** — 기억이 아니라 기계가 지키는 구조.
 `make_map.sh` 는 이 게이트에 포함하지 않는다 (지도 자산 변경 — 명시 승인 시에만).
 
 ## 2. 각 테스트의 목적과 PASS 기준

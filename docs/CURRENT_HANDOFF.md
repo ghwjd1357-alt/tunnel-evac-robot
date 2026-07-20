@@ -46,7 +46,8 @@
 
 ## 완료 판정 + 필수 테스트
 
-동작 불변: pytest 108개 + 새 공격 테스트 전부 녹색 → `TEST_GATES.md` §1 전체 게이트
+동작 불변: **기존 테스트 전량**(기준선 수치 정본 = `TEST_GATES.md` §1) + 새 공격 테스트
+전부 녹색 → `TEST_GATES.md` §1 전체 게이트
 (pytest → colcon → negative → 3goals → mission → abort, 각 프로세스 완전 종료 후 순차)
 전량 PASS → 변경 파일·책임 이동표·테스트 수치·남은 위험을 `0719_현황.md` 다음 절에
 기록 → 한 커밋+push.

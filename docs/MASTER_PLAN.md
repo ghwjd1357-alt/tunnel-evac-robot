@@ -5,8 +5,13 @@
 
 ## 1. 확정 순서 12단계 (07-19 개정 2 — "최종 시나리오는 실차 후")
 
+> ★ **현재 위치는 이 파일에 적지 않는다** — 정본은 `CURRENT_HANDOFF.md` 한 곳뿐이다.
+> (같은 사실을 두 문서에 두면 반드시 한쪽이 낡는다. 07-20 실제 사고: 이 파일은 SpeedManager,
+> 핸드오프는 GoalManager 를 가리켜 구현자와 검토자가 다른 작업을 볼 뻔했다.)
+> 이 파일은 **단계의 정의**, 핸드오프는 **현재 상태**. ✅ 완료 표시만 사후 기록한다.
+
 1. ~~G 묶음 봉합~~ ✅ → 2. ~~전체 회귀 녹색 기준선~~ ✅ → 3. ~~중간보고서~~ ✅
-4. **SpeedManager → GoalManager → E2E 공통 하네스 단계적 분리** ◀ 현재 (§2)
+4. **SpeedManager → GoalManager → E2E 공통 하네스 단계적 분리** (§2)
 5. **platform-core-freeze** (release tag + hash manifest)
 6. 역할 B V1 최소 계약 확정 — ★ 책임경계 (b) camera-frame 3D 는 07-20 확정, 세부(필드·주기·실패 표현)만 잔여 (병렬 진행 가능)
 7. 가상 시나리오를 검증 대본으로 실차 R0~R8 진행 (§3)
@@ -19,7 +24,7 @@
 ## 2. platform-core 구조 분리 (동작 불변 리팩터 — 단계마다 회귀 전량, 한 단계 = 한 커밋 묶음)
 
 1. ~~**SpeedManager 추출**~~ ✅ 완료 (07-20, `f94da44` — 미준비 정책 = timeout 30초 후 FAULT 확정. 기록 = `0719_현황.md §19`)
-2. **GoalManager 추출** ◀ 현재 — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익). 완료조건·경계 = `CURRENT_HANDOFF.md`
+2. **GoalManager 추출** — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익)
 3. **E2E 공통 하네스** — readiness·cleanup·send_goal 재전송을 셸 함수 라이브러리로. 이때 readiness "최대 90초" 문구·deadline 함수 통일 (Codex §14.5 P2)
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
 
