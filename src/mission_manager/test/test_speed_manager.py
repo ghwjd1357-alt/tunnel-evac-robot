@@ -443,3 +443,236 @@ def test_guide_wait_not_overwritten_by_sync():
     assert node._calls == []                 # sync 가 가로채면 안 됨
     node.speed.tick()
     assert node._calls == [0.12]             # guide 대기가 정상 발사
+
+
+# ============================================================
+# ★ 0720 Codex 검토 보완 — 부정 회귀 N1~N6 (0720_현황.md §20.7)
+#   "desired 가 controller 에 반영 안 된 채 아무도 재시도하지 않는" 종결을 금지한다.
+# ============================================================
+def drain_failures(node, seen=0):
+    """아직 응답 안 준 요청 전부에 실패 응답 주입 (재시도로 늘어나는 것 포함)."""
+    while seen < len(node._cbs):
+        idx, seen = seen, seen + 1
+        node._cbs[idx][1](fail_resp())
+    return seen
+
+
+def arm_stale_guide_over_restore(node):
+    """N1·N2·N5 공통 전제: applied=0.12(늦은 guide), desired=0.26(restore in-flight).
+
+    ① 정상 sync 로 synced=True 를 만든다 (ensure_sync 안전망이 죽은 상태 재현)
+    ② guide 0.12 in-flight 중 reset → restore 0.26
+    ③ 늦은 guide 성공 도착 = controller 에 0.12 가 뒤늦게 적용 (reconcile 은 생략됨)
+    """
+    node.speed.ensure_sync(0.26)             # 요청 0
+    respond(node, 0, ok_resp())              # synced=True, applied=0.26
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 요청 1
+    node.state = State.PATROL                # reset
+    node._guide_pending = False
+    node.speed.cancel_pending('reset')
+    node.speed.request_restore(0.26)         # 요청 2 — in-flight
+    respond(node, 1, ok_resp())              # ★ 늦은 guide 성공 → applied=0.12
+    assert len(node._calls) == 3             # reconcile 생략됨 (기존 최적화)
+    assert any('재조정 생략' in m for m in node._logs)
+
+
+def test_n1_reconcile_skipped_then_current_request_final_fails_recovers():
+    """N1 — Codex 0720 P1 반례.
+
+    reconcile 을 '현재 요청이 곧 덮는다'며 생략했는데 그 요청이 최종 실패하면,
+    desired(0.26)는 영영 복구되지 않았다 (synced=True 라 ensure_sync 도 무력).
+    → 종결 후 tick 이 재평가해 0.26 을 다시 쏴야 한다."""
+    node = make_env()
+    arm_stale_guide_over_restore(node)
+    respond(node, 2, fail_resp())            # restore 1차 실패 → 재시도
+    respond(node, 3, fail_resp())            # 2차
+    respond(node, 4, fail_resp())            # 3차 = 최종 실패 (에러 로그만)
+    assert len(node._calls) == 5
+    assert node.speed.synced is True         # ensure_sync 안전망은 죽어 있다
+    node.speed.ensure_sync(0.26)
+    assert len(node._calls) == 5             # ★ 실제로 아무것도 안 쏜다 (P1 조건)
+
+    node.speed.tick()                        # ★ 종결 재평가가 복구를 담당
+    assert node._calls[-1] == 0.26
+    assert len(node._calls) == 6
+    respond(node, 5, ok_resp())              # 복구 확인 → 더 안 쏨
+    node.speed.tick()
+    assert len(node._calls) == 6
+
+
+def test_n2_request_evaporated_by_service_death_recovers():
+    """N2 — Claude 발견 2번째 누출 경로 (0720_현황.md §20.3).
+
+    재시도 도중 서비스가 소멸하면 non-guide 요청은 _final_fail 조차 없이
+    증발한다. 서비스가 돌아오면 desired 를 다시 쏴야 한다."""
+    node = make_env()
+    arm_stale_guide_over_restore(node)
+    node._ready['ready'] = False             # 재시도 직전 서비스 소멸
+    respond(node, 2, fail_resp())            # 실패 → 재시도하려다 증발
+    assert len(node._calls) == 3             # 요청이 나가지 못했다
+
+    node.speed.tick()                        # 아직 미준비 — 헛발사 금지
+    assert len(node._calls) == 3
+    node._ready['ready'] = True
+    node.speed.tick()                        # 준비됨 → 복구 발사
+    assert node._calls[-1] == 0.26
+    assert len(node._calls) == 4
+
+
+def test_n3_never_completing_future_faults_at_deadline():
+    """N3 — 서비스는 ready 인데 응답이 영영 안 오는 경우.
+
+    07-20 확정 정책 = '저속 적용 확인까지 총 30초' → 무기한 GATHER 은폐 금지."""
+    node = make_env(timeout=30.0)            # ready=True
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    assert node._calls == [0.12]             # 요청은 나갔고 응답이 없다
+    node._clock['t'] = 29.9
+    node.speed.tick()
+    assert node._faults == []                # 아직 예산 안 소진
+    node._clock['t'] = 30.0
+    node.speed.tick()
+    assert node._faults == [1]               # ★ FAULT 로 가시화
+    assert node._cancels == [1]
+    assert not node._guide_pending
+    node._clock['t'] = 300.0
+    node.speed.tick()
+    assert node._faults == [1]               # 중복 FAULT 금지
+
+
+def test_n4_late_response_after_deadline_does_not_revive_guide():
+    """N4 — deadline 으로 포기한 요청의 응답이 뒤늦게 성공으로 와도
+    FAULT 를 덮고 GUIDE 로 되살아나면 안 된다 (stale 규칙이 그대로 적용)."""
+    node = make_env(timeout=30.0)
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node._clock['t'] = 30.0
+    node.speed.tick()                        # deadline → FAULT
+    assert node._faults == [1]
+    respond(node, 0, ok_resp())              # ★ 그 뒤 늦은 성공 도착
+    assert node.state != State.GUIDE         # 되살아나지 않음
+    assert node._faults == [1]
+    assert len(node._calls) == 1             # 불필요한 reconcile 도 없음
+
+
+def test_n5_permanently_broken_controller_terminates_finitely():
+    """N5 — controller 가 영구 고장이어도 재평가가 무한 재발사로 번지면 안 된다
+    (Codex §5 '유한 종결' 확인 항목). 상한 소진 후엔 조용해진다."""
+    node = make_env()
+    arm_stale_guide_over_restore(node)
+    seen = drain_failures(node, 2)           # restore 3회 실패
+    for _ in range(500):                     # tick 을 아무리 돌려도
+        node.speed.tick()
+        seen = drain_failures(node, seen)    # 나가는 족족 실패
+    total = len(node._calls)
+    assert total < 30, f'무한 재발사 의심 — 총 {total}회'
+    assert any('재조정 포기' in m for m in node._logs)
+    before = len(node._calls)
+    for _ in range(100):
+        node.speed.tick()
+    assert len(node._calls) == before        # 완전히 종결 — 추가 발사 0
+
+
+# ============================================================
+# ★ N6: MissionNode.on_cmd() wiring (Codex 0720 P2 — 테스트 공백)
+#   기존 24개는 cancel_pending 을 손으로 불러서, mission_node 쪽 호출이
+#   빠지거나 순서가 바뀌어도 잡지 못했다.
+# ============================================================
+def make_cmd_env():
+    """on_cmd() 를 실제로 통과시킬 수 있는 껍데기 노드 (reset/abort 경로 전용)."""
+    node = make_env(state=State.GUIDE)
+    node.patrol_idx = 3
+    node.fire = (1.0, 2.0)
+    node.gather_wp = (3.0, 4.0)
+    node.gather_since = 1
+    node._escaped_logged = True
+    node.search_attempts = 2
+    node.give_up = True
+    node.last_seen = (5.0, 6.0)
+    node.search_goal = (7.0, 8.0)
+    node.refind_since = 1
+    node.fault_retries = 1
+    node.fault_since = None
+    node.MAX_RETRIES = 2                     # 실노드는 __init__ 에서 세팅 (537줄)
+    node.resume_state = State.GUIDE
+    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12}
+    node._sirens = []
+    node.set_siren = lambda on: node._sirens.append(on)
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: 0)
+    node._order = []
+    real_cancel = node.speed.cancel_pending
+    real_restore = node.speed.request_restore
+
+    def rec_cancel(reason=''):
+        node._order.append('cancel')
+        return real_cancel(reason)
+
+    def rec_restore(v):
+        node._order.append('restore')
+        return real_restore(v)
+
+    node.speed.cancel_pending = rec_cancel
+    node.speed.request_restore = rec_restore
+    return node
+
+
+def test_n6_on_cmd_reset_cancels_before_restore():
+    """reset — cancel_pending 이 실제로 불리고, restore '앞'에 와야 한다.
+
+    순서가 뒤집히면 restore 요청 자체가 stale 이 되어 늦은 응답 취급을 받는다."""
+    node = make_cmd_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)           # 진행 중 요청 (요청 0)
+    node.on_cmd(types.SimpleNamespace(data='reset'))
+    assert node._order == ['cancel', 'restore']   # ★ wiring + 순서
+    assert node.state == State.PATROL
+    assert not node._guide_pending
+    assert node._calls == [0.12, 0.26]
+    respond(node, 0, ok_resp())              # 늦은 guide 성공 = stale
+    assert node.state == State.PATROL        # 상태를 덮지 못함
+
+
+def test_n6_on_cmd_abort_cancels_and_faults_without_restore():
+    """abort — cancel_pending 은 불리되 restore 는 하지 않는다 (정지 유지)."""
+    node = make_cmd_env()
+    node._guide_pending = True
+    node.speed.request_guide(0.12)
+    node.on_cmd(types.SimpleNamespace(data='abort'))
+    assert node._order == ['cancel']          # ★ restore 없음
+    assert node.state == State.FAULT
+    assert not node._guide_pending
+    assert node._calls == [0.12]
+    respond(node, 0, ok_resp())               # 늦은 guide 성공
+    assert node.state == State.FAULT          # FAULT 유지
+
+
+def test_n7_settle_request_is_also_deadline_guarded():
+    """N7 — 자기 논증 반증(AGENTS.md §3-4)에서 발견한 구멍.
+
+    _settle 이 보낸 복구 요청은 _new_request 를 거치지 않는다. deadline 무장을
+    _new_request 에만 두면 이 요청이 무응답일 때 _inflight=True 로 굳어
+    _settle 이 영원히 막힌다 — 즉 P1 을 고치면서 같은 모양의 정지를 새로
+    만든다. 발사 경로와 무관하게 감시되는지 고정한다."""
+    node = make_env(timeout=30.0)
+    arm_stale_guide_over_restore(node)
+    seen = drain_failures(node, 2)               # restore 3회 실패로 종결
+    node.speed.tick()                            # 복구 발사 (응답을 주지 않는다)
+    assert len(node._calls) == 6
+    assert node.speed._inflight is True
+
+    node._clock['t'] = 30.0
+    node.speed.tick()                            # ★ deadline 이 이 요청도 잡아야
+    assert any('무응답 포기' in m for m in node._logs)
+    assert node.speed._inflight is False         # 영구 정지 아님
+
+    for _ in range(500):                         # 이후에도 유한 종결
+        node._clock['t'] += 1.0
+        node.speed.tick()
+        seen = drain_failures(node, seen)
+    assert any('재조정 포기' in m for m in node._logs)
+    before = len(node._calls)
+    for _ in range(100):
+        node._clock['t'] += 1.0
+        node.speed.tick()
+    assert len(node._calls) == before

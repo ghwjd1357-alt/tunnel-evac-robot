@@ -82,7 +82,10 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 `docs/legacy/CLAUDE_pre-restructure_0720.md`(개편 전 CLAUDE.md 백업, git `8042464`와 동일).
 
 **Desktop 역사·근거 (`~/Desktop/개발현황/`)**: 날짜별 `06xx/07xx_현황.md`(상세 학습기록) ·
-`0719_현황.md`(외부 검토 교차검증 정본, §18=SpeedManager 인계) · `CODEX 현황/0719검토현황.md`(Codex 원문, §14=최종 승인) ·
+`0719_현황.md`(외부 검토 교차검증 정본 — 07-19 시뮬 마감·G 묶음까지, §18.2 에서 끝) ·
+**`0720_현황.md`**(SpeedManager 전용 서사 — §18.3 인계 / §19 구현 / §20 Codex 검토·P1 보완.
+07-20 에 0719 에서 이관, **절 번호 보존**) · `CODEX 현황/0719검토현황.md`(Codex 원문, §14=최종 승인) ·
+`CODEX 현황/0720검토현황.md`(SpeedManager 추출 독립 검토 — P1 1건, GoalManager HOLD) ·
 `0719_실차전환_마스터플랜.md`(계획 근거·개정 이력 — 실행 정본은 repo MASTER_PLAN) ·
 `0705_실차전_전략.md` · `0707_로드맵_통합계획.md`(구판, 마스터플랜이 개정) · `0718_관제시스템.md`(관제 설계 정본) ·
 `0718_구동부_배선맵핑_검증절차.md` · `실차값_수령체크리스트.md`(구판, `docs/REAL_ROBOT_VALUES.md` 로 이관) ·
