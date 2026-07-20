@@ -791,19 +791,23 @@ class _Stamp:
 
 
 def test_n13_guide_speed_regated_on_fault_resume():
-    """N13 — 자기 논증 반증에서 발견: FAULT 자동 재시도로 GUIDE 에 복귀할 때
-    저속이 확인된 상태라고 가정하면 안 된다.
+    """N13 — FAULT 자동 재시도로 GUIDE 에 복귀할 때 저속 보장은 함께 돌아오지 않는다.
+
+    ★ 07-20 재검토 §11.3: 이 테스트의 초판은 `state==GUIDE and _calls==[0.12]`
+    만 확인해 **버그를 정상으로 고정**했다. 요청을 '보낸 것'을 적용 '확인된 것'과
+    동일시한 것이다 — 다음 tick 에 escape goal 이 나가 평시속도로 유도가 시작됐다.
+    완료판정은 "확인 전에는 GUIDE 주행 goal 이 단 한 건도 전송되지 않는다".
 
     §22 의 유지-실패 종결은 FAULT 를 만들지만, MAX_RETRIES 안이면 tick 이
     GUIDE 로 자동 복귀시킨다. 이때 controller 는 아직 0.26 이고 Manager 의
     복구 예산(_settle_gave_up)은 소진돼 있어, 아무도 다시 고치지 않으면
     '금지 상태'(GUIDE + 평시속도 + 재시도 0)가 부활한다."""
     node = make_env(state=State.FAULT)
-    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12}
+    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12,
+               'escape': {'x': -12.0, 'y': 0.0, 'yaw': 0.0}}
     node.siren_on = False
     node.state_pub = types.SimpleNamespace(publish=lambda m: None)
     node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
-    node.goal_active = True
     node.MAX_RETRIES = 2
     node.RETRY_WAIT = 3.0
     node.fault_retries = 0
@@ -812,6 +816,27 @@ def test_n13_guide_speed_regated_on_fault_resume():
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: _Stamp(100 * 10**9))
     node.speed.synced = True                 # sync 가 대신 쏘는 경로 배제
 
+    node._goals = []
+    node.goal_active = False
+    node.give_up = True
+    node.monitor = types.SimpleNamespace(
+        visible=lambda zone=None: True, lost=lambda zone=None: False,
+        scan_stale=lambda: False, reset=lambda k: None)
+    node.send_goal = lambda wp, tag='': (
+        node._goals.append((tag, node.speed._applied)),
+        setattr(node, 'goal_active', True))[0]
+    node.speed._applied = 0.26                # 유지 실패 종결 직후 = 평시속도 적용됨
+
     node.tick()
     assert node.state == State.GUIDE          # 복귀했고
-    assert node._calls == [0.12]              # ★ 저속을 다시 확인받는다
+    assert node._calls == [0.12]              # 저속을 다시 '요청'했고
+    assert not node.speed.guide_confirmed     # ★ 아직 '확인'은 안 됐다
+    assert node._goals == []                  # ★ 그러므로 주행 goal 금지
+
+    node.tick()                               # 응답 없는 채 다음 tick
+    assert node._goals == [], '저속 미확인 상태로 유도 주행이 시작됨 (F2 위반)'
+
+    respond(node, 0, ok_resp())               # 이제 적용 확인
+    assert node.speed.guide_confirmed
+    node.tick()
+    assert node._goals == [('escape', 0.12)]  # ★ 확인 후에야 출발

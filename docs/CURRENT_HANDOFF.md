@@ -3,12 +3,12 @@
 > 작업 완료 시 구현자가 갱신하고 검토자가 사실관계·테스트 결과를 확인한다.
 > 이전 묶음 내용은 날짜별 현황으로 보낸다. 항상 이 한 묶음만 유지.
 
-- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager 보완 2차, 07-20)
+- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager 보완 3차, 07-20)
 - **현재 단계**: 마스터플랜 12단계 중 4단 — 구조 분리 **1/3 보완 2차 완료**,
   **Codex 최종 재검토 대기**. 통과해야 2/3(GoalManager) 착수 (`CODEX 현황/0720검토현황.md §10.7`)
-- **직전 완료**: Codex 재검토 신규 P1 봉합 (`0720_현황.md §22` — origin/in-flight purpose
-  분리, GUIDE 유지 실패 = 취소+FAULT, FAULT 복귀 시 저속 재확인. pytest 116→122)
-  + 검토 강도 정책 신설 (`docs/TEST_GATES.md §7`)
+- **직전 완료**: 재검토 3차 P1 봉합 (`0720_현황.md §23` — GUIDE 주행을 fail-closed
+  게이트로. 저속 '적용 확인' 전에는 진입 경로와 무관하게 주행 goal 0건)
+  + `TEST_GATES §7` 보완 3건(재실행/재독해 구분·fail-closed 기본 행)
 - **이번 한 묶음 목표** (★ Codex 최종 재검토 통과 후 착수): **GoalManager 동작 불변 추출** (goal 전송·cancel 확인 사슬·
   stale goal 방어를 MissionNode 에서 분리 — `docs/MASTER_PLAN.md §2-2`, "최대 수익")
 
@@ -67,5 +67,5 @@ E2E 공통 하네스 추출 (구조 분리 3/3) → platform-core-freeze 게이�
 
 ## 근거 문서의 정확한 절
 
-`docs/MASTER_PLAN.md §2-2` · `~/Desktop/개발현황/0720_현황.md §21`(SpeedManager 보완 기록·요령) ·
+`docs/MASTER_PLAN.md §2-2` · `~/Desktop/개발현황/0720_현황.md §23`(SpeedManager 보완 기록·요령) ·
 `~/Desktop/개발현황/0719_실차전환_마스터플랜.md §7.3`(구조 분리 근거 — 계획 이력 정본)

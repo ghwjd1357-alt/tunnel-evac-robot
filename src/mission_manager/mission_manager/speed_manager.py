@@ -32,10 +32,14 @@ speed_manager.py — 주행속도 변경의 비동기 수명주기 전담 모듈
 
 [단일 deadline — "적용 확인까지 총 N초"]
   요청 하나에 예산 하나. 재시도·미준비 대기를 가로질러 유지되며, 요청이 실제로
-  나가는 지점(_send)에서 무장한다. 서비스 미준비든 응답 Future 무응답이든
-  같은 경로로 포기 처리 — 후자를 방치하면 로봇은 정지라 물리적으론 안전하지만
-  고장이 관제 화면에 안 드러나고 무기한 숨는다 (07-20 정책이 막으려던 것).
-  포기 시 세대를 올려 늦은 응답을 stale 화 → 기존 규칙이 그대로 처리한다.
+  나가는 지점(_send)에서 무장한다. 포기 시 세대를 올려 늦은 응답을 stale 화
+  → 기존 규칙이 그대로 처리한다.
+  ★ 적용 범위 (07-20 재검토 §11.4 로 정정 — 이전 문구는 실동작과 달랐다):
+    - **guide** 는 '서비스 미준비'와 '응답 무응답'을 같은 deadline 으로 포기 처리한다.
+      정지 상태로 고장을 숨기지 않고 관제에 FAULT 로 드러내는 게 목적.
+    - **restore/sync** 의 서비스 미준비는 **예외** — 요청을 보내지도 못한 상태라
+      예산을 소모하지 않고 deadline 을 내린다. 서비스가 복귀하면 _settle(restore)·
+      ensure_sync(sync)가 재개한다. 이 국면의 로봇은 정지/종결이라 주행 위험이 없다.
 
 [purpose 별 정책 (F2 유지)]
   'guide'     GUIDE 진입 게이트. 성공 확인 → on_guide_confirmed (노드가 전환).
@@ -120,6 +124,14 @@ class SpeedManager:
     # ===========================================================
     # 공개 API — MissionNode 의 정책이 부르는 4개 + tick
     # ===========================================================
+    @property
+    def guide_confirmed(self):
+        """GUIDE 저속이 '적용 확인'된 상태인가 (요청 전송이 아니라 성공 응답 기준).
+
+        ★ 이 값이 False 인데 유도 주행을 시작하면 F2 불변조건 위반이다 —
+        MissionNode 가 goal 전송 전에 fail-closed 로 검사한다 (07-20 재검토 §11.3).
+        새 정책 요청(_new_request)마다 False 로 돌아가고, guide 성공 응답에서만 True."""
+        return self._guide_confirmed
     def request_guide(self, v):
         """GUIDE 저속 적용 요청. 성공 확인 → on_guide_confirmed 콜백.
         서비스 미준비면 timeout 까지 tick 이 대기·재시도 (기존 '무기한 GATHER

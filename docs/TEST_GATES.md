@@ -77,8 +77,23 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 > 반면 `regression_negative`·`regression_3goals` 는 `mission_node` 를 **띄우지도 않는다**
 > (`grep -c "mission_manager mission_node" tools/*.sh` = 0) — 미션 로직 변경과 인과가 없다.
 
-**항상 (싸고 위조·환경의존 검출력 있음)**: `pytest` + `colcon test-result` 수치 재현 +
-`doc_check.sh --after-push`. 시간 배분의 중심은 **공격 harness** — 검토자의 실제 가치다.
+**항상 (싸고 위조·환경의존 검출력 있음)**:
+
+```bash
+python3 -m pytest src/mission_manager/test/ -q
+colcon test --packages-select mission_manager tunnel_sim   # ⚠ 반드시 직접 실행
+colcon test-result --verbose                                # 판정만 — 재실행 아님
+bash tools/doc_check.sh --strict                            # 문서 검사 본체
+bash tools/doc_check.sh --after-push                        # 원격 ahead/behind 만
+```
+
+⚠ **`colcon test-result` 는 테스트를 돌리지 않는다** — 기존 `build/` 산출물을 읽을 뿐이라,
+`colcon test` 없이 이것만 보면 *구현자가 남긴 결과를 재독해*하는 것이고 위조·환경의존은
+검출되지 않는다 (Codex 07-20 §11.5 지적). 검토자는 `colcon test` 를 직접 실행한다.
+⚠ `--after-push` 도 **문서 검사가 아니라 원격 동기 확인 전용**이다. 문서 검사 본체는
+`doc_check.sh` (엄격 모드 `--strict`).
+
+시간 배분의 중심은 **공격 harness** — 검토자의 실제 가치다.
 
 **E2E 는 변경 표면으로 고른다:**
 
@@ -89,6 +104,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 | 지도 자산 | `regression_negative` + 승격 evidence |
 | 셸 도구 · 문서 전용 | 없음 (`doc_check.sh` + `bash -n`) |
 | **동결 게이트** (platform-core-freeze · mission-logic-RC · mission-v1-freeze) | **전량 + 쌍굴 + 지도 승격 evidence** |
+| **위에 없는 런타임 변경** (`follower_monitor.py` · waypoints yaml · launch/wiring 등) | ★ **fail-closed — 검토자가 관련 E2E 를 직접 선정**하고 그 근거를 검토본에 남긴다. "표에 없으니 생략"은 금지 |
 
 **조기 판정**: P0/P1 을 재현했으면 **그 시점에 판정하고 남은 게이트는 생략**한다.
 불승인이 확정된 커밋에 E2E 를 더 태울 이유가 없다 — 보완 후 어차피 다시 돈다.

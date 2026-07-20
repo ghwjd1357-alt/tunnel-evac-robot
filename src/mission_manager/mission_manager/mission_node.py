@@ -753,7 +753,18 @@ class MissionNode(Node):
                 self.speed.request_guide(float(self.wp['guide_speed']))
 
         elif self.state == State.GUIDE:
-            if not self.goal_active:
+            # ★ fail-closed 게이트 (07-20 재검토 §11.3 P1) — 저속이 '적용 확인'되기
+            #   전에는 유도 주행 goal 을 단 한 건도 보내지 않는다.
+            #   왜 진입 경로가 아니라 여기서 막나: FAULT 자동복귀·재발견 복귀 등
+            #   GUIDE 로 들어오는 길이 여럿이고, 07-20 에 그 중 하나를 세 번 연속
+            #   놓쳤다. 경로를 세는 대신 '주행을 시작하는 지점' 하나를 막으면
+            #   앞으로 생길 경로까지 자동으로 덮인다.
+            #   요청을 보낸 것 ≠ 적용된 것 (AGENTS.md §3-3 — 호출≠접수≠종결≠실효).
+            if not self.speed.guide_confirmed:
+                self.get_logger().warn(
+                    '⚠ GUIDE 저속 적용 미확인 — 유도 주행 보류 (확인 후 출발)',
+                    throttle_duration_sec=5.0)
+            elif not self.goal_active:
                 self.send_goal(self.wp['escape'], tag='escape')
             # --- 추종감시 (give_up 이면 단독 탈출 — 더는 안 돌아봄) ---
             # ★ zone='any'(전방위) 로 판정 (07-06 E2E 가 잡은 설계 구멍 수정):
