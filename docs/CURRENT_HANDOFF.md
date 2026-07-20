@@ -8,15 +8,25 @@
 - **직전 완료**: SpeedManager 동작 불변 추출 (`0719_현황.md §19` — 책임 이동표·
   테스트 수치·남은 위험 3건 기록. 미준비 정책 = **timeout 30초 후 FAULT** 사용자 확정)
 - **이번 한 묶음 목표**: **GoalManager 동작 불변 추출** (goal 전송·cancel 확인 사슬·
-  stale goal 방어를 MissionNode 에서 분리 — 마스터플랜 §7.3 2호, "최대 수익")
+  stale goal 방어를 MissionNode 에서 분리 — `docs/MASTER_PLAN.md §2-2`, "최대 수익")
 
-## 완료조건 (착수 세션이 마스터플랜 §7.3 + 0719_현황.md §19 를 근거로 세부 확정)
+## 완료조건
 
 1. send_goal·응답 seq 검증·뒤늦은 수락 즉시취소·cancel 확인 사슬·stale 결과 감시를
    Manager 내부로 이관 (기존 goal_seq 방식 유지 — 동작 불변)
 2. MissionNode 에는 "어떤 상태에서 어디로 간다" 정책 + on_reached/enter_fault 콜백만
-3. 기존 test_goal_lifecycle.py 시나리오 전부 새 이음새에서 녹색 유지
+3. 기존 `test_goal_lifecycle.py` 15개 시나리오 전부 새 이음새에서 녹색 유지
 4. SpeedManager 추출과 동일한 요령: 껍데기 노드 + 진짜 Manager 조합 공격 테스트
+5. **공격 테스트 목록 (구현 전 확정 — 기존 15종 이관 + 신규 3종)**
+   - 이관: 뒤늦게 수락된 stale goal 즉시 취소 / 거절된 stale goal 은 취소 불필요 /
+     현재 goal 은 저장하고 취소 안 함 / 수락 후 취소가 handle 에 도달 / result 가 handle 정리 /
+     stale result 무시 / cancel 응답 `goals_canceling` 확인·빈 응답 경고 /
+     stale goal 최종 결과 감시(CANCELED 는 조용히, 그 외는 에러) /
+     예외 4종: goal_response 예외→FAULT, stale goal_response 예외→조용히,
+     result 예외→FAULT, cancel 호출 예외→방어
+   - 신규: ① reset/abort 로 seq 가 오른 뒤 도착한 in-flight 응답·결과가 새 goal 을 죽이지 않음
+     ② 연속 send_goal 2회에서 이전 handle 이 취소 확인까지 도달 ③ handle 없는 상태의 취소 요청이
+     조용히 무사 통과 (goal_active 잔존 금지)
 
 ## 허용 파일/범위
 
@@ -48,4 +58,5 @@ E2E 공통 하네스 추출 (구조 분리 3/3) → platform-core-freeze 게이�
 
 ## 근거 문서의 정확한 절
 
-`docs/MASTER_PLAN.md §2` · `0719_현황.md §19` · Desktop 마스터플랜 §7.3
+`docs/MASTER_PLAN.md §2` · `~/Desktop/개발현황/0719_현황.md §19`(SpeedManager 기록·요령) ·
+`~/Desktop/개발현황/0719_실차전환_마스터플랜.md §7.3`(구조 분리 근거 — 계획 이력 정본)

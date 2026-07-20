@@ -18,8 +18,8 @@
 
 ## 2. platform-core 구조 분리 (동작 불변 리팩터 — 단계마다 회귀 전량, 한 단계 = 한 커밋 묶음)
 
-1. **SpeedManager 추출** ◀ 현재 — 완료조건·경계 = `CURRENT_HANDOFF.md`
-2. **GoalManager 추출** — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익)
+1. ~~**SpeedManager 추출**~~ ✅ 완료 (07-20, `f94da44` — 미준비 정책 = timeout 30초 후 FAULT 확정. 기록 = `0719_현황.md §19`)
+2. **GoalManager 추출** ◀ 현재 — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익). 완료조건·경계 = `CURRENT_HANDOFF.md`
 3. **E2E 공통 하네스** — readiness·cleanup·send_goal 재전송을 셸 함수 라이브러리로. 이때 readiness "최대 90초" 문구·deadline 함수 통일 (Codex §14.5 P2)
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
 
@@ -42,7 +42,10 @@
 
 사전 준비(S4~S5, 트리거 임박 시): **`tunnel_bringup` 별도 패키지** (시뮬 파일은 한 글자도 안 바꿈),
 실측 URDF/footprint·collision ON·velocity_smoother 명시·절대경로 제거·use_sim_time false·Jetson aarch64 소스 빌드.
-이식 체크리스트 10종 = `0707_로드맵_통합계획.md §2-B`, 수치 출처 = `실차값_수령체크리스트.md`.
+실측 수치·반영 지점 정본 = **`docs/REAL_ROBOT_VALUES.md`**.
+⚠ 구판 이식 체크리스트(`0707_로드맵_통합계획.md §2-B`, `실차값_수령체크리스트.md §2`)는 **시뮬 파일을 직접
+고치는 전제**로 쓰여 있다 — 항목(절대경로·use_sim_time·collision ON·penalty 등)은 유효하되, 반영 위치는
+전부 `tunnel_bringup` 신규 파일로 읽는다.
 
 ## 4. 최종 시나리오 확정 회의 안건 — 사람 탐색 정책 8문항 (순서 8에서)
 
