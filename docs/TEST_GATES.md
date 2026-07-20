@@ -14,7 +14,13 @@ bash tools/regression_3goals.sh                          # ~4분
 bash tools/mission_e2e.sh                                # ~3분
 bash tools/abort_e2e.sh                                  # ~3분
 bash tools/doc_check.sh                                  # ~1초 — 문서 동기화 (커밋 직전)
+#   … 커밋 + push …
+bash tools/doc_check.sh --after-push                     # 원격 동기 재확인 (필수)
 ```
+
+⚠ **`--after-push` 를 빼면 안 된다.** 커밋 직전 실행 시점의 HEAD 는 아직 *이전* 커밋이라,
+새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
+`--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
 기준선 (07-20, SpeedManager 추출 후 `f94da44`): pytest **108 passed** / colcon **114 tests, 0 fail, 2 skip** / E2E 4종 PASS.
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).

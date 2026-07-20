@@ -58,8 +58,9 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
 
 - **한 세션 = 한 커밋 묶음** (마스터플랜 표 행 단위 이하). 묶음 밖 파일·기능을 섞지 않는다.
 - **묶음이 끝나면 문서도 같이 갱신한다** — `CURRENT_HANDOFF` 를 다음 묶음으로 교체(현재 위치의 유일한 정본),
-  `TEST_GATES` 기준선, 필요 시 `MASTER_PLAN` ✅·§8 색인. 커밋 직전 **`bash tools/doc_check.sh`** 로 검사한다
-  (문서 불일치 = 다음 세션의 실행 버그). 같은 사실을 두 문서에 쓰지 않는다 — 링크로 연결한다.
+  `TEST_GATES` 기준선, 필요 시 `MASTER_PLAN` ✅·§8 색인. 커밋 직전 **`bash tools/doc_check.sh`**,
+  push 직후 **`bash tools/doc_check.sh --after-push`** 로 검사한다 (문서 불일치 = 다음 세션의 실행 버그).
+  같은 사실을 두 문서에 쓰지 않는다 — 링크로 연결한다.
 - **커밋 = push 한 세트.** 원격 `https://github.com/ghwjd1357-alt/tunnel-evac-robot` (private).
 - 빌드는 항상 `colcon build --symlink-install` (수동 실행).
 - **`make_map.sh` 실런 금지** — 지도 자산 변경은 사용자 명시 승인 + 정기 지도 제작 때만. E2E 스크립트는 전용 시뮬 PC 전용(Jetson 실행 금지).
