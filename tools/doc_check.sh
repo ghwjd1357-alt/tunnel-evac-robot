@@ -46,6 +46,12 @@ resolve_doc() {
     return 1
 }
 
+# 문서에 'N' 번 제목이 존재하는가 (## 2. / ### 7.3 / ### 2-B. 등)
+heading_exists() {
+    local path="$1" num="${2//./\\.}"
+    grep -qP "^#{1,6} *\**${num}[.\s\*]" "$path" || grep -qP "^#{1,6} *\**${num}$" "$path"
+}
+
 # ── 원격 동기 검사 (ahead/behind/diverged) ───────────────────────────────
 remote_check() {
     if ! git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
@@ -67,7 +73,10 @@ remote_check() {
 }
 
 if [ "$MODE" = "after-push" ]; then
+    # 이 모드는 원격 확인이 유일한 목적 → upstream 없음·rev-list 실패도 실패로 본다
+    # (확인 못 한 것을 '정상'이라 말하지 않는다).
     echo "=== push 후 원격 동기 확인 ==="
+    STRICT=1
     remote_check
     echo
     [ "$FAIL" = "0" ] && echo "✅ 원격 동기 정상" || echo "❌ 위 항목을 정리할 것"
@@ -135,16 +144,22 @@ while IFS= read -r ref; do
         continue
     fi
     LINKN=$((LINKN+1))
-    sec=$(printf '%s' "$ref" | grep -oP '§ *\K[0-9]+(\.[0-9]+)*')
-    [ -z "$sec" ] && continue
-    esc="${sec//./\\.}"
-    if grep -qP "^#{1,6} *\**${esc}[.\s\*]" "$path" || grep -qP "^#{1,6} *\**${esc}$" "$path"; then
+    raw=$(printf '%s' "$ref" | grep -oP '§ *\K\S+')
+    [ -z "$raw" ] && continue
+    raw="${raw%%~*}"                       # 범위 표기(§18.3~18.4)는 앞부분으로 검사
+    # 지원 형식: N / N.N / N-X (X = 숫자 또는 영문). 그 외는 조용히 넘기지 않고 FAIL.
+    if ! printf '%s' "$raw" | grep -qP '^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z]+)?$'; then
+        SECBAD="$SECBAD [$ref ← 지원하지 않는 절 형식]"; continue
+    fi
+    # §2-B 처럼 하이픈까지가 실제 제목인 경우와, §2-2(=§2 의 2번 항목)처럼
+    # 하이픈 앞 번호가 제목인 경우를 모두 인정한다.
+    if heading_exists "$path" "$raw" || heading_exists "$path" "${raw%%-*}"; then
         SECN=$((SECN+1))
     else
         SECBAD="$SECBAD [$ref]"
     fi
 done < <(grep -rhoP '`[^`]+`' "${SRC[@]}" 2>/dev/null | tr -d '`' \
-         | grep -P '\.md( *§ *[0-9]+(\.[0-9]+)*)? *$' | sort -u)
+         | grep -P '\.md( *§ *\S+)? *$' | sort -u)
 
 [ -z "$BROKEN" ] && ok "문서 링크 전부 유효 ($LINKN 건)" || bad "없는 문서 참조:$BROKEN"
 # 07-20 실사고: CURRENT_HANDOFF 가 repo MASTER_PLAN 에 없는 '§7.3' 을 가리켰다.
