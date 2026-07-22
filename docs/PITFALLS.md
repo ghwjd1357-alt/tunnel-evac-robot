@@ -72,6 +72,7 @@
 - ★ **"A 는 B 가 담당한다"고 범위를 나눌 땐 B 가 그 경로 전부를 덮는지 확인** — "guide 실패는 FAULT 가 담당"이 맞은 건 *진입* 실패뿐이었고, guide 성공 **후** stale 이 덮은 경우는 아무도 안 맡아 GUIDE 중 과속이 남았다. → `0720_현황.md §22.2`
 - ★ **상태 판단은 그 상태를 소유한 쪽이 한다** — Manager 가 `_guide_confirmed` 로 노드 상태를 짐작하면 FAULT 자동복귀 같은 순간에 둘이 어긋난다. 콜백은 하나로 주고 분기는 state 소유자(MissionNode)가. → `0720_현황.md §22.4`
 - **저속·모드 보장은 상태와 함께 자동 복귀하지 않는다** — FAULT 재시도로 GUIDE 에 돌아갈 때 controller 값은 그대로다. 복귀 시 다시 확인받을 것. → `0720_현황.md §22.4`
+- ★★ **소비 지점 fail-closed 게이트라도 그 술어가 latch(과거)면 뚫린다** — "위험한 건 소비 지점에서 막자"(§23)로 위치는 옳게 옮겼는데, 게이트가 읽는 값이 `guide_confirmed`(과거 1회 성공)라 늦은 sync 가 실제 속도를 덮어도 True 로 남아 과속 goal 이 나갔다. **게이트 술어는 반드시 live(지금 실효값)여야 한다** — `guide_speed_applied` = `_applied == desired guide값`. public live 와 private latch 는 이름을 뚜렷이 분리(`guide_speed_applied` vs `_guide_was_confirmed`)해 다음 검토의 겸직 오독을 막는다. → `0720_현황.md §24.2`
 - 껍데기 노드 테스트는 **매니저만 찌르지 말고 노드의 진짜 진입점(`on_cmd` 등)을 통과시킬 것** — 호출 누락·순서 뒤바뀜은 매니저 단위테스트가 못 잡는다. → `0720_현황.md §21.2`
 
 ## 9. 실물 라이다 (RPLIDAR C1)

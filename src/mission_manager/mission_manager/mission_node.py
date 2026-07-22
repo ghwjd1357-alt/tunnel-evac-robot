@@ -760,9 +760,13 @@ class MissionNode(Node):
             #   놓쳤다. 경로를 세는 대신 '주행을 시작하는 지점' 하나를 막으면
             #   앞으로 생길 경로까지 자동으로 덮인다.
             #   요청을 보낸 것 ≠ 적용된 것 (AGENTS.md §3-3 — 호출≠접수≠종결≠실효).
-            if not self.speed.guide_confirmed:
+            #   ★ §12 P1: 술어는 latch(과거 1회 성공)가 아니라 live(지금 저속 적용)
+            #   여야 한다 — guide_speed_applied. 늦은 sync 0.26 이 controller 를 덮으면
+            #   즉시 False 가 되어 새 escape 가 안 나간다. 이미 주행 중인 goal 은 여기서
+            #   멈추지 않는다 — 그 정지는 §22.3(reconcile→소진 시 cancel+FAULT)·B(GoalManager).
+            if not self.speed.guide_speed_applied:
                 self.get_logger().warn(
-                    '⚠ GUIDE 저속 적용 미확인 — 유도 주행 보류 (확인 후 출발)',
+                    '⚠ GUIDE 저속 미적용 — 유도 주행 보류 (적용 확인 후 출발)',
                     throttle_duration_sec=5.0)
             elif not self.goal_active:
                 self.send_goal(self.wp['escape'], tag='escape')

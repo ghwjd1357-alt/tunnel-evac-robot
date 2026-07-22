@@ -102,7 +102,11 @@ class SpeedManager:
         self._applied = None      # controller 에 '성공 확인'된 마지막 값
         self._inflight = False    # 현재 세대 요청이 응답 대기 중인가
         self._inflight_purpose = None   # 그 요청의 종류 (reconcile 포함)
-        self._guide_confirmed = False   # GUIDE 저속이 한 번이라도 확인됐는가
+        # ★ 개명(§12): latch = "한 번이라도 확인됐나"(과거). public live 프로퍼티
+        #   guide_speed_applied("지금 저속인가")와 이름이 거의 같으면 다음 검토가
+        #   겸직으로 오독한다(§22 전례). 이 걸쇠는 _settle 재조정 자격·유지실패
+        #   분류 전용 — 주행 게이트는 절대 이 값을 읽지 않는다.
+        self._guide_was_confirmed = False   # GUIDE 저속이 한 번이라도 확인됐는가
 
         # --- 종결 재평가 (0720 P1 — desired 미반영 채로 끝나는 것 금지) ---
         self._settle_cooldown = 0
@@ -125,13 +129,20 @@ class SpeedManager:
     # 공개 API — MissionNode 의 정책이 부르는 4개 + tick
     # ===========================================================
     @property
-    def guide_confirmed(self):
-        """GUIDE 저속이 '적용 확인'된 상태인가 (요청 전송이 아니라 성공 응답 기준).
+    def guide_speed_applied(self):
+        """지금 controller 에 저속(guide 요구값)이 실제로 적용돼 있는가 — **live**.
 
-        ★ 이 값이 False 인데 유도 주행을 시작하면 F2 불변조건 위반이다 —
-        MissionNode 가 goal 전송 전에 fail-closed 로 검사한다 (07-20 재검토 §11.3).
-        새 정책 요청(_new_request)마다 False 로 돌아가고, guide 성공 응답에서만 True."""
-        return self._guide_confirmed
+        ★ 07-20 §12 P1: 이 게이트의 이전 술어(`_guide_was_confirmed` latch)는
+        "guide 가 과거에 한 번 성공했나"였다. 늦은 sync 0.26 성공이 `_applied` 를
+        덮어도 latch 는 True 로 남아, 평시속도인데 escape goal 이 나갔다.
+        → 걸쇠(과거)가 아니라 **현재 적용값**을 실시간 계산한다:
+          desired 가 여전히 guide 를 원하고(_desired origin), controller 가
+          그 값을 실제로 확인·적용한(_applied) 동안에만 True.
+        stale 가 _applied 를 덮으면 즉시 False → 소비 지점 게이트가 fail-closed.
+        reconcile 성공으로 _applied 가 다시 guide 값이 되면 True 로 복귀."""
+        return (self._desired is not None
+                and self._desired[1] == 'guide'
+                and self._applied == self._desired[0])
     def request_guide(self, v):
         """GUIDE 저속 적용 요청. 성공 확인 → on_guide_confirmed 콜백.
         서비스 미준비면 timeout 까지 tick 이 대기·재시도 (기존 '무기한 GATHER
@@ -162,7 +173,7 @@ class SpeedManager:
         self._gen += 1
         self._inflight = False
         self._inflight_purpose = None
-        self._guide_confirmed = False
+        self._guide_was_confirmed = False
         self._deadline_at = None
         if self._wait_since is not None:
             self._log.info(f'guide 저속 대기 취소 ({reason})')
@@ -216,7 +227,7 @@ class SpeedManager:
         self._settle_cooldown = 0
         self._settle_rounds = 0
         self._settle_gave_up = False
-        self._guide_confirmed = False
+        self._guide_was_confirmed = False
         # 이전 guide 대기가 있었다면 새 요청이 대체 (세대 불일치로 tick 이 정리)
         if not self._cli.service_is_ready():
             if purpose == 'guide':
@@ -305,7 +316,7 @@ class SpeedManager:
             # 시작 동기화의 목적(재시작 저속 상속 방지)은 이 시점에 충족된다.
             self.synced = True
             if purpose == 'guide':
-                self._guide_confirmed = True   # 이후 실패는 '유지 실패'로 분류
+                self._guide_was_confirmed = True   # 이후 실패는 '유지 실패'로 분류
                 self._on_guide_confirmed()
         else:
             if attempt < self.MAX_ATTEMPTS:
@@ -420,7 +431,7 @@ class SpeedManager:
         origin = self._desired[1] if self._desired else ''
         if origin == 'guide':
             # ★ '진입 차단'인지 '유도 중단'인지는 MissionNode 가 자기 상태로 판단한다.
-            #   Manager 가 _guide_confirmed 로 대신 판단하면, FAULT 자동 재시도로
+            #   Manager 가 _guide_was_confirmed 로 대신 판단하면, FAULT 자동 재시도로
             #   GUIDE 에 복귀한 순간 두 관점이 어긋난다 (자기반증에서 발견).
             self._on_guide_failed(reason)
         elif origin == 'sync':
@@ -452,7 +463,7 @@ class SpeedManager:
         # ★ 이전엔 origin guide 를 통째로 뺐다가, GUIDE 진입 후 stale 이 덮은
         #   경우를 아무도 안 고쳤다 (재검토 §10.2).
         if not (origin == 'restore'
-                or (origin == 'guide' and self._guide_confirmed)):
+                or (origin == 'guide' and self._guide_was_confirmed)):
             return
         if self._applied == dv:
             return                                  # 이미 일치 — 할 일 없음

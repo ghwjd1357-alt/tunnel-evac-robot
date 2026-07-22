@@ -830,13 +830,88 @@ def test_n13_guide_speed_regated_on_fault_resume():
     node.tick()
     assert node.state == State.GUIDE          # 복귀했고
     assert node._calls == [0.12]              # 저속을 다시 '요청'했고
-    assert not node.speed.guide_confirmed     # ★ 아직 '확인'은 안 됐다
+    assert not node.speed.guide_speed_applied     # ★ 아직 '확인'은 안 됐다
     assert node._goals == []                  # ★ 그러므로 주행 goal 금지
 
     node.tick()                               # 응답 없는 채 다음 tick
     assert node._goals == [], '저속 미확인 상태로 유도 주행이 시작됨 (F2 위반)'
 
     respond(node, 0, ok_resp())               # 이제 적용 확인
-    assert node.speed.guide_confirmed
+    assert node.speed.guide_speed_applied
     node.tick()
     assert node._goals == [('escape', 0.12)]  # ★ 확인 후에야 출발
+
+
+# ============================================================
+# §12 P1 봉합(A): 게이트 술어를 latch → live 로 — MissionNode.tick() 진입
+# ============================================================
+def _tick_harness(node):
+    """N14~N15: MissionNode.tick() 로 GUIDE 주행 게이트를 실제로 통과시키는 하네스.
+    make_env 는 speed 만 계측하므로 tick() 이 참조하는 노드 필드를 채운다 (N13 요령).
+    give_up=True 로 SEARCH_BACK 추종 블록을 배제하고, send_goal 은 (tag, 적용속도)를
+    _goals 에 남긴다 — '어떤 속도로 유도를 시작했나'를 검사에서 직접 본다."""
+    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12,
+               'escape': {'x': -12.0, 'y': 0.0, 'yaw': 0.0}}
+    node.siren_on = False
+    node.state_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.speed.synced = True                 # sync 가 대신 쏘는 경로 배제
+    node._goals = []
+    node.goal_active = False
+    node.give_up = True
+    node.monitor = types.SimpleNamespace(
+        visible=lambda zone=None: True, lost=lambda zone=None: False,
+        scan_stale=lambda: False, reset=lambda k: None)
+    node.send_goal = lambda wp, tag='': (
+        node._goals.append((tag, node.speed._applied)),
+        setattr(node, 'goal_active', True))[0]
+
+
+def test_n14_stale_sync_overwrite_blocks_new_guide_goal():
+    """N14 — 재검토 §12 P1: guide 확인 뒤 늦은 sync 0.26 이 controller 를 덮으면,
+    적용값이 평시속도(0.26)인데도 새 escape goal 이 나가던 구멍.
+
+    A(guide_speed_applied = 지금 적용값이 저속인가, live)로 봉합. 이전 게이트 술어인
+    latch(_guide_was_confirmed)는 '과거 1회 성공'을 뜻해 이 창을 못 막았다 —
+    소비 지점은 옳았으나 술어가 stale 였다."""
+    node = make_env()
+    arm_guide_then_stale_sync_overwrites(node)   # applied=0.26, reconcile(0.12) in-flight
+    _tick_harness(node)
+    assert node.state == State.GUIDE
+    assert node.speed._applied == 0.26
+    assert not node.speed.guide_speed_applied     # ★ 지금 평시속도 = 저속 미적용
+
+    node.tick()
+    assert node._goals == [], 'stale 평시속도 적용 상태에서 유도 주행이 시작됨 (F2 위반)'
+    node.tick()                                   # 응답 없는 다음 tick 도 금지
+    assert node._goals == []
+
+    respond(node, 2, ok_resp())                   # reconcile(0.12) 성공 → applied=0.12
+    assert node.speed._applied == 0.12
+    assert node.speed.guide_speed_applied
+    node.tick()
+    assert node._goals == [('escape', 0.12)]      # ★ 적용 확인 후에야 출발
+
+
+def test_n15_stale_sync_does_not_disturb_moving_guide_goal():
+    """N15 — 회귀 가드(Codex §12.3 철회분): A 는 '신규 전송'만 막고, 이미 주행
+    중인 escape goal 을 즉시 cancel 하지 않는다 (§22.3 유지 — 일시적 표류는
+    reconcile 이 먼저, 예산 소진 시에만 cancel+FAULT: N8/N9). reconcile 성공
+    뒤에도 기존 goal 을 유지하고 중복 goal 을 보내지 않는다.
+
+    '즉시 정지'는 §22.3 보다 엄격한 새 정책이고, 그 취소의 CANCELED 종결 직렬화는
+    GoalManager(2/3, B) 소관이다 — 이 묶음에 넣지 않는다."""
+    node = make_env()
+    arm_guide_then_stale_sync_overwrites(node)
+    _tick_harness(node)
+    node._goals = [('escape', 0.12)]              # 이미 escape 주행 중
+    node.goal_active = True
+
+    node.tick()                                   # stale 0.26 적용 상태
+    assert node._cancels == [], '일시적 표류에 escape goal 을 즉시 취소함 (§22.3 위반)'
+    assert node._goals == [('escape', 0.12)]      # 중복 전송도 없음
+
+    respond(node, 2, ok_resp())                   # reconcile 성공 → applied=0.12
+    node.tick()
+    assert node._cancels == []                    # 여전히 취소 없음
+    assert node._goals == [('escape', 0.12)]      # 기존 goal 유지, 중복 없음
