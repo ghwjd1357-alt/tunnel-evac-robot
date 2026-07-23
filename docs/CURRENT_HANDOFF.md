@@ -3,42 +3,47 @@
 > 작업 완료 시 구현자가 갱신하고 검토자가 사실관계·테스트 결과를 확인한다.
 > 이전 묶음 내용은 날짜별 현황으로 보낸다. 항상 이 한 묶음만 유지.
 
-- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager 보완 4차 진행, 07-20)
-- **현재 단계**: 마스터플랜 12단계 중 4단 — 구조 분리 **1/3 보완 4차 (진행 중)**.
-  4차 통과 후 2/3(GoalManager) 착수 (`CODEX 현황/0720검토현황.md §12`)
-- **직전 완료**: 재검토 3차 P1 봉합 (`0720_현황.md §23`) — 그러나 §12 에서 그 게이트의
-  **술어가 stale latch** 였음이 드러남(guide 과거 1회 성공 ≠ 지금 저속 적용).
-- **이번 한 묶음 목표 = SpeedManager 보완 4차 (A 한정)**: 소비 지점 게이트의 술어를
-  **latch → live** 로 교정한다. `guide_speed_applied`(지금 적용값이 저속인가) 신설 +
-  내부 걸쇠 `_guide_confirmed → _guide_was_confirmed` 개명(겸직 오독 방지).
-  이것이 `§12` P1(늦은 sync 0.26 이 덮은 뒤 새 escape goal 전송)의 정확한 봉합이다.
-  ⚠ **B(취소 종결 게이트)는 이 묶음에 넣지 않는다 — GoalManager 로 이관** (아래 착수 예고).
-  근거: 주행 중 일시적 표류는 기존 reconcile→소진 시 cancel+FAULT(`§22.3`)가 이미 담당,
-  "즉시 정지"는 그보다 엄격한 새 정책이라 §12 P1 필수조건 아님(Codex §12 철회 확인).
+- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — SpeedManager 보완 5차 진행, 07-23)
+- **현재 단계**: 마스터플랜 12단계 중 4단 — 구조 분리 **1/3 보완 5차 (진행 중)**.
+  5차 통과 = SpeedManager 동결 → 2/3(GoalManager) 착수 (`CODEX 현황/0720검토현황.md §13`)
+- **직전 완료**: 4차 §12 P1 봉합 (`322d146`, `0720_현황.md §24`) — 게이트 술어를 latch→live
+  로 교정. §12 원 반례는 닫혔으나, **§13 에서 보존한다던 §22.3 정책의 구멍**이 드러남.
+- **이번 한 묶음 목표 = SpeedManager 보완 5차 (§13 P1 봉합)**: guide 저속 복구 예산이
+  **SEARCH_BACK 전환 중** 소진되면 실패 통보(`_on_guide_speed_fail`)가 콜백 else 로 **무시**돼
+  (state 가 GATHER/GUIDE 가 아님) cancel·FAULT 없이 GUIDE 복귀 → **고장 은폐 영구 정지**.
+  §24 와 같은 오류 클래스(fail-open 기본값). 실패 결정을 **콜백 한 번**에 맡기지 말고
+  **매 tick live** 로 확인한다(=§24 의 latch→live 교훈을 한 단계 위에 적용).
+  ⚠ **B(취소 종결 직렬화)는 이 묶음에 넣지 않는다 — 여전히 GoalManager 소관** (아래 예고).
+  여기 쓰는 `cancel_current_goal()`은 branch ② 가 이미 쓰는 **기존 호출**이라 B 를 선점하지 않는다.
 
-## 완료조건 (SpeedManager 보완 4차 — A 한정)
+## 완료조건 (SpeedManager 보완 5차 — §13 P1)
 
-1. **`guide_speed_applied` (live) 신설** — `_desired` origin 이 guide 이고 `_applied`
-   가 그 요구값과 같을 때만 True. "guide 가 한 번이라도 성공했나"(과거)가 아니라
-   "지금 controller 에 저속이 적용돼 있나"(현재)를 뜻한다. `_on_stale_result` 가
-   `_applied` 를 0.26 으로 덮으면 즉시 False 가 되어야 한다.
-2. **내부 걸쇠 개명** `_guide_confirmed → _guide_was_confirmed` — public live 와
-   거의 같은 이름을 남기면 다음 검토가 겸직으로 오독한다(§22 전례). 걸쇠는
-   `_settle` 재조정 자격·유지실패 분류 전용으로 남긴다.
-3. **소비 지점 게이트가 live 를 참조** (`mission_node.py` GUIDE 분기) — 신규 goal
-   전송만 가른다. 이미 주행 중인 goal 은 건드리지 않는다(그 정지는 §22.3·B 소관).
-4. 공격 테스트 (구현 전 확정, `MissionNode.tick()` 진입):
-   - **N14** goal 없음 + stale 0.26: live=False → 신규 goal 0건, reconcile 성공 후 1건.
-   - **N15** 주행 중 + 일시적 stale 0.26: **즉시 cancel 안 함**, reconcile 성공 뒤에도
-     기존 goal 유지 + 중복 goal 0건 (A 가 주행을 건드리지 않는다는 회귀 가드).
-   - 기존 N8/N9(소진 시 cancel+FAULT)·N11(금지상태 부재)·N13(FAULT 복귀) 녹색 유지.
-   - T자·쌍굴 정상 설정 역회귀(E2E).
-5. ★ **테스트가 실제로 적색이 되는지 확인** — 게이트를 옛 latch 로 임시 되돌려 N14 가
-   0.26 에서 escape 를 쏘는지(적색) 확인 후 되돌린다 (N13 초판 교훈).
+1. **`guide_speed_recovery_exhausted` (live) 신설** (`speed_manager.py`) — "한 번 성공한 뒤
+   reconcile 예산 소진"만 뜻한다(최초 진입 실패 포함 금지 → 그래서 `_failed` 아님):
+   `_settle_gave_up ∧ _desired origin=guide ∧ _applied≠요구값 ∧ ¬_inflight`. 재무장
+   (`request_guide`→`_new_request`)이 `_settle_gave_up=False` 로 즉시 False 화.
+2. **live fail-closed 가드** (`mission_node.py` `tick()` — `self.speed.tick()` 직후,
+   **`ensure_sync` 앞**): `state ∈ {GUIDE, SEARCH_BACK} ∧ guide_speed_recovery_exhausted`
+   → `cancel_current_goal()`+`enter_fault()`. **`return` 하지 않는다** — 같은 tick 에 FAULT
+   가 발행되고 이후 GUIDE/SEARCH_BACK 동작은 state 가 FAULT 라 자동으로 실행 안 됨.
+   ⚠ 가드를 `ensure_sync` 뒤에 두면 sync 요청이 `_inflight=True` 로 술어를 가려 뚫린다.
+3. **FAULT→SEARCH_BACK 재시도 재무장** (`mission_node.py:833` 부근) — 기존엔 resume 가
+   GUIDE 일 때만 `request_guide` 했다. `state ∈ {GUIDE, SEARCH_BACK}` 로 넓힌다.
+   안 하면 SEARCH_BACK 복귀 시 소진 술어가 그대로 남아 **즉시 재-FAULT** 루프.
+4. **콜백 backstop 정리** (`mission_node.py:1037`) — branch ② 를 `state ∈ {GUIDE,
+   SEARCH_BACK}` 로 넓혀 즉시성 확보. live 가드(2)는 **콜백 유실에 대한 backstop**.
+5. 공격 테스트 (구현 전 확정, `MissionNode`/`SpeedManager` 조합):
+   - **N16** SEARCH_BACK 중 실제 reconcile 소진 → 같은 tick 에 cancel+FAULT (콜백 경로).
+   - **N17** 콜백이 이미 유실됐다고 가정(술어만 True) → 다음 tick 에 live 가드가 FAULT.
+   - **N18** FAULT→SEARCH_BACK 재시도 시 `request_guide()` 재무장 → 소진 술어 해제,
+     즉시 재-FAULT 하지 않음.
+   - 기존 N8/N9·N11·N13·N14/N15 녹색 유지.
+   - T자·**쌍굴** 정상 설정 역회귀(E2E) — 4차 §24.5 가 쌍굴 실행 증거를 빠뜨린 P2 동봉.
+6. ★ **적색 확인** — live 가드를 제거하면 **N17 이 실패**하는지 확인 후 되돌린다.
 
-## 다음 묶음(2/3) 착수 예고 — GoalManager 헌장 (★ 이번 4차엔 손대지 않음)
+## 다음 묶음(2/3) 착수 예고 — GoalManager 헌장 (★ 이번 5차엔 손대지 않음)
 
-> B(취소 종결 게이트)를 여기서 담당한다. 4차 통과 후 별도 묶음으로 착수.
+> B(취소 종결 게이트)를 여기서 담당한다. 5차 통과 후 별도 묶음으로 착수.
 
 1. send_goal·응답 seq 검증·뒤늦은 수락 즉시취소·cancel 확인 사슬·stale 결과 감시를
    Manager 내부로 이관 (기존 goal_seq 방식 유지 — 동작 불변)
@@ -70,16 +75,16 @@
    - 비동기 요청엔 요청 단위 deadline / Manager 만 찌르지 말고 `tick` 진입점 통과 테스트.
    - ★ **테스트가 실제로 적색이 되는지 확인** — N13 초판은 통과만 하고 버그를 고정했다.
 
-## 허용 파일/범위 (이번 4차)
+## 허용 파일/범위 (이번 5차)
 
-- `src/mission_manager/mission_manager/speed_manager.py` (property/걸쇠 개명 + live 술어)
-- `src/mission_manager/mission_manager/mission_node.py` (GUIDE 게이트 술어 1줄)
-- `src/mission_manager/test/test_speed_manager.py`
+- `src/mission_manager/mission_manager/speed_manager.py` (live 술어 `guide_speed_recovery_exhausted` 신설)
+- `src/mission_manager/mission_manager/mission_node.py` (tick live 가드 + 재시도 재무장 + 콜백 backstop)
+- `src/mission_manager/test/test_speed_manager.py` (N16~N18)
 
 ## 금지 범위
 
-**B(취소 종결 게이트)·GoalManager 이관·FSM·인지 기능·make_map 실런을 이번 묶음에 섞지 않는다.**
-주행 중 표류의 '즉시 정지'는 넣지 않는다(§22.3 유지 — reconcile 먼저, 소진 시에만 cancel+FAULT).
+**B(취소 종결 게이트)·GoalManager 이관·FSM 순수화·인지 기능·make_map 실런을 이번 묶음에 섞지 않는다.**
+`cancel_current_goal()`은 기존 호출 그대로 쓴다 — 그 취소의 CANCELED 종결 직렬화는 여전히 B/GoalManager.
 지도 자산 불변. (SpeedManager 의 비차단 보류 항목은 `0720_현황.md §23.5`.)
 
 ## 보존해야 할 동작·안전 불변조건
@@ -100,8 +105,9 @@
 
 ## 완료 후 다음 단계
 
-4차 Codex 통과 → **GoalManager 추출 (구조 분리 2/3, 위 헌장)** → E2E 공통 하네스 3/3
-→ platform-core-freeze 게이트. 병렬: 역할 B V1 세부 미팅 / micro-ROS 구동부 대기.
+5차 Codex 통과 = **새 P1 에 허용된 마지막 연장 검토 종료 → SpeedManager 동결** →
+**GoalManager 추출 (구조 분리 2/3, 위 헌장)** → E2E 공통 하네스 3/3 → platform-core-freeze
+게이트. 병렬: 역할 B V1 세부 미팅 / micro-ROS 구동부 대기.
 
 ## 근거 문서의 정확한 절
 

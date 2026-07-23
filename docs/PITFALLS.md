@@ -73,6 +73,7 @@
 - ★ **상태 판단은 그 상태를 소유한 쪽이 한다** — Manager 가 `_guide_confirmed` 로 노드 상태를 짐작하면 FAULT 자동복귀 같은 순간에 둘이 어긋난다. 콜백은 하나로 주고 분기는 state 소유자(MissionNode)가. → `0720_현황.md §22.4`
 - **저속·모드 보장은 상태와 함께 자동 복귀하지 않는다** — FAULT 재시도로 GUIDE 에 돌아갈 때 controller 값은 그대로다. 복귀 시 다시 확인받을 것. → `0720_현황.md §22.4`
 - ★★ **소비 지점 fail-closed 게이트라도 그 술어가 latch(과거)면 뚫린다** — "위험한 건 소비 지점에서 막자"(§23)로 위치는 옳게 옮겼는데, 게이트가 읽는 값이 `guide_confirmed`(과거 1회 성공)라 늦은 sync 가 실제 속도를 덮어도 True 로 남아 과속 goal 이 나갔다. **게이트 술어는 반드시 live(지금 실효값)여야 한다** — `guide_speed_applied` = `_applied == desired guide값`. public live 와 private latch 는 이름을 뚜렷이 분리(`guide_speed_applied` vs `_guide_was_confirmed`)해 다음 검토의 겸직 오독을 막는다. → `0720_현황.md §24.2`
+- ★★ **실패 '결정'을 콜백 이벤트 한 번에만 맡기면 상태 전환 중 유실된다** — 저속 복구 소진(`_settle`)이 콜백(`_on_guide_speed_fail`)으로 딱 한 번 알리는데, 그 순간 상태가 GUIDE 가 아니라 SEARCH_BACK 이면 콜백 else(기본값)가 '늦은 통보'로 **무시** → GUIDE 복귀 후 live 게이트가 신규 goal 은 막아도 FAULT 없이 **고장 은폐 영구정지**. §24 와 같은 클래스(fail-open 기본값). 봉합 = 소비 지점(tick)에서 **매 tick live 술어**(`guide_speed_recovery_exhausted`)를 확인하는 fail-closed 가드 — 통보 유실과 무관하게 유도활성(GUIDE/SEARCH_BACK) 상태가 종결 실패를 한 tick 이상 못 이고 간다. 콜백은 즉시성, 가드는 backstop. **가드는 `ensure_sync` 앞**에 둔다(sync 요청 `_inflight` 이 술어를 가림). FAULT→SEARCH_BACK 재시도 복귀도 `request_guide` 재무장(안 하면 소진 술어 잔존→즉시 재-FAULT). → `0720_현황.md §25.2`
 - 껍데기 노드 테스트는 **매니저만 찌르지 말고 노드의 진짜 진입점(`on_cmd` 등)을 통과시킬 것** — 호출 누락·순서 뒤바뀜은 매니저 단위테스트가 못 잡는다. → `0720_현황.md §21.2`
 
 ## 9. 실물 라이다 (RPLIDAR C1)

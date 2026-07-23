@@ -915,3 +915,97 @@ def test_n15_stale_sync_does_not_disturb_moving_guide_goal():
     node.tick()
     assert node._cancels == []                    # 여전히 취소 없음
     assert node._goals == [('escape', 0.12)]      # 기존 goal 유지, 중복 없음
+
+
+# ============================================================
+# §13 P1 봉합: SEARCH_BACK 전환 중 복구 소진 통보 유실 방지
+#   콜백 ②(즉시성) + tick live 가드(통보 유실 backstop) + 재시도 재무장
+# ============================================================
+def test_n16_searchback_reconcile_exhaustion_faults_via_callback():
+    """N16 — SEARCH_BACK 로 전환한 뒤 guide 저속 복구가 실제로 소진되면, 실패
+    통보(_settle→_on_guide_failed)가 콜백 else 로 버려지지 않고 cancel+FAULT 로
+    종결돼야 한다.
+
+    §13 P1: 소진 통보가 도착한 순간 상태가 GUIDE 가 아니라 SEARCH_BACK 이면,
+    이전 콜백은 branch ③(else)으로 빠져 '늦은 통보'로 무시했다 → GUIDE 복귀 후
+    고장 없이 영구 정지. 콜백 ② 를 SEARCH_BACK 까지 넓혀 봉합한다. (여기선
+    speed.tick() 만 돌려 tick live 가드와 분리 — 순수히 콜백 경로만으로 종결되는지
+    본다. N8 을 SEARCH_BACK 상태로 옮긴 셈이다.)"""
+    node = make_env()
+    arm_guide_then_stale_sync_overwrites(node)   # state GUIDE, applied 0.26, reconcile in-flight
+    node.state = State.SEARCH_BACK               # ★ 놓침 → 역행 중으로 전환
+    seen = drain_failures(node, 2)               # reconcile 실패 주입
+    for _ in range(500):                         # 예산 안에서 재시도 → 소진 → 종결
+        node.speed.tick()
+        seen = drain_failures(node, seen)
+    assert node._faults == [1]                   # ★ SEARCH_BACK 에서도 버려지지 않고 FAULT
+    assert node._cancels == [1]                  # goal 취소까지
+    assert len(node._calls) < 30                 # 유한 종결
+
+
+def test_n17_terminal_predicate_faults_even_if_callback_lost():
+    """N17 — 콜백이 이미 유실됐다고 가정하고(소진 술어만 True) tick 을 돌리면,
+    live 가드가 그 tick 에 반드시 cancel+FAULT 한다 (§13 backstop, 적색 확인 대상).
+
+    통보 유실은 상태 전환과 콜백 사이 경합에서 생길 수 있다 — 그래서 실패 결정을
+    '이벤트 한 번'이 아니라 '매 tick live 확인'으로 이중화한다(§24 latch→live 교훈의
+    한 단계 위 적용). enter_fault 는 실제로 state 를 FAULT 로 바꾸므로 국소 대체해
+    '가드 뒤 분기 자동 스킵'까지 재현한다."""
+    node = make_env()
+    _tick_harness(node)
+    node.state = State.SEARCH_BACK
+    node.resume_state = None
+    node.fault_retries = 0
+    node.MAX_RETRIES = 2
+
+    def _fault():                                # 실제 enter_fault 처럼 상태를 옮김
+        node._faults.append(1)
+        node.state = State.FAULT
+    node.enter_fault = _fault
+
+    # 콜백이 유실됐다고 가정 — 소진 술어만 직접 True 로 (_settle 을 거치지 않음)
+    node.speed._desired = (0.12, 'guide')
+    node.speed._applied = 0.26
+    node.speed._inflight = False
+    node.speed._settle_gave_up = True
+    assert node.speed.guide_speed_recovery_exhausted
+
+    node.tick()
+    assert node._faults == [1]                   # ★ live 가드가 FAULT
+    assert node._cancels == [1]                  # goal 취소까지
+    assert node.state == State.FAULT             # 같은 tick 에 FAULT 발행
+
+
+def test_n18_searchback_fault_retry_rearms_guide_no_immediate_refault():
+    """N18 — FAULT 에서 SEARCH_BACK 으로 자동 재시도 복귀할 때 request_guide()
+    로 저속을 재무장해야 한다. 안 하면 _settle_gave_up 이 남아 위 live 가드가
+    다음 tick 즉시 재-FAULT → 재시도 예산만 태우고 영구 정지(§13).
+
+    이전엔 resume 가 GUIDE 일 때만 재무장했다(GUIDE-only). SEARCH_BACK 도 유도
+    임무의 소풍이라 복귀 시 동일하게 저속을 다시 확인받아야 한다."""
+    node = make_env(state=State.FAULT)
+    node.wp = {'normal_speed': 0.26, 'guide_speed': 0.12,
+               'escape': {'x': -12.0, 'y': 0.0, 'yaw': 0.0}}
+    node.siren_on = False
+    node.state_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
+    node.MAX_RETRIES = 2
+    node.RETRY_WAIT = 3.0
+    node.fault_retries = 0
+    node.resume_state = State.SEARCH_BACK        # ★ SEARCH_BACK 에서 FAULT 났었다
+    node.fault_since = _Stamp(0)
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: _Stamp(100 * 10**9))
+    node.speed.synced = True
+
+    # 소진 상태로 진입 — 재무장 안 하면 즉시 재-FAULT 로 굳는다
+    node.speed._desired = (0.12, 'guide')
+    node.speed._applied = 0.26
+    node.speed._inflight = False
+    node.speed._settle_gave_up = True
+
+    node.tick()
+    assert node.state == State.SEARCH_BACK             # 재시도로 복귀
+    assert node._calls == [0.12]                       # ★ request_guide 재무장
+    assert not node.speed._settle_gave_up              # 소진 예산 해제됨
+    assert not node.speed.guide_speed_recovery_exhausted  # → 다음 tick 재-FAULT 안 함
+    assert node._faults == []                          # 이 tick 엔 FAULT 없음

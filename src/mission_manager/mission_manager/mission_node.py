@@ -720,6 +720,22 @@ class MissionNode(Node):
         #   inflight/cooldown/준비 감시는 SpeedManager 내부 (ensure_sync 는 멱등).
         #   상태 전환의 속도 변경보다 같은 tick 안에서 항상 먼저 실행 → 덮어쓰기 없음.
         self.speed.tick()
+
+        # ★ 07-23 §13 P1 backstop — guide 저속 복구가 끝내 소진됐는데 유도 활성
+        #   상태(GUIDE/SEARCH_BACK)면, 실패 통보 콜백이 상태 전환 중 유실됐어도
+        #   여기서 매 tick 잡아 cancel+FAULT 한다. 그러지 않으면 GUIDE 복귀 후
+        #   live 게이트가 신규 goal 은 막아도(§24) FAULT 없이 영구 정지 = 고장 은폐.
+        #   ★ ensure_sync 앞에 둔다 — sync 요청이 _inflight=True 로 술어를 가리면
+        #     이 tick 을 놓친다. return 하지 않는다 — enter_fault 가 state 를 FAULT 로
+        #     바꿔 아래 GUIDE/SEARCH_BACK 분기는 자동으로 건너뛰고, 같은 tick 에
+        #     FAULT 상태가 발행된다(SEARCH_BACK 은 §22.3 과 동일 취급: 소진=cancel+FAULT).
+        if (self.state in (State.GUIDE, State.SEARCH_BACK)
+                and self.speed.guide_speed_recovery_exhausted):
+            self.get_logger().error(
+                '★ GUIDE 저속 복구 소진 — 유도 불가, 정지(FAULT)')
+            self.cancel_current_goal()
+            self.enter_fault()
+
         self.speed.ensure_sync(float(self.wp['normal_speed']))
 
         # 상태·싸이렌 상시 발행
@@ -830,11 +846,16 @@ class MissionNode(Node):
                     self.resume_state = None
                     self.get_logger().warn(
                         f'재시도 {self.fault_retries}/{self.MAX_RETRIES} → {self.state.name} 복귀')
-                    if self.state == State.GUIDE:
+                    if self.state in (State.GUIDE, State.SEARCH_BACK):
                         # ★ 저속 보장은 상태와 함께 자동 복귀하지 않는다 (07-20 재검토
                         #   자기반증). FAULT 원인이 속도였다면 controller 는 아직
                         #   평시값이고 Manager 의 복구 예산도 소진된 상태다 —
                         #   GUIDE 로 되돌아가기 전에 저속을 다시 확인받는다.
+                        #   ★ 07-23 §13: SEARCH_BACK 복귀도 재무장한다. 안 하면
+                        #   _settle_gave_up 이 그대로 남아 위 live 가드가 다음 tick
+                        #   즉시 재-FAULT → 재시도 예산이 헛돌며 영구 정지로 굳는다.
+                        #   request_guide→_new_request 가 _settle_gave_up=False 로
+                        #   복구 예산을 새로 줘 소진 술어를 해제한다.
                         self.speed.request_guide(float(self.wp['guide_speed']))
 
     # ===========================================================
@@ -1043,15 +1064,21 @@ class MissionNode(Node):
             # ① 진입 게이트 실패 — 아직 GATHER 정지 상태. 유도를 시작하지 않는다.
             self._guide_pending = False
             self.get_logger().error('GUIDE 저속 적용 실패 — 유도 진입 중단, FAULT')
-        elif self.state == State.GUIDE:
+        elif self.state in (State.GUIDE, State.SEARCH_BACK):
             # ② ★ 유지 실패 (07-20 Codex 재검토 P1) — 이미 사람을 앞에서 유도하며
             #   주행 중인데 controller 속도가 평시값(0.26)으로 덮인 상태다.
             #   과속 유도가 즉시 위험하므로 정지시킨다. 이전엔 아래 '무시' 로 빠져
             #   경고 한 줄만 남기고 0.26 인 채 유도가 계속됐다 (재검토 §10.3).
+            #   ★ 07-23 §13: SEARCH_BACK 도 포함한다 — 유도 임무의 소풍일 뿐
+            #   (두 복귀 경로 모두 GUIDE 로 돌아감) 저속 의무는 살아 있다. 이걸
+            #   '늦은 통보'로 버리면 GUIDE 복귀 후 고장 없이 영구 정지했다(§13 P1).
+            #   즉시성은 여기서, 통보 유실 대비는 tick 의 live 가드가 backstop.
             self.get_logger().error(
                 f'★ GUIDE 저속 보장 상실({reason}) — 유도 중단, 정지 (FAULT)')
         else:
-            # ③ 그 외 = 늦은 통보 (기존 stale 방어) — 상태를 덮지 않는다.
+            # ③ 그 외 = 정말로 유도 안 하는 상태(PATROL/APPROACH/ESCAPED/FAULT 등).
+            #   여기선 desired origin 이 이미 guide 가 아니라 애초에 이 콜백이 잘
+            #   안 오지만, 오더라도 유도 위험이 없어 상태를 덮지 않는다.
             self.get_logger().warn(
                 f'늦은 guide 속도 실패 통보({reason}) 무시 — 상태 변경됨'
                 f'(현재 {self.state.name}), FAULT 안 함')

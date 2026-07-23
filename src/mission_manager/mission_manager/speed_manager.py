@@ -143,6 +143,30 @@ class SpeedManager:
         return (self._desired is not None
                 and self._desired[1] == 'guide'
                 and self._applied == self._desired[0])
+
+    @property
+    def guide_speed_recovery_exhausted(self):
+        """guide 저속을 **한 번 성공한 뒤** 복구 예산까지 소진해 끝내 못 지키는
+        게 확정됐는가 — **live, 종결 사실**.
+
+        ★ 07-23 §13 P1 backstop. 이 술어는 '최초 GUIDE 진입 실패'는 포함하지
+        않는다(그건 진입 게이트가 GATHER 정지로 이미 막는다). 그래서 이름이
+        `_failed` 가 아니라 `_recovery_exhausted` 다 — `_settle_gave_up`(재조정
+        예산 소진)이 참일 때만 성립한다.
+
+        [왜 live 로 노출하나] 예산 소진은 `_settle` 이 콜백(`_on_guide_failed`)으로
+        딱 한 번 알린다. 그 순간 MissionNode 상태가 GATHER/GUIDE 가 아니면
+        (예: SEARCH_BACK 전환 중) 콜백이 '늦은 통보'로 버려질 수 있다. 소비 지점
+        (tick)에서 매번 이 live 값을 확인하면, 통보 유실과 무관하게 유도 활성
+        상태가 이 종결 사실을 한 tick 이상 이고 갈 수 없다(§13 완료판정).
+        재무장(`request_guide`→`_new_request`)이 `_settle_gave_up=False` 로
+        되돌리거나 재조정이 성공해 `_applied` 가 요구값이 되면 즉시 False."""
+        return (self._settle_gave_up
+                and self._desired is not None
+                and self._desired[1] == 'guide'
+                and self._applied != self._desired[0]
+                and not self._inflight)
+
     def request_guide(self, v):
         """GUIDE 저속 적용 요청. 성공 확인 → on_guide_confirmed 콜백.
         서비스 미준비면 timeout 까지 tick 이 대기·재시도 (기존 '무기한 GATHER
