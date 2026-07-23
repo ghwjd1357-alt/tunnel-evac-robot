@@ -23,12 +23,12 @@
 
 ## 2. platform-core 구조 분리 (동작 불변 리팩터 — 단계마다 회귀 전량, 한 단계 = 한 커밋 묶음)
 
-1. **SpeedManager 추출** — 구현 `f94da44` + 보완 **5회**. **완료 판정 = Codex 최종
-   재검토 통과 시** (재검토마다 신규 P1 이 나와 §5 탈출조건 하에 연장 진행 중).
-   기록 = `0720_현황.md §19` 구현 · `§20`·`§22`·`§23`·`§24`·`§25` 검토·보완.
-   P1 5건 중 4건이 "요청/과거 ≠ 현재 실효값"(§3-3) — §24 는 소비 지점 게이트의
-   **술어가 stale latch** 였던 건을 live 로, §25 는 실패 결정을 **콜백 이벤트 한 번**에
-   맡겨 SEARCH_BACK 전환 중 유실되던 건(fail-open 기본값)을 매 tick live 가드로 교정.
+1. ~~**SpeedManager 추출**~~ ✅ — 구현 `f94da44` + 보완 **6회**, 07-23 동결.
+   기록 = `0720_현황.md §19~§26` / `CODEX 현황/0720검토현황.md §3~§15`.
+   P1 6건 중 5건이 "요청/과거 ≠ 현재 실효값"(§3-3) 계열이었다. 마지막 §26은
+   SEARCH_BACK 신규 goal 소비 지점도 `guide_speed_applied`로 막아, reconcile·FAULT
+   재무장 **호출** 뒤 적용 확인 전 0.26 출발을 차단했다. 사용자 명시 승인으로 마지막
+   봉합은 동일 Codex가 구현·재검토한 역할 분리 예외이며 기록에 공개했다.
 2. **GoalManager 추출** — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익)
 3. **E2E 공통 하네스** — readiness·cleanup·send_goal 재전송을 셸 함수 라이브러리로. 이때 readiness "최대 90초" 문구·deadline 함수 통일 (Codex §14.5 P2)
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
@@ -110,3 +110,4 @@
 | 주행 중 저속 표류의 '즉시 정지'는 채택 안 함 — reconcile→소진 시 cancel+FAULT(§22.3) 유지. 취소 종결 직렬화(B)는 GoalManager 소관 | 07-20 | `0720_현황.md §24.3` |
 | 저속 복구 소진 실패 결정은 **콜백 이벤트 한 번**이 아니라 **매 tick live 가드**(`guide_speed_recovery_exhausted`)로 확인 — GUIDE·SEARCH_BACK 유도활성 상태에서 통보 유실돼도 고장 은폐 영구정지 금지 | 07-23 | `0720_현황.md §25.2` |
 | FAULT→SEARCH_BACK 자동 재시도 복귀도 `request_guide` 재무장 — GUIDE 만 하면 소진 술어 잔존→즉시 재-FAULT | 07-23 | `0720_현황.md §25.3` |
+| GUIDE·SEARCH_BACK **신규** goal은 `guide_speed_applied=True`에서만 전송 — 일시 표류 중 기존 goal 비취소(§22.3)와 신규 과속 출발 차단을 분리 | 07-23 | `0720_현황.md §26.2` |

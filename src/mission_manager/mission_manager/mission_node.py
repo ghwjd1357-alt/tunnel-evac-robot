@@ -815,7 +815,19 @@ class MissionNode(Node):
                 self.monitor.reset('any')    # 타이머 리셋 — 복귀 즉시 재-놓침 방지
                 self.state = State.GUIDE
             elif not self.goal_active and self.refind_since is None:
-                self.send_goal(self.search_goal, tag='search_back')
+                # ★ 07-23 §14 P1 — SEARCH_BACK 도 guide 유도 임무의 일부이므로
+                # 신규 역행 goal 은 저속이 controller 에 실제 적용된 뒤에만 보낸다.
+                # request_guide/reconcile 를 '호출'한 것만으로는 부족하다:
+                # 응답 대기 중 _applied=0.26 이면 평시속도로 새 goal 이 출발한다.
+                # 이미 주행 중인 goal(goal_active=True)은 건드리지 않아 §22.3의
+                # "일시 표류는 reconcile 먼저, 소진 시 cancel+FAULT"를 보존한다.
+                if not self.speed.guide_speed_applied:
+                    self.get_logger().warn(
+                        '⚠ SEARCH_BACK 저속 미적용 — 역행 주행 보류 '
+                        '(적용 확인 후 출발)',
+                        throttle_duration_sec=5.0)
+                else:
+                    self.send_goal(self.search_goal, tag='search_back')
             elif self.refind_since is not None:
                 # 역행 지점 도착 후 대기 — 시간 다 되면 이번 시도 실패
                 waited = (self.get_clock().now() - self.refind_since).nanoseconds / 1e9

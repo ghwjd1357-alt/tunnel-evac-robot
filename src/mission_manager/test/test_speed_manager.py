@@ -1009,3 +1009,79 @@ def test_n18_searchback_fault_retry_rearms_guide_no_immediate_refault():
     assert not node.speed._settle_gave_up              # 소진 예산 해제됨
     assert not node.speed.guide_speed_recovery_exhausted  # → 다음 tick 재-FAULT 안 함
     assert node._faults == []                          # 이 tick 엔 FAULT 없음
+
+
+# ============================================================
+# §14 P1 봉합: SEARCH_BACK 신규 goal 도 live 저속 확인 뒤 전송
+#   기존 goal 은 유지(§22.3), 신규 goal 소비 지점만 fail-closed
+# ============================================================
+def _searchback_goal_harness(node):
+    """SEARCH_BACK 신규 goal 전송을 MissionNode.tick() 진입점에서 계측한다."""
+    _tick_harness(node)
+    node.search_goal = {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
+    node.refind_since = None
+    node.monitor = types.SimpleNamespace(
+        visible=lambda zone=None: False,
+        lost=lambda zone=None: False,
+        scan_stale=lambda: False,
+        reset=lambda key: None)
+
+
+def test_n19_stale_drift_blocks_new_searchback_goal_until_low_speed():
+    """N19 — guide 0.12 성공 뒤 stale sync 0.26 이 덮고 reconcile 응답을
+    기다리는 동안 SEARCH_BACK 으로 전환돼도 새 역행 goal 을 보내면 안 된다.
+
+    §22.3은 이미 주행 중인 goal의 즉시 취소를 금지할 뿐, 평시속도 상태에서
+    새 goal을 시작하라는 정책이 아니다. SEARCH_BACK 소비 지점도 GUIDE와
+    동일하게 live 적용값을 확인하고, reconcile 성공 뒤 0.12로 출발해야 한다."""
+    node = make_env()
+    arm_guide_then_stale_sync_overwrites(node)
+    _searchback_goal_harness(node)
+    node.state = State.SEARCH_BACK
+
+    node.tick()
+    assert not node.speed.guide_speed_applied
+    assert node._goals == [], \
+        'stale 평시속도 적용 상태에서 SEARCH_BACK 신규 goal이 시작됨'
+
+    respond(node, 2, ok_resp())                   # reconcile 0.12 성공 확인
+    assert node.speed.guide_speed_applied
+    node.tick()
+    assert node._goals == [('search_back', 0.12)]
+
+
+def test_n20_searchback_fault_retry_waits_for_low_speed_confirmation():
+    """N20 — FAULT→SEARCH_BACK 재시도가 request_guide()로 소진 예산을
+    재무장해도, 응답 전에는 새 역행 goal을 보내면 안 된다.
+
+    N18은 재무장 호출과 소진 술어 해제까지만 봤다. 호출≠실효이므로 다음 tick의
+    실제 SEARCH_BACK 소비 지점까지 통과시켜, 적용 확인 뒤에만 출발하는지 본다."""
+    node = make_env(state=State.FAULT)
+    _searchback_goal_harness(node)
+    node.MAX_RETRIES = 2
+    node.RETRY_WAIT = 3.0
+    node.fault_retries = 0
+    node.resume_state = State.SEARCH_BACK
+    node.fault_since = _Stamp(0)
+    node.get_clock = lambda: types.SimpleNamespace(
+        now=lambda: _Stamp(100 * 10**9))
+
+    node.speed._desired = (0.12, 'guide')
+    node.speed._applied = 0.26
+    node.speed._inflight = False
+    node.speed._settle_gave_up = True
+
+    node.tick()                                   # SEARCH_BACK 복귀 + 0.12 요청
+    assert node.state == State.SEARCH_BACK
+    assert node._calls == [0.12]
+    assert not node.speed.guide_speed_applied
+    assert node._goals == []
+
+    node.tick()                                   # 응답 없는 다음 tick도 출발 금지
+    assert node._goals == [], \
+        '저속 요청 응답 전에 SEARCH_BACK 신규 goal이 시작됨'
+
+    respond(node, 0, ok_resp())                   # 이제 0.12 적용 확인
+    assert node.speed.guide_speed_applied
+    node.tick()
+    assert node._goals == [('search_back', 0.12)]
