@@ -83,4 +83,4 @@ GoalManager 독립 검토 통과 → E2E 공통 하네스 3/3 → platform-core-
 
 `docs/MASTER_PLAN.md §2` · `docs/PITFALLS.md §8` ·
 `~/Desktop/개발현황/0720_현황.md §19~§26` ·
-`~/Desktop/개발현황/CODEX 현황/0720검토현황.md §3~§14`
+`~/Desktop/개발현황/CODEX 현황/0720검토현황.md §3~§15`
