@@ -30,8 +30,13 @@ goal_manager.py — Nav2 goal 전송·응답·취소·최종결과의 비동기 
   다시 확인돼도 새 goal 을 절대 보내지 않는다**(직렬화 = 먼저 확실히 멈추고 나서
   다음 명령). 취소가 끝내 실패/지연되면(호출·응답 예외, 빈 goals_canceling,
   대기 예산 소진, CANCELED 아닌 종결) FAULT + 재전송 금지로 굳힌다.
-    - 진입: cancel_current_goal(intent='guide_stop') → _stop_pending=True
-    - 해제: 그 goal 이 CANCELED 로 종결 관찰 → _stop_pending=False (신규 goal 허용)
+    - 진입: cancel_current_goal(intent='guide_stop') → _stop_pending=True. 대상은 수락된
+      핸들뿐 아니라 '수락응답 대기 세대'(_response_pending_seq)도 포함 — 서버가 이미 수락해
+      주행 중인데 응답만 늦은 goal 을 놓치지 않는다(0723검토 §2 P1 보완).
+    - 해제: 그 goal(대상 seq)이 CANCELED 로 종결 관찰 → _stop_pending=False (신규 허용).
+      대상이 끝내 미수락(거부)이면 실제 주행 goal 이 없으니 정상 해제.
+    - 실패(취소 호출/응답 예외·빈 goals_canceling·비CANCELED 종결·응답/결과 예외·예산
+      소진) → on_fault + 봉쇄 유지. 모든 B 콜백은 대상 seq 에 귀속(옛 세대 오판 방지).
     - hard(reset/abort): intent='hard' → 직렬화 강제 해제(운영자 개입이 최우선)
 
 [MissionNode 와의 이음새 — 콜백 3개 + 얇은 위임]
@@ -84,6 +89,10 @@ class GoalManager:
         self._seq = 0             # send_goal/cancel 마다 +1 (stale 판별 기준)
         self._handle = None       # 현재 수락된 goal 핸들 (취소 대상)
         self._active = False      # goal 이 진행 중인가 (노드 정책 입력 = goal_active)
+        # ★ P1 보완(0723검토 §2): 요청은 나갔지만 수락/거부 응답이 아직 안 온 세대.
+        #   `_handle is None` 하나로는 "나간 goal 없음"과 "수락응답 대기 중"(서버는
+        #   이미 주행 중일 수 있음)을 구분 못 해 B 직렬화가 접수 전환 순간에 새 나갔다.
+        self._response_pending_seq = None
 
         # --- B: 유도정지 취소 종결 직렬화 ---
         self._stop_pending = False   # CANCELED 종결 대기 중 — 신규 goal 전면 보류
@@ -133,6 +142,7 @@ class GoalManager:
         self._seq += 1
         seq = self._seq
         self._set(True)
+        self._response_pending_seq = seq   # 수락/거부 응답 도착 전까지 '대기'로 표시
         self._log.info(
             f'[{state_name}] 목표전송 {tag} → ({wp["x"]:.1f}, {wp["y"]:.1f})')
         fut = self._nav.send_goal_async(goal)
@@ -151,9 +161,12 @@ class GoalManager:
         self._seq += 1
 
         if intent == 'guide_stop':
-            # 취소할 실제 주행 goal(핸들)이 있을 때만 직렬화를 무장한다.
-            # 핸들이 없으면 멈출 대상이 없어 기다릴 것도 없다(조용히 통과).
-            if self._handle is not None:
+            # ★ P1 보완(§2): 멈출 대상은 '수락된 핸들'만이 아니다. 요청은 나갔지만
+            #   수락 응답만 늦는 goal(_response_pending_seq)도 서버에선 이미 주행
+            #   중일 수 있다 — 그 세대도 B 정지 대상으로 무장한다. 요청조차 없고
+            #   핸들도 없으면(진짜 멈출 대상 없음) 조용히 통과.
+            if (self._handle is not None
+                    or self._response_pending_seq == stopped_seq):
                 self._stop_pending = True
                 self._stop_seq = stopped_seq
                 self._stop_blocks = 0
@@ -161,9 +174,11 @@ class GoalManager:
             self._clear_stop()
 
         if self._handle is not None:
+            # 핸들이 있으면 지금 취소. 핸들이 아직 없는(응답 대기) B 대상은 늦은 수락
+            # 경로(_on_goal_response stale)에서 취소·감시가 이어진다.
             self._cancel_with_confirm(
                 self._handle, f'현재 목표(seq={stopped_seq})',
-                guide_stop=(intent == 'guide_stop'))
+                stop_seq=(stopped_seq if intent == 'guide_stop' else None))
             self._handle = None
         self._set(False)
 
@@ -181,34 +196,81 @@ class GoalManager:
         self._stop_seq = None
         self._stop_blocks = 0
 
+    def _clear_response_pending(self, seq):
+        """자기 seq 의 '수락응답 대기' 표시만 비운다 — 오래된 응답이 새 요청의
+        pending 을 지우지 않게 한다(0723검토 §5 권장 3)."""
+        if self._response_pending_seq == seq:
+            self._response_pending_seq = None
+
+    def _is_stop_target(self, seq):
+        """seq 가 지금 B 직렬화가 종결을 기다리는 그 goal 인가 (live).
+        모든 B 콜백을 이 술어로 귀속시켜, hard 해제 뒤 도착한 옛 세대 콜백이
+        새 B 세대를 false FAULT 시키지 않게 한다(0723검토 §5 권장 8)."""
+        return self._stop_pending and seq == self._stop_seq
+
+    def _judge_stop_terminal(self, seq, status):
+        """B 대상 goal 의 최종 status 판정 — B 대상이면 처리하고 True 반환.
+        CANCELED 만 직렬화 해제, 나머지는 FAULT + 봉쇄 유지(재전송 금지).
+        수락된 핸들 경로(_observe_stale_terminal)와 늦은 수락 경로(_on_stale_result)가
+        같은 판정으로 합류한다(0723검토 §5 권장 5)."""
+        if not self._is_stop_target(seq):
+            return False
+        if status == GoalStatus.STATUS_CANCELED:
+            self._log.info(
+                f'유도정지 취소 CANCELED 종결 확인(seq={seq}) — 신규 goal 허용')
+            self._clear_stop()
+        else:
+            self._log.error(
+                f'★ 유도정지 취소가 CANCELED 아닌 status={status} 로 '
+                f'종결(seq={seq}) — 정지 확인 불가, FAULT (재전송 금지)')
+            self._on_fault()               # _stop_pending 유지 = 재전송 금지
+        return True
+
     # ===========================================================
     # 내부 — 응답/결과 콜백 (세대 토큰으로 stale 구분)
     # ===========================================================
     def _on_goal_response(self, seq, future):
-        """send_goal_async 응답 — 수락/거부 + stale(취소 레이스) 처리."""
+        """send_goal_async 응답 — 수락/거부 + stale(취소 레이스) + B 대상 처리."""
         # ★ future.result() 예외가 콜백 밖으로 새면 executor 로그에만 남고 미션은
         #   goal_active=True 로 영구 대기. 예외 = 응답 자체를 못 받음 → 정리+FAULT.
         try:
             handle = future.result()
         except Exception as e:
             self._log.error(f'★ goal 응답 수신 실패: {e} → FAULT')
+            self._clear_response_pending(seq)
             if seq == self._seq:
                 self._set(False)
                 self._handle = None
                 self._on_fault()
+            elif self._is_stop_target(seq):
+                # ★ P1: B 대상의 응답 자체가 예외 = 수락 여부 불명 → 정지 확인 불가.
+                self._log.error(
+                    f'★ 유도정지 대상(seq={seq}) 응답 예외 — 수락 여부 불명, '
+                    f'FAULT (재전송 금지)')
+                self._on_fault()               # _stop_pending 유지 = 재전송 금지
             return
+        self._clear_response_pending(seq)
         if seq != self._seq:
-            # ★ 취소 레이스: send_goal 응답이 오기 전에 cancel_current_goal 이 먼저
-            #   실행되면 그 시점엔 핸들이 없어 취소할 게 없었다. 그 goal 이 뒤늦게
-            #   수락되면 Nav2 는 혼자 주행 계속 — "abort 했는데 안 멈춤"의 구멍.
-            #   → stale 응답은 '무시'가 아니라 '수락됐으면 즉시 취소' + 최종결과 감시.
+            # ★ 취소 레이스: cancel 이 응답보다 먼저 실행되면 그 시점엔 핸들이 없어
+            #   취소할 게 없었다. 뒤늦게 수락되면 Nav2 는 혼자 주행 계속 —
+            #   "abort 했는데 안 멈춤"의 구멍 → stale 수락은 즉시 취소 + 최종결과 감시.
             if handle is not None and handle.accepted:
                 self._log.warn(
                     f'뒤늦게 수락된 이전 목표(seq={seq}) 즉시 취소 '
                     f'(현재 seq={self._seq})')
                 handle.get_result_async().add_done_callback(
                     partial(self._on_stale_result, seq))
-                self._cancel_with_confirm(handle, f'이전 목표(seq={seq})')
+                # ★ P1: 이 goal 이 B 정지 대상이면 취소도 B 로 귀속(빈 goals_canceling·
+                #   호출 예외를 FAULT+봉쇄로). 아니면 일반 취소(로그만).
+                self._cancel_with_confirm(
+                    handle, f'이전 목표(seq={seq})',
+                    stop_seq=(seq if self._is_stop_target(seq) else None))
+            elif self._is_stop_target(seq):
+                # ★ P1: B 대상이 거부됨(또는 핸들 없음) — 실제 주행 goal 이 생성되지
+                #   않았다. 실패로 취급하면 영구 봉쇄 → 명시 로그 후 직렬화 정상 해제.
+                self._log.info(
+                    f'유도정지 대상(seq={seq}) 미수락 — 주행 goal 없음, 직렬화 해제')
+                self._clear_stop()
             return
         if not handle.accepted:
             self._log.warn('목표 거부됨 → FAULT')
@@ -247,19 +309,8 @@ class GoalManager:
 
     def _observe_stale_terminal(self, seq, status):
         """지난 세대 goal 의 최종 status 관찰 (현재 goal 아님).
-
-        ★ B: 이게 '유도정지로 취소한 그 goal'(seq==_stop_seq)의 종결이면 직렬화를
-        판정한다 — CANCELED 여야 신규 goal 을 다시 허용, 아니면 FAULT + 재전송 금지."""
-        if self._stop_pending and seq == self._stop_seq:
-            if status == GoalStatus.STATUS_CANCELED:
-                self._log.info(
-                    f'유도정지 취소 CANCELED 종결 확인(seq={seq}) — 신규 goal 허용')
-                self._clear_stop()
-            else:
-                self._log.error(
-                    f'★ 유도정지 취소가 CANCELED 아닌 status={status} 로 '
-                    f'종결(seq={seq}) — 정지 확인 불가, FAULT (재전송 금지)')
-                self._on_fault()           # _stop_pending 유지 = 재전송 금지
+        B 대상이면 종결 직렬화 판정, 아니면 일반 관찰 로그."""
+        if self._judge_stop_terminal(seq, status):
             return
         if status == GoalStatus.STATUS_CANCELED:
             self._log.info(f'지난 목표(seq={seq}) CANCELED 종결 확인')
@@ -271,27 +322,29 @@ class GoalManager:
     # ===========================================================
     # 내부 — 취소 접수·종결 확인
     # ===========================================================
-    def _cancel_with_confirm(self, handle, tag, guide_stop=False):
+    def _cancel_with_confirm(self, handle, tag, stop_seq=None):
         """cancel_goal_async 의 응답까지 확인. 재시도는 안 한다(거절의 흔한 원인이
         '이미 종결'이라 무의미) — 진짜 이상은 경고 로그가 관제 대응 경로.
 
-        ★ B: guide_stop 취소는 '요청조차 실패'하면 정지 확인 불가 → FAULT."""
+        ★ B: stop_seq(≠None)면 이 취소는 유도정지 대상 — '요청조차 실패'하면 정지
+        확인 불가 → FAULT. 콜백엔 bool 이 아니라 대상 seq 를 실어, hard 해제 뒤 도착한
+        옛 응답이 새 B 세대를 오판(false FAULT)하지 않게 한다(0723검토 §5 권장 8)."""
         try:                            # 호출 자체의 예외도 미션을 못 세우게
             fut = handle.cancel_goal_async()
         except Exception as e:
             self._log.error(f'★ {tag} 취소 요청 실패: {e} — 정지 미보장')
-            if guide_stop and self._stop_pending:
+            if stop_seq is not None and self._is_stop_target(stop_seq):
                 self._on_fault()        # 재전송 금지: _stop_pending 유지
             return
         fut.add_done_callback(
-            partial(self._on_cancel_response, tag, guide_stop))
+            partial(self._on_cancel_response, tag, stop_seq))
 
-    def _on_cancel_response(self, tag, guide_stop, future):
+    def _on_cancel_response(self, tag, stop_seq, future):
         try:
             res = future.result()
         except Exception as e:      # 통신 실패 — 취소 접수 여부 자체를 모름
             self._log.error(f'★ {tag} 취소 응답 수신 실패: {e} — 정지 미보장')
-            if guide_stop and self._stop_pending:
+            if stop_seq is not None and self._is_stop_target(stop_seq):
                 self._on_fault()
             return
         if res.goals_canceling:
@@ -301,19 +354,27 @@ class GoalManager:
             # 계속된다면 이 로그가 원인 추적의 첫 단서.
             self._log.warn(f'{tag} 취소 접수 안 됨 (이미 종결됐거나 거절)')
             # ★ B: 유도정지 취소가 접수조차 안 됐고 아직 종결 관찰 전이면(CANCELED
-            #   terminal 이 이미 왔다면 _stop_pending 은 꺼져 있음) 정지 확인 불가.
-            if guide_stop and self._stop_pending:
+            #   terminal 이 이미 왔다면 _is_stop_target 이 거짓) 정지 확인 불가.
+            if stop_seq is not None and self._is_stop_target(stop_seq):
                 self._log.error(
                     '★ 유도정지 취소 접수 안 됨 — 정지 확인 불가, '
                     'FAULT (재전송 금지)')
                 self._on_fault()
 
     def _on_stale_result(self, seq, future):
-        """stale(뒤늦게 수락돼 즉시 취소한) goal 의 최종결과 감시 — CANCELED 정상."""
+        """stale(뒤늦게 수락돼 즉시 취소한) goal 의 최종결과 감시 — CANCELED 정상.
+
+        ★ P1: 이 goal 이 B 정지 대상(수락응답이 늦어 핸들 없이 무장된 그 세대)이면
+        로그로 끝내지 말고 종결 직렬화 판정(_judge_stop_terminal)에 합류한다 —
+        CANCELED 만 해제, 나머지는 FAULT+봉쇄. 아니면 기존 일반 관찰 로그."""
         try:
             status = future.result().status
         except Exception as e:
             self._log.error(f'★ 이전 목표(seq={seq}) 결과 수신 실패: {e}')
+            if self._is_stop_target(seq):
+                self._on_fault()          # B 대상 terminal 수신 실패 = 정지 확인 불가
+            return
+        if self._judge_stop_terminal(seq, status):
             return
         if status == GoalStatus.STATUS_CANCELED:
             self._log.info(f'이전 목표(seq={seq}) CANCELED 종결 확인')

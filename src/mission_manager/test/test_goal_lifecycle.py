@@ -441,13 +441,16 @@ def test_b_incidental_cancel_preserves_stop_pending():
     assert len(env.goals) == 1                         # 여전히 봉쇄
 
 
-def test_b_guide_stop_without_handle_does_not_arm():
-    """멈출 주행 goal(핸들)이 없으면 유도정지 직렬화를 무장하지 않는다
-    (기다릴 대상이 없음 — 조용히 통과)."""
+def test_b_guide_stop_no_request_does_not_arm():
+    """전송조차 없어 멈출 대상이 정말 없으면 직렬화 미무장 — 조용히 통과.
+
+    ★ 0723검토 P1: 구판은 '전송했지만 미수락'까지 '핸들 없음 = 멈출 대상 없음'으로
+    묶어 조용히 통과시켰다(버그를 앵커로 고정). 이제 '요청조차 없는' 경우만 미무장이다.
+    '전송 후 미수락' 무장은 아래 §P1 부정 회귀가 담당한다."""
     env = make_gm()
-    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')   # 미수락(핸들 없음)
-    env.gm.cancel_current_goal(intent='guide_stop')
+    env.gm.cancel_current_goal(intent='guide_stop')    # send_goal 자체가 없었다
     assert not env.gm._stop_pending
+    assert env.faults == []
 
 
 def test_b_canceled_terminal_before_empty_response_no_double_fault():
@@ -476,6 +479,156 @@ def test_b_gate_is_load_bearing():
     env.gm._stop_pending = False                       # ★ 가드 임시 무력화
     env.gm.send_goal({'x': 9, 'y': 9})
     assert len(env.goals) == 2, '가드를 껐는데도 봉쇄되면 가드가 아닌 딴 걸 본 것'
+
+
+# ============================================================
+# ★ 0723검토 P1 보완 — 수락응답 대기 중 guide_stop (접수 전환 레이스)
+#   `_handle is None` 을 "멈출 goal 없음"으로 축약해, 서버가 이미 수락해 주행
+#   중인데 응답만 늦은 goal 을 놓쳤다. 부정 회귀로 이 창을 직접 고정한다.
+# ============================================================
+def test_p1_pending_guide_stop_blocks_until_canceled():
+    """전송 후 수락 전 guide_stop → 무장. 늦은 수락은 즉시 취소·감시하고, CANCELED
+    종결 전 신규 goal 0건, 종결 후 1건 (검토자 핵심 부정 회귀)."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')   # seq1, 응답 보류
+    env.gm.cancel_current_goal(intent='guide_stop')    # 수락 전 guide_stop
+    assert env.gm._stop_pending                        # ★ 이제 무장됨(구판은 안 됐음)
+
+    env.gm.send_goal({'x': 9, 'y': 9}, tag='escape')   # CANCELED 전 봉쇄
+    assert len(env.goals) == 1
+
+    late = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))                 # 늦은 수락 → 즉시 취소 + 감시
+    assert late.cancel_called
+    assert late.result_cb is not None
+    env.gm.send_goal({'x': 9, 'y': 9})                 # 아직 CANCELED 전 → 봉쇄 유지
+    assert len(env.goals) == 1
+
+    late.result_cb(fake_result(CANCELED))              # 옛 goal CANCELED 종결
+    assert not env.gm._stop_pending
+    env.gm.send_goal({'x': 9, 'y': 9})                 # 이제 허용
+    assert len(env.goals) == 2
+
+
+def test_p1_pending_guide_stop_non_canceled_terminal_faults():
+    """전송 후 미수락 guide_stop → 늦은 수락 → 취소 안 되고 SUCCEEDED 종결 →
+    FAULT + 봉쇄 유지."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    late = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))
+    late.result_cb(fake_result(SUCCEEDED))
+    assert env.faults == [1]
+    assert env.gm._stop_pending
+    env.gm.send_goal({'x': 9, 'y': 9})
+    assert len(env.goals) == 1
+
+
+def test_p1_pending_guide_stop_empty_cancel_faults():
+    """늦은 수락의 취소가 빈 goals_canceling 으로 접수 실패 → FAULT + 봉쇄."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    late = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))
+    late.cancel_response_cb(fake_cancel_response(0))
+    assert env.faults == [1]
+    assert env.gm._stop_pending
+
+
+def test_p1_pending_guide_stop_cancel_call_exception_faults():
+    """늦은 수락의 취소 '호출' 자체가 예외 → FAULT + 봉쇄."""
+    class ExplodingCancelHandle(FakeGoalHandle):
+        def cancel_goal_async(self):
+            raise RuntimeError('server gone')
+
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    late = ExplodingCancelHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))                 # stale 즉시 취소 시도 → 예외
+    assert env.faults == [1]
+    assert env.gm._stop_pending
+
+
+def test_p1_pending_guide_stop_response_exception_faults():
+    """B 대상 goal-response Future 자체가 예외 → 수락 여부 불명 → FAULT + 봉쇄."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    env.resp_cbs[0](failing_future())                  # 응답 자체가 예외
+    assert env.faults == [1]
+    assert env.gm._stop_pending
+    env.gm.send_goal({'x': 9, 'y': 9})
+    assert len(env.goals) == 1
+
+
+def test_p1_pending_guide_stop_result_exception_faults():
+    """늦은 수락 뒤 terminal(result) Future 예외 → 정지 확인 불가 → FAULT + 봉쇄."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    late = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))
+    late.result_cb(failing_future())
+    assert env.faults == [1]
+    assert env.gm._stop_pending
+
+
+# --- P1 역회귀: 안전한 반대 경로 보존 (봉쇄가 과하지 않은지) ---
+def test_p1_pending_guide_stop_late_rejected_releases():
+    """전송 후 미수락 guide_stop → 늦은 '거부' → 실제 주행 goal 없음 → cancel 0건,
+    직렬화 해제, 다음 goal 허용 (거부를 실패로 오인해 영구 봉쇄하면 안 됨)."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    env.gm.cancel_current_goal(intent='guide_stop')
+    assert env.gm._stop_pending
+    late = FakeGoalHandle(accepted=False)
+    env.resp_cbs[0](fake_future(late))
+    assert not late.cancel_called                      # 취소할 것도 없음
+    assert not env.gm._stop_pending                    # 직렬화 정상 해제
+    assert env.faults == []
+    env.gm.send_goal({'x': 9, 'y': 9})
+    assert len(env.goals) == 2
+
+
+def test_p1_none_cancel_on_pending_keeps_stale_policy_no_b():
+    """일반 취소(intent=None)의 수락응답 대기 goal — B 미무장, 늦은 수락은 기존
+    stale 즉시 cancel 정책 유지(§22.3 보존), 봉쇄 없음."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2}, tag='patrol')
+    env.gm.cancel_current_goal(intent=None)
+    assert not env.gm._stop_pending                    # B 미무장
+    late = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late))
+    assert late.cancel_called                          # 기존 stale 즉시 cancel 유지
+    env.gm.send_goal({'x': 9, 'y': 9})                 # 봉쇄 없음
+    assert len(env.goals) == 2
+
+
+def test_p1_hard_then_late_cancel_response_no_false_fault():
+    """hard 로 새 B 세대가 된 뒤 옛 세대 취소 응답이 늦게 와도 false FAULT 없음
+    (모든 B 콜백을 대상 seq 에 귀속 — 검토자 §5 권장 8)."""
+    env = make_gm()
+    handle = send_and_accept(env, tag='escape')        # seq1 accepted
+    env.gm.cancel_current_goal(intent='guide_stop')    # B 무장(seq1), handle 취소
+    env.gm.cancel_current_goal(intent='hard')          # 직렬화 해제 + 세대 증가
+    assert not env.gm._stop_pending
+    handle.cancel_response_cb(fake_cancel_response(0))  # 옛 seq1 취소 응답 늦게 도착
+    assert env.faults == []                            # ★ 새 세대에 false FAULT 없음
+
+
+def test_p1_response_pending_seq_not_cleared_by_stale_response():
+    """오래된 응답이 새 요청의 '수락응답 대기' 표시를 지우지 않는다(§5 권장 3)."""
+    env = make_gm()
+    env.gm.send_goal({'x': 1, 'y': 2})                 # seq1 pending
+    env.gm.cancel_current_goal(intent=None)            # seq2 (seq1 stale)
+    env.gm.send_goal({'x': 3, 'y': 4})                 # seq3 pending (덮어씀)
+    assert env.gm._response_pending_seq == 3
+    late1 = FakeGoalHandle(accepted=True)
+    env.resp_cbs[0](fake_future(late1))                # 옛 seq1 응답 도착
+    assert env.gm._response_pending_seq == 3           # ★ seq3 pending 은 그대로
 
 
 # ============================================================
