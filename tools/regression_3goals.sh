@@ -24,41 +24,13 @@
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
+# 공통 함수(cleanup·fail·trap·state·deadline_*·wait_nav2_ready·send_goal) = 같은 폴더의 라이브러리.
+# ★ set -u 뒤에 source (setup.bash 는 이미 위에서 처리). BASH_SOURCE 로 위치 독립.
+source "$(dirname "${BASH_SOURCE[0]}")/lib_e2e.sh"
 
 EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=false)
 LOGDIR=$(mktemp -d /tmp/reg3goals.XXXX)
 echo "로그: $LOGDIR"
-
-cleanup() {
-  pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
-  pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "slam[_]toolbox" 2>/dev/null   # async(mapping)·localization 둘 다 매칭
-  pkill -9 -f "robot_state[_]publisher" 2>/dev/null
-  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # ★ nav2 노드 전체 — launch 부모 kill -9 는 고아(좀비 bt_navigator)를 남김
-  pkill -9 -x ekf_node 2>/dev/null
-  pkill -9 -f "spawn[_]entity" 2>/dev/null
-  sleep 1
-}
-fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
-# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-# ★ F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도 다음 단계 계속 실행
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
-# --- 목표 전송: SUCCEEDED 대기, 응답유실 대비 1회 재전송 ---
-send_goal() {  # $1=x $2=y $3=yaw $4=제한시간(초)
-  local qz qw out
-  qz=$(python3 -c "import math; print(math.sin($3/2))")
-  qw=$(python3 -c "import math; print(math.cos($3/2))")
-  for attempt in 1 2; do
-    out=$(timeout "$4" ros2 action send_goal /navigate_to_pose \
-      nav2_msgs/action/NavigateToPose \
-      "{pose: {header: {frame_id: map}, pose: {position: {x: $1, y: $2}, orientation: {z: $qz, w: $qw}}}}" 2>&1 | tail -1)
-    if echo "$out" | grep -q SUCCEEDED; then return 0; fi
-    echo "  (시도 $attempt 결과: $out — 재전송)"
-  done
-  return 1
-}
 
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
@@ -66,23 +38,7 @@ ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
-echo "== ② Nav2 활성화 대기 (최대 90초)"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
-# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
-until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
-done
-# F4 (Codex §12.10): parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인
-# ⚠ "inactive" 에 'active' 가 부분 문자열로 포함 → ^앵커 필수
-until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
-done
-# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
-#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
-until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
-  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
-done
-sleep 5   # SLAM 첫 지도/TF 안정화
+wait_nav2_ready   # ② 3단 관문(param→lifecycle active→action discovery)·"최대 90초" = lib_e2e.sh
 
 echo "== ③ goal1 분기입구 (12,0) 북향"
 send_goal 12.0 0.0 1.57 180 || fail "goal1 미도달"

@@ -27,6 +27,8 @@
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
+# 공통 함수(cleanup·fail·trap·state·deadline_*·wait_nav2_ready·send_goal) = 같은 폴더의 라이브러리.
+source "$(dirname "${BASH_SOURCE[0]}")/lib_e2e.sh"
 
 # --- 월드 모드 (07-07): 첫 인자 twin = 쌍굴, 아니면 T자(기존 그대로) ---
 MODE=tunnel
@@ -50,29 +52,6 @@ fi
 EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=false)
 LOGDIR=$(mktemp -d /tmp/mission_e2e.XXXX)
 echo "로그: $LOGDIR (모드: $MODE)"
-
-cleanup() {
-  pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
-  pkill -9 -f "mission[_]node" 2>/dev/null
-  pkill -9 -f "fake[_]follower" 2>/dev/null
-  pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "slam[_]toolbox" 2>/dev/null   # async(mapping)·localization 둘 다 매칭
-  pkill -9 -f "robot_state[_]publisher" 2>/dev/null
-  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # ★ nav2 노드 전체 — launch 부모 kill -9 는 고아(좀비 bt_navigator)를 남김
-  pkill -9 -x ekf_node 2>/dev/null
-  pkill -9 -f "spawn[_]entity" 2>/dev/null
-  sleep 1
-}
-fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
-# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-# ★ F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도 다음 단계 계속 실행
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
-state() {  # 현재 /mission_state 값 1개 읽기 (2Hz 발행이라 3초면 충분)
-  timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \
-    | sed -n 's/^data: //p' | head -1
-}
 
 wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재시도는 통과시킴
   # ★ F7 방어 (07-19 실측): CLI echo 가 240초 내내 빈값('')인 flake —
@@ -104,23 +83,7 @@ nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   "${WORLD_ARGS[@]}" "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
-echo "== ② Nav2 활성화 대기 (최대 90초)"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
-# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
-until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
-done
-# F4 (Codex §12.10): parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인
-# ⚠ "inactive" 에 'active' 가 부분 문자열로 포함 → ^앵커 필수
-until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
-done
-# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
-#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
-until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
-  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
-done
-sleep 5
+wait_nav2_ready   # ② 3단 관문(param→lifecycle active→action discovery)·"최대 90초" = lib_e2e.sh
 
 echo "== ③ 미션 노드 + 가짜 추종자 기동"
 MISSION_ARGS=(-p use_sim_time:=true)
@@ -132,9 +95,9 @@ nohup ros2 run tunnel_sim fake_follower --ros-args -p use_sim_time:=true \
 wait_state PATROL 30
 
 echo "== ④ 추종자 스폰 확인"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
+deadline_start   # ★ G4: 실경과시간 상한(timeout 미산입 봉쇄) — lib_e2e.sh
 until grep -qE "스폰 완료|모델 접수" "$LOGDIR/follower.log"; do
-  sleep 3; [ $((SECONDS-T0)) -ge 45 ] && fail "추종자 스폰 확인 실패"
+  sleep 3; deadline_exceeded 45 && fail "추종자 스폰 확인 실패"
 done
 echo "  ✓ 추종자 스폰"
 sleep 10   # 순찰 이동 + 추종자 따라붙기 (모니터가 '봤다' 기록을 쌓게)

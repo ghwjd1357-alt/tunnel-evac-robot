@@ -18,32 +18,12 @@
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
+# 공통 함수(cleanup·fail·trap·state·deadline_*·wait_nav2_ready·send_goal) = 같은 폴더의 라이브러리.
+source "$(dirname "${BASH_SOURCE[0]}")/lib_e2e.sh"
 
 EXTRA_ARGS=("$@")
 LOGDIR=$(mktemp -d /tmp/abort_e2e.XXXX)
 echo "로그: $LOGDIR"
-
-cleanup() {
-  pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
-  pkill -9 -f "mission[_]node" 2>/dev/null
-  pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "slam[_]toolbox" 2>/dev/null
-  pkill -9 -f "robot_state[_]publisher" 2>/dev/null
-  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # 고아 nav2(좀비 bt_navigator) 필수 청소
-  pkill -9 -x ekf_node 2>/dev/null
-  pkill -9 -f "spawn[_]entity" 2>/dev/null
-  sleep 1
-}
-fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
-# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-# ★ F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도 다음 단계 계속 실행
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
-state() {
-  timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \
-    | sed -n 's/^data: //p' | head -1
-}
 
 robot_xy() {  # ground truth (believed 아님 — gz 실위치)
   gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}'
@@ -55,42 +35,26 @@ ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   "${EXTRA_ARGS[@]}" > "$LOGDIR/launch.log" 2>&1 &
 
-echo "== ② Nav2 활성화 대기 (최대 90초)"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
-# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
-until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
-done
-# F4 (Codex §12.10): parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인
-# ⚠ "inactive" 에 'active' 가 부분 문자열로 포함 → ^앵커 필수
-until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
-done
-# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
-#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
-until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
-  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
-done
-sleep 5
+wait_nav2_ready   # ② 3단 관문(param→lifecycle active→action discovery)·"최대 90초" = lib_e2e.sh
 
 echo "== ③ 미션 노드 기동 (추종자 불필요 — 순찰 주행만 쓰면 됨)"
 nohup ros2 run mission_manager mission_node --ros-args -p use_sim_time:=true \
   > "$LOGDIR/mission.log" 2>&1 &
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
+deadline_start   # ★ G4: 실경과시간 상한(timeout 미산입 봉쇄) — lib_e2e.sh
 until [ "$(state)" = "PATROL" ]; do
-  sleep 3; [ $((SECONDS-T0)) -ge 30 ] && fail "PATROL 대기 타임아웃"
+  sleep 3; deadline_exceeded 30 && fail "PATROL 대기 타임아웃"
 done
 echo "  ✓ PATROL 진입"
 
 echo "== ④ 주행 확인 대기 — 스폰(-12,0)에서 0.5m 이상 이동해야 '주행 중 abort'"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
+deadline_start   # ★ G4: 실경과시간 상한(timeout 미산입 봉쇄) — lib_e2e.sh
 while true; do
   read -r rx ry < <(robot_xy)
   moved=$(python3 -c "import math; print(math.hypot($rx+12.0, $ry-0.0))")
   if python3 -c "exit(0 if $moved > 0.5 else 1)"; then
     echo "  ✓ 주행 중 (이동 ${moved}m, world ($rx, $ry))"; break
   fi
-  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "120초 내 주행 시작 안 함 (이동 ${moved}m)"
+  sleep 3; deadline_exceeded 120 && fail "120초 내 주행 시작 안 함 (이동 ${moved}m)"
 done
 
 echo "== ⑤ ★ abort 발사"
@@ -98,9 +62,9 @@ ros2 topic pub --times 2 -w 1 /mission_cmd std_msgs/msg/String \
   "{data: abort}" >/dev/null 2>&1
 
 echo "== ⑥ 상태 = FAULT 확인"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
+deadline_start   # ★ G4: 실경과시간 상한(timeout 미산입 봉쇄) — lib_e2e.sh
 until [ "$(state)" = "FAULT" ]; do
-  sleep 2; [ $((SECONDS-T0)) -ge 20 ] && fail "abort 후 FAULT 미진입 (상태='$(state)')"
+  sleep 2; deadline_exceeded 20 && fail "abort 후 FAULT 미진입 (상태='$(state)')"
 done
 echo "  ✓ FAULT 진입"
 

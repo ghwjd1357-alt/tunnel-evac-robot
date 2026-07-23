@@ -29,9 +29,12 @@
    SEARCH_BACK 신규 goal 소비 지점도 `guide_speed_applied`로 막아, reconcile·FAULT
    재무장 **호출** 뒤 적용 확인 전 0.26 출발을 차단했다. 사용자 명시 승인으로 마지막
    봉합은 동일 Codex가 구현·재검토한 역할 분리 예외이며 기록에 공개했다.
-2. ~~**GoalManager 추출**~~ ✅ 구현 완료 (독립 검토 대기) — goal 전송·응답·cancel 확인 사슬·
-   stale goal 방어 전부 이관 + B(유도정지 취소 종결 직렬화) 신규. 기록 = `0723_현황.md §1`.
-3. **E2E 공통 하네스** — readiness·cleanup·send_goal 재전송을 셸 함수 라이브러리로. 이때 readiness "최대 90초" 문구·deadline 함수 통일 (Codex §14.5 P2)
+2. ~~**GoalManager 추출**~~ ✅ — 구현 `9a03d1f` + 0723검토 P1 2회 보완, **§7 기술 통과**(07-24).
+   goal 전송·응답·cancel 확인 사슬·stale goal 방어 전부 이관 + B(유도정지 취소 종결 직렬화) 신규.
+   기록 = `0723_현황.md §1`·§8·§9, 검토 종결 = `CODEX 현황/0723검토현황.md §7`.
+3. ~~**E2E 공통 하네스**~~ ✅ 구현 완료 (독립 검토 대기, 07-24) — readiness·cleanup·send_goal·
+   deadline 을 `tools/lib_e2e.sh` 로 추출. readiness "최대 90초" 문구·deadline 함수 단일화
+   (Codex §14.5 P2). 4 E2E 리팩터 전과 동일 PASS. 기록 = `0723_현황.md §10`.
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
 
 각 단계 완료 게이트 = `TEST_GATES.md` §1 전체 게이트 전량 PASS → 한 커밋+push → Codex 독립 검토.
@@ -84,7 +87,7 @@
 ## 7. SpeedManager 이후 예약 항목 (비차단 보류 — 지금 손대지 않음)
 
 1. `map_promote.sh` 는 best-effort transaction — 다음 정기 지도 제작 때 release evidence 3종(staging 로드 로그·FAIL 시 정본 hash 불변·PASS 후 manifest 일치) 실전 확인.
-2. readiness 문구·deadline 통일 → E2E 하네스 추출 때 (§2-3).
+2. ~~readiness 문구·deadline 통일 → E2E 하네스 추출 때 (§2-3).~~ ✅ 07-24 완료 (`tools/lib_e2e.sh` · `0723_현황.md §10`).
 3. 마스터플랜 §3.3 "동일 바이너리" 표현 → "동일 소스·아키텍처별 빌드"로 다음 문서 정리 때.
 
 ## 8. 유효 결정 색인 (한 줄씩 — 상세 근거는 링크 절. 100줄 초과 시 별도 파일로 분리)

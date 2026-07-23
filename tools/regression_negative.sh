@@ -29,28 +29,15 @@
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 set -u
+# 공통 함수(cleanup·fail·trap·state·deadline_*·wait_nav2_ready·send_goal) = 같은 폴더의 라이브러리.
+source "$(dirname "${BASH_SOURCE[0]}")/lib_e2e.sh"
 
 EXTRA_ARGS=("$@")
 LOGDIR=$(mktemp -d /tmp/regneg.XXXX)
 echo "로그: $LOGDIR"
 
-cleanup() {
-  pgrep -f "ros2[ ]launch" | xargs -r kill -9 2>/dev/null
-  pkill -9 -x gzserver 2>/dev/null; pkill -9 -x gzclient 2>/dev/null
-  pkill -9 -f "slam[_]toolbox" 2>/dev/null
-  pkill -9 -f "robot_state[_]publisher" 2>/dev/null
-  pkill -9 -f "lib/nav2[_]" 2>/dev/null   # launch 부모 kill -9 의 고아 nav2 노드까지
-  pkill -9 -x ekf_node 2>/dev/null
-  pkill -9 -f "spawn[_]entity" 2>/dev/null
-  sleep 1
-}
-fail() { echo "== FAIL: $1 (로그: $LOGDIR)"; cleanup; exit 1; }
-# ★ S2-4: Ctrl+C/kill 로 끊겨도 좀비(고아 nav2 등)를 안 남기게
-# ★ F4 (Codex §12.6): cleanup 후 반드시 exit — 없으면 Ctrl+C 뒤에도 다음 단계 계속 실행
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
 # --- 부정 목표 전송: '성공하면 안 되고, 제한시간 안에 끝나야(무한 회복 금지)' ---
+# ★ 이 스크립트 전용(부정경로) — 정상 goal(send_goal)은 lib_e2e.sh 공용.
 send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨
   local out attempt
   for attempt in 1 2; do
@@ -77,41 +64,13 @@ send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨
   echo "  ✓ $4: 예상대로 실패 종결 ($(grep -oE 'ABORTED|REJECTED|rejected|CANCELED' <<<"$out" | head -1))"
 }
 
-# --- 정상 목표 전송 (regression_3goals 와 동일: 응답유실 대비 1회 재전송) ---
-send_goal_expect_success() {  # $1=x $2=y $3=제한시간(초)
-  local out
-  for attempt in 1 2; do
-    out=$(timeout "$3" ros2 action send_goal /navigate_to_pose \
-      nav2_msgs/action/NavigateToPose \
-      "{pose: {header: {frame_id: map}, pose: {position: {x: $1, y: $2}, orientation: {w: 1.0}}}}" 2>&1 | tail -1)
-    if echo "$out" | grep -q SUCCEEDED; then return 0; fi
-    echo "  (시도 $attempt 결과: $out — 재전송)"
-  done
-  return 1
-}
-
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
 ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
-echo "== ② Nav2 활성화 대기 (최대 90초)"
-T0=$SECONDS   # ★ G4 (Codex §13.5): sleep 누적 아닌 실경과시간 상한 (timeout 대기 미산입 구멍 봉쇄)
-# ★ F4 (Codex §12.10): CLI 자체 timeout 없으면 hang 시 '최대 90초'가 무효
-until timeout 8 ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null | grep -q Double; do
-  sleep 3; [ $((SECONDS-T0)) -ge 90 ] && fail "Nav2 기동 타임아웃"
-done
-# F4: parameter 존재 ≠ lifecycle active — bt_navigator 활성까지 확인 ("inactive" 오매칭 방지 ^앵커)
-until timeout 8 ros2 lifecycle get /bt_navigator 2>/dev/null | grep -q "^active"; do
-  sleep 3; [ $((SECONDS-T0)) -ge 120 ] && fail "bt_navigator 미활성 (lifecycle bringup 실패 의심 — launch 로그 확인)"
-done
-# ★ G4 (Codex §13.5): bt_navigator active ≠ action discovery 완료 —
-#   navigate_to_pose 서버가 실제 떠 있는지 별도 확인 (goal 전송 전 마지막 관문)
-until timeout 8 ros2 action info /navigate_to_pose 2>/dev/null | grep -q "Action servers: [1-9]"; do
-  sleep 2; [ $((SECONDS-T0)) -ge 150 ] && fail "navigate_to_pose action server 미준비"
-done
-sleep 5   # 지도/TF 안정화
+wait_nav2_ready   # ② 3단 관문(param→lifecycle active→action discovery)·"최대 90초" = lib_e2e.sh
 
 echo "== ③ 지도 밖 goal (0,15) — 미탐사 공간, 실패해야 정상"
 send_goal_expect_fail 0.0 15.0 60 "offmap"
@@ -148,7 +107,7 @@ echo "== ⑥ 막힌 goal (6,0) — 상자 정중앙, 성공 금지 + 제한시�
 send_goal_expect_fail 6.0 0.0 240 "blocked"
 
 echo "== ⑦ 정상 goal (3,0) — 실패 3연타 뒤에도 시스템이 살아있는지 (양성 대조군)"
-send_goal_expect_success 3.0 0.0 120 || fail "정상 goal 미도달 — 부정 테스트 후 시스템 사망 의심"
+send_goal 3.0 0.0 0.0 120 || fail "정상 goal 미도달 — 부정 테스트 후 시스템 사망 의심"  # yaw=0 → 옛 orientation{w:1.0} 동일
 read -r gx gy < <(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}')
 err=$(python3 -c "import math; print(round(math.hypot(($gx+12)-3.0, $gy-0.0), 3))")
 echo "  ✓ 정상 goal SUCCEEDED, 실위치 오차 ${err}m"
