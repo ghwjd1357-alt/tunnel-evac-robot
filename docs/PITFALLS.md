@@ -76,6 +76,7 @@
 - ★★ **실패 '결정'을 콜백 이벤트 한 번에만 맡기면 상태 전환 중 유실된다** — 저속 복구 소진(`_settle`)이 콜백(`_on_guide_speed_fail`)으로 딱 한 번 알리는데, 그 순간 상태가 GUIDE 가 아니라 SEARCH_BACK 이면 콜백 else(기본값)가 '늦은 통보'로 **무시** → GUIDE 복귀 후 live 게이트가 신규 goal 은 막아도 FAULT 없이 **고장 은폐 영구정지**. §24 와 같은 클래스(fail-open 기본값). 봉합 = 소비 지점(tick)에서 **매 tick live 술어**(`guide_speed_recovery_exhausted`)를 확인하는 fail-closed 가드 — 통보 유실과 무관하게 유도활성(GUIDE/SEARCH_BACK) 상태가 종결 실패를 한 tick 이상 못 이고 간다. 콜백은 즉시성, 가드는 backstop. **가드는 `ensure_sync` 앞**에 둔다(sync 요청 `_inflight` 이 술어를 가림). FAULT→SEARCH_BACK 재시도 복귀도 `request_guide` 재무장(안 하면 소진 술어 잔존→즉시 재-FAULT). → `0720_현황.md §25.2`
 - ★★ **같은 안전 의무를 공유하는 상태는 신규 동작 소비 지점도 전부 게이트할 것** — GUIDE escape만 live 저속 게이트를 두고 SEARCH_BACK의 신규 goal은 `goal_active`만 봐, stale reconcile 중·FAULT 재무장 응답 대기 중 0.26으로 출발했다. “기존 goal은 reconcile 먼저” 정책과 “새 goal은 적용 확인 뒤” 정책을 분리한다: 기존 goal은 즉시 취소하지 않되 GUIDE·SEARCH_BACK 신규 `send_goal`은 모두 `guide_speed_applied`로 막는다. → `0720_현황.md §26.2`
 - 껍데기 노드 테스트는 **매니저만 찌르지 말고 노드의 진짜 진입점(`on_cmd` 등)을 통과시킬 것** — 호출 누락·순서 뒤바뀜은 매니저 단위테스트가 못 잡는다. → `0720_현황.md §21.2`
+- ★ **상태를 매니저로 옮길 때 동결 테스트가 그 노드 속성을 직접 만지면, 매니저 프로퍼티로 바꾸지 말고 노드에 평범한 속성으로 남긴 뒤 매니저가 콜백으로 미러**한다 — `goal_active` 를 `self.goals.active` 프로퍼티로 바꿨다면 이를 평범한 속성으로 세팅·독해하는 동결 하네스(N13~N20)와 `tick` 이 전부 깨진다. **`tick` 에는 새 매니저 참조를 한 줄도 넣지 않는 게 안전**(하네스가 매니저 미배선). 0-인자 호출 규약을 유지해야 하면 인자 대신 전이 속성(`_cancel_intent`)으로 의도를 넘긴다. → `0723_현황.md §4`
 
 ## 9. 실물 라이다 (RPLIDAR C1)
 

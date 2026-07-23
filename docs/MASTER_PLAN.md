@@ -29,7 +29,8 @@
    SEARCH_BACK 신규 goal 소비 지점도 `guide_speed_applied`로 막아, reconcile·FAULT
    재무장 **호출** 뒤 적용 확인 전 0.26 출발을 차단했다. 사용자 명시 승인으로 마지막
    봉합은 동일 Codex가 구현·재검토한 역할 분리 예외이며 기록에 공개했다.
-2. **GoalManager 추출** — goal 전송·cancel 확인 사슬·stale goal 방어 전부 이관 (최대 수익)
+2. ~~**GoalManager 추출**~~ ✅ 구현 완료 (독립 검토 대기) — goal 전송·응답·cancel 확인 사슬·
+   stale goal 방어 전부 이관 + B(유도정지 취소 종결 직렬화) 신규. 기록 = `0723_현황.md §1`.
 3. **E2E 공통 하네스** — readiness·cleanup·send_goal 재전송을 셸 함수 라이브러리로. 이때 readiness "최대 90초" 문구·deadline 함수 통일 (Codex §14.5 P2)
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
 
@@ -111,3 +112,4 @@
 | 저속 복구 소진 실패 결정은 **콜백 이벤트 한 번**이 아니라 **매 tick live 가드**(`guide_speed_recovery_exhausted`)로 확인 — GUIDE·SEARCH_BACK 유도활성 상태에서 통보 유실돼도 고장 은폐 영구정지 금지 | 07-23 | `0720_현황.md §25.2` |
 | FAULT→SEARCH_BACK 자동 재시도 복귀도 `request_guide` 재무장 — GUIDE 만 하면 소진 술어 잔존→즉시 재-FAULT | 07-23 | `0720_현황.md §25.3` |
 | GUIDE·SEARCH_BACK **신규** goal은 `guide_speed_applied=True`에서만 전송 — 일시 표류 중 기존 goal 비취소(§22.3)와 신규 과속 출발 차단을 분리 | 07-23 | `0720_현황.md §26.2` |
+| goal 수명주기(전송·응답·취소확인·stale·유도정지 종결 직렬화 B)는 GoalManager 소유 — 노드는 정책+콜백만. B: 저속상실 취소는 CANCELED 종결 전 신규 goal 재전송 금지, 실패 시 FAULT | 07-23 | `0723_현황.md §1` |

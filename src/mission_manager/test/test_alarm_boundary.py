@@ -34,9 +34,10 @@ def bare_node(with_graph=True):
     node.state = State.PATROL
     node.fire = None
     node.gather_wp = None
-    node.goal_seq = 0
-    node.goal_active = False
-    node._goal_handle = None
+    # goal 수명주기는 GoalManager 로 이관(07-23 구조 분리 2/3). on_alarm 의
+    # 재지정 취소는 이 테스트의 검증 대상(알람 입력 신뢰경계)이 아니므로,
+    # 매니저 배선 없이 무해 가짜로 대체한다 (시나리오·단언은 그대로).
+    node.cancel_current_goal = lambda: None
     node.siren_on = False
     node.wp = {
         'escape': {'x': 0.0, 'y': 0.0},
