@@ -576,6 +576,43 @@ def test_p1_pending_guide_stop_result_exception_faults():
     assert env.gm._stop_pending
 
 
+def test_p1_accepted_handle_result_exception_faults():
+    """0723검토 §6.3 신규 P1: 수락된 핸들을 guide_stop 으로 취소한 뒤 terminal
+    Future 가 예외면, 늦은 수락 경로와 대칭으로 즉시 FAULT + 봉쇄여야 한다.
+    (구판은 _on_result 예외 분기가 현재 세대만 FAULT 하고 stale B 대상은 로그만
+    남겨 faults=0 — 예산 소진까지 정지 불능이 관제에 안 드러났다.)"""
+    env = make_gm()
+    handle = send_and_accept(env, tag='escape')        # 수락된 핸들
+    env.gm.cancel_current_goal(intent='guide_stop')
+    handle.result_cb(failing_future())                 # terminal 수신 예외
+    assert env.faults == [1]                           # ★ 즉시 FAULT
+    assert env.gm._stop_pending                         # 봉쇄 유지
+    env.gm.send_goal({'x': 9, 'y': 9})
+    assert len(env.goals) == 1                          # 신규 goal 0건
+    env.gm.send_goal({'x': 9, 'y': 9})
+    assert len(env.goals) == 1
+
+
+def test_p1_result_exception_symmetric_accepted_vs_pending():
+    """§6.3 대칭성 앵커: accepted-handle 과 pending-late-accept 의 result Future
+    예외가 동일한 FAULT 관찰값(faults==[1], _stop_pending=True)을 낸다 —
+    두 경로가 공통 helper(_stop_target_terminal_lost)를 공유함을 고정한다."""
+    a = make_gm()
+    ha = send_and_accept(a, tag='escape')              # accepted-handle 경로
+    a.gm.cancel_current_goal(intent='guide_stop')
+    ha.result_cb(failing_future())
+
+    b = make_gm()                                       # pending → 늦은 수락 경로
+    b.gm.send_goal({'x': 1, 'y': 2}, tag='escape')
+    b.gm.cancel_current_goal(intent='guide_stop')
+    hb = FakeGoalHandle(accepted=True)
+    b.resp_cbs[0](fake_future(hb))
+    hb.result_cb(failing_future())
+
+    assert a.faults == b.faults == [1]
+    assert a.gm._stop_pending and b.gm._stop_pending
+
+
 # --- P1 역회귀: 안전한 반대 경로 보존 (봉쇄가 과하지 않은지) ---
 def test_p1_pending_guide_stop_late_rejected_releases():
     """전송 후 미수락 guide_stop → 늦은 '거부' → 실제 주행 goal 없음 → cancel 0건,

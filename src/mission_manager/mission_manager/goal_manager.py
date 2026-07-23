@@ -226,6 +226,20 @@ class GoalManager:
             self._on_fault()               # _stop_pending 유지 = 재전송 금지
         return True
 
+    def _stop_target_terminal_lost(self, seq):
+        """B 대상 goal 의 최종결과 수신 자체가 실패(Future 예외) — 정지 확인 불가
+        → FAULT + 봉쇄 유지. 반환 True = B 대상이라 처리함.
+
+        ★ 0723검토 §6.3 P1: accepted-handle(_on_result 예외)·늦은 수락
+        (_on_stale_result 예외) 두 경로가 이 helper 로 같은 정책을 공유한다 —
+        성공 경로는 _judge_stop_terminal 로 이미 합쳤는데 예외 경로가 비대칭이었다."""
+        if not self._is_stop_target(seq):
+            return False
+        self._log.error(
+            f'★ 유도정지 대상(seq={seq}) 종결 확인 불가 — FAULT (재전송 금지)')
+        self._on_fault()                   # _stop_pending 유지 = 재전송 금지
+        return True
+
     # ===========================================================
     # 내부 — 응답/결과 콜백 (세대 토큰으로 stale 구분)
     # ===========================================================
@@ -291,6 +305,10 @@ class GoalManager:
                 self._handle = None
                 self._set(False)
                 self._on_fault()
+            else:
+                # ★ 0723검토 §6.3 P1: stale 이라도 이게 B 정지 대상이면 terminal
+                #   수신 실패 = 정지 확인 불가 → FAULT + 봉쇄(늦은 수락 경로와 대칭).
+                self._stop_target_terminal_lost(seq)
             return
         if seq != self._seq:
             # ★ 취소한(=지난) goal 의 최종 status 관찰. cancel_current_goal 경로는
@@ -371,8 +389,7 @@ class GoalManager:
             status = future.result().status
         except Exception as e:
             self._log.error(f'★ 이전 목표(seq={seq}) 결과 수신 실패: {e}')
-            if self._is_stop_target(seq):
-                self._on_fault()          # B 대상 terminal 수신 실패 = 정지 확인 불가
+            self._stop_target_terminal_lost(seq)   # B 대상이면 FAULT+봉쇄(공통 helper)
             return
         if self._judge_stop_terminal(seq, status):
             return
