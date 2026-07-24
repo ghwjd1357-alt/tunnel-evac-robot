@@ -10,14 +10,17 @@
 - **현재 단계**: 마스터플랜 5단 완료 + 순서 밖 소묶음 **e2e-harness-fix 완료** → 다음 = 마스터플랜
   **6단 역할 B V1 계약 세부 확정** (`MASTER_PLAN.md §1` 6, 실차 7단과 **병렬 가능**).
 - **직전 완료**: **e2e-harness-fix** (마스터플랜 §7 예약 6·7) — 쌍굴 하네스 결함 2건(⑦ `ros2 param get`
-  무한 행 · ⑧ 폴링 race + 90s 예산) 수리. **런타임 코드 무변경, 셸 하네스만**. 1차 `0eb285c` 는 Codex
-  `§14 P1` 로 불승인(유한 상한이 벽시계로 미보장) → **벽시계 deadline 으로 보완**(복구 명령 timeout,
-  `wait_state` 벽시계 전환, 격리 테스트 `tools/test_harness_guards.sh` 신설).
-  실측: 격리 5/5 · pytest 159 · colcon 165·0f·2s · T자 PASS · 쌍굴 PASS ×2 연속 · abort PASS(실정지 0.0m).
+  무한 행 · ⑧ 폴링 race + 90s 예산) 수리. **런타임 코드 무변경, 셸 하네스만**. 검토를 **2라운드** 거쳤다:
+  1차 `0eb285c` → Codex `§14 P1` 불승인(유한 상한 벽시계 미보장) → 벽시계 deadline 보완 `d70bbaf`
+  → Codex `§15 P1` **재불승인**(SIGTERM 무시 시 무한 행 · daemon kick 예산 밖) → **hard-kill 재보완**.
+  재보완 핵심: 모든 ros2 CLI 대기를 공통 `hard_timeout`(`timeout --kill-after=2`, TERM 무시도 SIGKILL)로
+  단일화 · `wait_state` daemon kick 을 **남은 예산 배분**(부족 시 복구 생략, deadline FAIL). `read_param_float`
+  hard 상한 = **34s**(정상 ≈26s). 격리 테스트 `tools/test_harness_guards.sh` **8케이스**(§15 신설 3).
+  실측: 격리 8/8 · pytest 159 · colcon 165·0f·2s · T자·쌍굴·abort (커밋 메시지·`0723_현황.md §15.6`).
   SEARCH_BACK 예산 **90s→180s(벽시계)** 재산정(근거 = `TEST_GATES.md §2`, 판정기준 변경 =
-  `FREEZE_MANIFEST.md §8.1`). 구현 기록 = `0723_현황.md §15`.
-  ⚠ **Codex 재검토 대기** (보완 diff 당 1회) — `bash tools/test_harness_guards.sh` + T자·쌍굴 역회귀를
-  함께 요청한다(`0723_현황.md §15.5`). 검토 범위 = `TEST_GATES.md §7` "셸 도구" 행.
+  `FREEZE_MANIFEST.md §8.1`·`FREEZE_MANIFEST.md §8.2`).
+  ⚠ **Codex 재검토 대기** (§15 P1 보완 diff 당 1회) — `bash tools/test_harness_guards.sh` + T자·쌍굴
+  역회귀를 함께 요청한다(`0723_현황.md §15.6`). 검토 범위 = `TEST_GATES.md §7` "셸 도구" 행.
 
 ## 이번 한 묶음 목표 — 역할 B `/detections` V1 최소 계약 세부 확정
 

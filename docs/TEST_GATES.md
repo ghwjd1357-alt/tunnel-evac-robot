@@ -7,7 +7,7 @@
 
 ```bash
 python3 -m pytest src/mission_manager/test/ -q          # ~0.6s
-bash tools/test_harness_guards.sh                        # ~15초 — E2E 하네스 유한 상한 단위(§14 P1)
+bash tools/test_harness_guards.sh                        # ~95초 — E2E 하네스 유한 상한 단위(§14·§15 P1)
 colcon test --packages-select mission_manager tunnel_sim
 colcon test-result --verbose                             # ⚠ 종료코드 말고 이걸로 판정
 bash tools/regression_negative.sh                        # ~6분
@@ -37,7 +37,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 | 검증 | 목적 | PASS 기준 |
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
-| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline) — Gazebo 불필요 | 5 케이스 전부 ✓ (§14 P1) |
+| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분) — Gazebo 불필요 | 8 케이스 전부 ✓ (§14·§15 P1) |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
 | regression_3goals | 주행 정확도 회귀 | 3종 SUCCEEDED, 최종 오차 **≤0.3m** |
@@ -56,10 +56,17 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
   구조적으로 확정 안 되는 이상(follower `stop` 미수신·`lost` 미발화)이므로 **여전히 FAIL** 해야 한다.
   실측 부정 회귀: 도달 불가 예산에서 `FAIL: … 대기 타임아웃(예산 Ns, 경과 Ms), 마지막 상태='GUIDE'` —
   판정과 '마지막 상태' 보고가 같은 읽기라 자기모순이 없다(옛 폴링 race 제거).
-- ★ **상한 집행은 벽시계(`SECONDS`)로 한다** (07-24 §14 P1 보완): `wait_state` 예산과 `read_param_float`
-  복구 시퀀스(param get + daemon 재시작 각 timeout, 상한 ≈26s)를 sleep 누적이 아니라 실경과시간으로
-  지킨다. 예산 밖에서 늦게 도달하면 s 가 목표여도 `경과>예산`이 메시지에 찍혀 FAIL(모순 없음). 그
-  부정 회귀는 `tools/test_harness_guards.sh` 가 Gazebo 없이 격리 검증한다.
+- ★ **상한 집행은 벽시계(`SECONDS`)로, hard-kill 로 실제 보장한다** (07-24 §14·§15 P1 보완):
+  `wait_state` 예산과 `read_param_float` 복구 시퀀스를 sleep 누적이 아니라 실경과시간으로 지킨다.
+  예산 밖에서 늦게 도달하면 s 가 목표여도 `경과>예산`이 메시지에 찍혀 FAIL(모순 없음).
+  - **§15 P1 추가**: 모든 ros2 CLI 대기를 공통 `hard_timeout`(=`timeout --kill-after=2`)으로 단일화 —
+    GNU `timeout` 은 기본 SIGTERM 만 보내 CLI 가 TERM 을 무시하면 안 죽는다. `--kill-after` 로 TERM 뒤
+    2초 유예 후 SIGKILL 을 보장한다. `read_param_float` 실제 hard 상한 = (8+2)+(5+2)+(5+2)+(8+2) = **34s**
+    (정상 TERM 응답 시 ≈26s). `wait_state` 의 daemon kick 도 고정 5 가 아니라 **남은 예산 배분**(각 5s
+    상한 + 유예까지 rem 안에 수렴)이며, 남은 예산 < 6s 면 복구를 생략하고 deadline FAIL 한다 → daemon
+    복구까지 전부 예산 안에서 소모돼 벽시계 상한이 N 을 넘지 않는다.
+  - 이 부정 회귀 4종은 `tools/test_harness_guards.sh` 8케이스가 Gazebo 없이 격리 검증한다
+    (TERM 무시 case 6=34s·예산부족 kick 생략 case 7=13s·kick 발동해도 예산 내 수렴 case 8=30s).
 - ⚠ 이 예산은 **판정 기준**이라 동결 태그 `platform-core-freeze-260724` 의 게이트 수치는 **옛 90s
   기준**으로 얻은 것이다 — 두 기준의 구분은 `FREEZE_MANIFEST.md §8`.
 

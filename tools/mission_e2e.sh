@@ -110,12 +110,13 @@ sleep 5
 #   set_nav_speed 요청이 조용히 실패하면 사람 걸음 배려 없이 0.26 으로 유도하는 구멍
 # ★ ⑦ 타임아웃 가드 (07-24 e2e-harness-fix): 구판은 이 param get 이 무방비라 CLI/daemon
 #   flake(§5 ③) 때 13분 27초 무한 행이 실측됐다(쌍굴 3회차, FREEZE_MANIFEST §8).
-#   read_param_float 가 timeout 8 + daemon 재시작 1회 재시도로 상한(≈19s)을 씌운다.
+#   read_param_float 가 hard_timeout(param get 8 + daemon 재시작 각 5 + 재시도 8, TERM 무시도
+#   SIGKILL)로 상한(정상 ≈26s, TERM 무시 최악 34s)을 씌운다 — 근거 = lib_e2e.sh · TEST_GATES §2.
 #   ⚠ '못 읽음(§5 ③ 인프라)'과 '값이 틀림(S1-5 코드 결함)'을 절대 뒤섞지 않는다 —
 #   빈 결과는 인프라 결함으로 분류해 FAIL(조용한 통과 없음), 값이 있으면 0.12 비교로 판정.
 v=$(read_param_float /controller_server FollowPath.desired_linear_vel)
 if [ -z "$v" ]; then
-  fail "desired_linear_vel 조회 무응답 — ros2 param CLI/daemon 결함(§5 ③), timeout+daemon 재시작 재시도도 실패(상한 ≈19s)"
+  fail "desired_linear_vel 조회 무응답 — ros2 param CLI/daemon 결함(§5 ③), hard_timeout+daemon 재시작 재시도도 실패(상한 ≤34s)"
 elif [ "$v" = "0.12" ]; then
   echo "  ✓ GUIDE 저속 0.12 m/s 실측 확인"
 else
