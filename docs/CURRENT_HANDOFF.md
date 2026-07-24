@@ -12,6 +12,13 @@
   SpeedManager `f94da44`(+보완 6회) / GoalManager `9a03d1f`(+P1 보완 2회, §7 통과) /
   하네스 `4fe060d`(§8 통과). 구현 기록 = `0723_현황.md §10`.
 
+- **진행 상황 (07-24)**: 완료조건 **1·2·3 완료** — 동결 게이트 전량 PASS(pytest 159 / colcon 165 /
+  negative·3goals 0.142m·mission T자·abort 0.0m·**쌍굴** 전부 PASS) + 지도 hash MATCH +
+  `docs/FREEZE_MANIFEST.md` 작성. 증거 = `0723_현황.md §11`.
+  ★ `abort_e2e` 최초 1회 실패는 **잔류 cmd_vel 활주**로 근인 규명(미션 코드 무결) — 알려진 시뮬
+  한계로 공개 기록, **R0 watchdog 실측 통과 전제의 조건부 수용** (`FREEZE_MANIFEST.md §6`).
+  **남은 것 = 완료조건 5(Codex 동결 판정) → 6(태그).**
+
 ## 이번 한 묶음 목표 — platform-core-freeze (동결 게이트 + release tag)
 
 "주행·정지·목표·속도·지도·고장 처리의 **기반**이 완성됐다"를 선언하고, 실차에서 문제가 났을 때
@@ -32,8 +39,7 @@
    일치하는지 대조하고, 그 대조 결과를 evidence 로 남긴다(불일치 = **동결 중단**, 원인 규명 먼저).
    ⚠ `make_map.sh` 실런은 이 묶음에 없다 — 새 지도 제작이 필요하다는 판단이 서면 **사용자 명시
    승인**을 받아 별도 묶음으로 분리한다 (`AGENTS.md §5` · `TEST_GATES.md §4`).
-3. **hash manifest 신설** (파일 1개, 예 **docs/FREEZE_MANIFEST.md** — 아직 없는 파일이라
-   백틱 참조로 쓰지 않는다: `doc_check.sh` 는 백틱 안 `*.md` 를 "실재해야 할 문서"로 검사한다) — 최소 항목:
+3. ✅ **hash manifest 신설** = `docs/FREEZE_MANIFEST.md` — 최소 항목:
    태그 대상 커밋 해시 / 지도 정본 sha256(§2 대조값 + `tunnel_map_loc`·`twin_*` 포함) /
    설정·URDF sha256(`src/tunnel_sim/config/*.yaml` · `src/tunnel_sim/urdf/robot.urdf`) /
    **`src/sllidar_ros2` upstream commit** / 게이트 결과 수치.
@@ -50,7 +56,7 @@
 
 ## 허용 파일/범위
 
-- **docs/FREEZE_MANIFEST.md**(신설) · `docs/MASTER_PLAN.md` · `docs/TEST_GATES.md` ·
+- `docs/FREEZE_MANIFEST.md`(신설) · `docs/MASTER_PLAN.md` · `docs/TEST_GATES.md` ·
   `docs/CURRENT_HANDOFF.md` · `docs/PROJECT_CONTEXT.md`(동결 표기) · `~/Desktop/개발현황/0723_현황.md`
 - git tag 생성/push (코드 변경 없음)
 

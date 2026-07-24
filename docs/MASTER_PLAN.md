@@ -92,6 +92,12 @@ evidence, `TEST_GATES.md §7`)와 태그·hash manifest = 순서 5단.
 1. `map_promote.sh` 는 best-effort transaction — 다음 정기 지도 제작 때 release evidence 3종(staging 로드 로그·FAIL 시 정본 hash 불변·PASS 후 manifest 일치) 실전 확인.
 2. ~~readiness 문구·deadline 통일 → E2E 하네스 추출 때 (§2-3).~~ ✅ 07-24 완료 (`tools/lib_e2e.sh` · `0723_현황.md §10`).
 3. 마스터플랜 §3.3 "동일 바이너리" 표현 → "동일 소스·아키텍처별 빌드"로 다음 문서 정리 때.
+4. **`abort_e2e` 진단 강화** — 실정지 단언 실패 시 `/cmd_vel` 잔류부터 읽어 "코드 결함 vs 잔류
+   명령"을 자동 분류(07-24 동결 게이트에서 이 구분에 수동 규명이 필요했다 — `0723_현황.md §11.3`).
+5. **시뮬 diff_drive 와 실차 watchdog 의 정합성** — `libgazebo_ros_diff_drive` 는 command timeout 이
+   없어 cmd_vel 이 끊기면 마지막 속도를 무한 유지한다. 실차는 R0 통과조건에 watchdog(단절 0.5s 내
+   정지)이 있으나 **아직 실측 전** — R0 실측 결과를 받은 뒤 시뮬 쪽 정합을 결정한다.
+   ⚠ 동결의 §6 수용은 이 R0 실측 통과를 전제로 한 **조건부** 수용이다 (`docs/FREEZE_MANIFEST.md §6`).
 
 ## 8. 유효 결정 색인 (한 줄씩 — 상세 근거는 링크 절. 100줄 초과 시 별도 파일로 분리)
 
