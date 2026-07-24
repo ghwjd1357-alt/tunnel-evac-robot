@@ -17,7 +17,11 @@
   `docs/FREEZE_MANIFEST.md` 작성. 증거 = `0723_현황.md §11`.
   ★ `abort_e2e` 최초 1회 실패는 **잔류 cmd_vel 활주**로 근인 규명(미션 코드 무결) — 알려진 시뮬
   한계로 공개 기록, **R0 watchdog 실측 통과 전제의 조건부 수용** (`FREEZE_MANIFEST.md §6`).
-  **남은 것 = 완료조건 5(Codex 동결 판정) → 6(태그).**
+  ★ 쌍굴은 **4회 중 2회 하네스 실패** 후 4회차 PASS — 두 실패 모두 미션 코드가 아니라 E2E
+  하네스 결함(`ros2 param get` 무가드 / ⑧ 90초 예산)이며 전량 공개 기록
+  (`FREEZE_MANIFEST.md §8`), 수리는 `MASTER_PLAN.md §7` 예약 6·7.
+  ★ GLX 는 복구됨(원인 = apt 자동 업데이트 실패) → `abort_e2e`·쌍굴을 **표준 환경에서 재실행**해
+  환경 이탈 없는 증거 확보. **남은 것 = 완료조건 5(Codex 동결 판정) → 6(태그).**
 
 ## 이번 한 묶음 목표 — platform-core-freeze (동결 게이트 + release tag)
 

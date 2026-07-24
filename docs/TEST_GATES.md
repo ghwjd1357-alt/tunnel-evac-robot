@@ -65,7 +65,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 
 기지 함정과 로그 물증으로 대조: ① goal 응답 유실 (bt_navigator "Failed to send goal response" — 타임아웃+1회 재전송이 표준) ② **좀비 bt_navigator 가로채기** (자기 로그 "Begin navigating" 0건이 판별법 → `pkill -9 -f "lib/nav2[_]"`) ③ ros2 daemon 오류 (`ros2 daemon stop/start`) ④ `/alarm` 유실 (상태 확인 후 재발사) ⑤ 샌드박스 UDP 차단 (Gazebo "Unable to get local interface addresses"). 인프라면 재시도+스크립트 방어 추가, 코드면 수정.
 
-**⑥ GLX 깨짐으로 gzserver 사망** (07-24 신규): 증상은 "Nav2 기동 타임아웃"이지만 진짜 원인은 **로봇 미스폰**이다. 판별 = launch.log 에 `X Error … X_GLXCreateContext BadValue` + `Service /spawn_entity unavailable`. **`glxinfo -B` 단독으로 같은 에러가 나면 우리 코드와 무관**(PC 그래픽 상태). 회피 = `env -u DISPLAY bash tools/…`(라이다가 CPU `type="ray"` 라 렌더링 불필요), 근본 복구 = §3 의 평소 설정 `sudo prime-select intel`.
+**⑥ GLX 깨짐으로 gzserver 사망** (07-24 신규): 증상은 "Nav2 기동 타임아웃"이지만 진짜 원인은 **로봇 미스폰**이다. 판별 = launch.log 에 `X Error … X_GLXCreateContext BadValue` + `Service /spawn_entity unavailable`. **`glxinfo -B` 단독으로 같은 에러가 나면 우리 코드와 무관**(PC 그래픽 상태). 즉시 회피 = `env -u DISPLAY bash tools/…`(라이다가 CPU `type="ray"` 라 렌더링 불필요). 근본 복구는 **그래픽 스택 자체를 고치는 것** — 07-24 실사례의 원인은 밤사이 **apt 자동 업데이트 실패**였다. ⚠ `prime-select` 값(`on-demand` 등)을 원인으로 단정하지 말 것: 07-24 에 그 오진이 있었고, 복구 후에도 `on-demand` 인 채 GLX 는 정상이었다.
 
 **⑦ 잔류 cmd_vel 활주** (07-24 신규): `abort_e2e` 의 "실정지"가 깨졌는데 미션 로그의 취소 사슬은 정상 종결(≤100ms)인 경우. `libgazebo_ros_diff_drive` 는 command timeout 이 없어 **마지막 cmd_vel 을 무한 유지**하므로, 중단된 Nav2 회복행동(BackUp 0.05m/s)이 남긴 속도로 로봇이 계속 미끄러진다. 판별 = 이동 속도가 `backup_speed` 와 일치 + launch.log 에 `backup failed`. 이건 미션 코드 결함이 아니다 — 상세 `docs/FREEZE_MANIFEST.md §6`.
 

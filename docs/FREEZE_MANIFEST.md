@@ -70,7 +70,7 @@
 | `regression_3goals` | **PASS** — 3목표 SUCCEEDED, 오차 **0.142m** (허용 0.3m) |
 | `mission_e2e` (T자) | **PASS** — GUIDE 0.12 → SEARCH_BACK → 재발견 → ESCAPED |
 | `abort_e2e` | **PASS** — 실정지 **0.0m**, cmd_vel 잠잠, '취소 접수 확인'. ★ 최초 1회 실패 = §6 |
-| `mission_e2e twin` (쌍굴) | **PASS** — ESCAPED, 로봇 world(-16.88, 0.08) / 탈출구 (-17, 0) |
+| `mission_e2e twin` (쌍굴) | **PASS** — ESCAPED 111s, 로봇 world(-16.88, 0.08) / 탈출구 (-17, 0). ★ 4회 중 2회 하네스 실패 = §8 |
 | 지도 hash 대조 | **MATCH** — §2 |
 | `doc_check.sh --strict` | **PASS** |
 
@@ -99,7 +99,41 @@
 
 ## 7. 환경 이탈 기록 (게이트 실행 당시)
 
-- 실행 PC 의 GLX 가 깨져(`prime-select` = `on-demand`, `X_GLXCreateContext BadValue`) gzserver 가
-  기동 중 사망 → `env -u DISPLAY` 로 실행했다. 라이다가 `type="ray"`(CPU) 라 렌더링은 판정과
-  무관하며, RTF 를 **1.01**(`gz stats`)·**1.015**(`/clock` 대 벽시계)로 실측해 시간 축 왜곡이
-  없음을 확인했다. 근본 복구 = `TEST_GATES.md §3` 의 평소 설정 `sudo prime-select intel`.
+- 실행 PC 의 GLX 가 깨져(`X_GLXCreateContext BadValue`) gzserver 가 기동 중 사망 →
+  `env -u DISPLAY` 로 실행했다. 라이다가 `type="ray"`(CPU) 라 렌더링은 판정과 무관하며,
+  RTF 를 **1.01**(`gz stats`)·**1.015**(`/clock` 대 벽시계)로 실측해 시간 축 왜곡이 없음을 확인했다.
+- **원인**: 밤사이 **apt 자동 업데이트 실패로 그래픽 스택이 깨진 것** (07-24 사용자 확인·해소).
+  ⚠ 구현자가 처음 지목한 `prime-select on-demand` 는 **오진**이었다 — 복구 후에도 `on-demand`
+  그대로인 채 GLX 가 정상이다 (`0723_현황.md §11.2`).
+- **해소 (07-24)**: GLX 복구 뒤 이탈 상태로 얻었던 2종을 **표준 환경에서 재실행**했다.
+  `abort_e2e` = **PASS**(실정지 0.0m, GLX 에러 0건) → 이탈 없는 증거 확보.
+  쌍굴 mission = §8 참조. 나머지 6종은 애초에 GLX 정상 시점에 통과한 것이다.
+  재확인 상세·해시 16개 전량 재대조 = `0723_현황.md §11.5`.
+
+## 8. ★ 알려진 하네스 취약점 — 쌍굴 4회 중 2회 실패 (전량 공개)
+
+> §5 표의 쌍굴 PASS 는 **4회차**다. 통과한 회차만 인용하지 않기 위해 전 회차를 남긴다.
+
+| 회차 | 환경 | 결과 | 원인 |
+|---|---|---|---|
+| 1 | `env -u DISPLAY` | **PASS** — ESCAPED 114s | — |
+| 2 | 표준 | FAIL ⑧ | SEARCH_BACK 이 90초 예산을 ≈3초 차로 스침 |
+| 3 | 표준 | FAIL ⑦ | `ros2 param get` 무한 행 (13분 27초, 타임아웃 가드 없음) |
+| 4 | 표준 | **PASS** — ESCAPED 111s, SEARCH_BACK 9s | — |
+
+**두 실패 모두 미션 코드를 지목하지 않는다** — E2E 하네스 결함이다.
+- 2회차: 미션 로직은 놓침을 정확히 확정하고 역행 목표를 보냈으며, 그 구간 Nav2 는 건강했다
+  (`Passing new path to controller` 1초 간격, 회복행동 0건). `wait_state` 가 t=87s 마지막 폴링 후
+  `fail` 이 상태를 한 번 더 읽는 구조라 "타임아웃인데 마지막 상태는 목표 상태"가 나왔다.
+- 3회차: 스크립트가 멈춘 동안 **미션은 독립적으로 쌍굴 탈출을 완주**했다(ESCAPED) — 시나리오
+  자체의 건강함을 보이는 부수 증거다.
+
+**변동성 기록**: GATHER 도달 **48s / 126s / 48s**, SEARCH_BACK 도달 **9s ~ ≈90s**.
+쌍굴은 T자보다 경로가 길어 타이밍 분산이 크다.
+
+⚠ 이 두 결함은 **T자 `mission_e2e.sh` 와 같은 파일**이다. 쌍굴 전용 문제가 아니며,
+T자가 통과해 온 것은 여유가 있었을 뿐이다.
+
+**동결 범위 밖으로 분리한 이유**: 둘 다 판정 기준·도구 변경이라 동결 묶음의 금지 범위에 걸린다
+(`CURRENT_HANDOFF.md` 금지 범위 — "게이트 중 결함이 나오면 별도 묶음"). 후속 =
+`MASTER_PLAN.md §7` 예약 항목 **6·7**. 상세 = `~/Desktop/개발현황/0723_현황.md §11.5`.
