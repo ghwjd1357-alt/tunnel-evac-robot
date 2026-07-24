@@ -11,7 +11,7 @@
 > 이 파일은 **단계의 정의**, 핸드오프는 **현재 상태**. ✅ 완료 표시만 사후 기록한다.
 
 1. ~~G 묶음 봉합~~ ✅ → 2. ~~전체 회귀 녹색 기준선~~ ✅ → 3. ~~중간보고서~~ ✅
-4. **SpeedManager → GoalManager → E2E 공통 하네스 단계적 분리** (§2)
+4. ~~SpeedManager → GoalManager → E2E 공통 하네스 단계적 분리~~ ✅ (§2 — 3종 전부 독립 검토 통과, 07-24)
 5. **platform-core-freeze** (release tag + hash manifest)
 6. 역할 B V1 최소 계약 확정 — ★ 책임경계 (b) camera-frame 3D 는 07-20 확정, 세부(필드·주기·실패 표현)만 잔여 (병렬 진행 가능)
 7. 가상 시나리오를 검증 대본으로 실차 R0~R8 진행 (§3)
@@ -32,13 +32,16 @@
 2. ~~**GoalManager 추출**~~ ✅ — 구현 `9a03d1f` + 0723검토 P1 2회 보완, **§7 기술 통과**(07-24).
    goal 전송·응답·cancel 확인 사슬·stale goal 방어 전부 이관 + B(유도정지 취소 종결 직렬화) 신규.
    기록 = `0723_현황.md §1`·§8·§9, 검토 종결 = `CODEX 현황/0723검토현황.md §7`.
-3. ~~**E2E 공통 하네스**~~ ✅ 구현 완료 (독립 검토 대기, 07-24) — readiness·cleanup·send_goal·
-   deadline 을 `tools/lib_e2e.sh` 로 추출. readiness "최대 90초" 문구·deadline 함수 단일화
-   (Codex §14.5 P2). 4 E2E 리팩터 전과 동일 PASS. 기록 = `0723_현황.md §10`.
+3. ~~**E2E 공통 하네스**~~ ✅ — 구현 `4fe060d`, **§8 기술 통과**(07-24, P0/P1/P2 0건).
+   readiness·cleanup·send_goal·deadline 을 `tools/lib_e2e.sh` 로 추출, readiness "최대 90초"
+   문구·deadline 함수 단일화 (Codex §14.5 P2). 판정 기준 무변경 순수 리팩터로 4 E2E 동일 PASS.
+   기록 = `0723_현황.md §10`, 검토 종결 = `CODEX 현황/0723검토현황.md §8`.
 4. FSM 순수화(상태+이벤트→다음상태+명령 표) — **시나리오 확정 후로 보류** (순서 9에서)
 
 각 단계 완료 게이트 = `TEST_GATES.md` §1 전체 게이트 전량 PASS → 한 커밋+push → Codex 독립 검토.
 세 분리 + Codex 최종 게이트 통과 후에만 platform-core-freeze 태그.
+→ **세 분리는 07-24 로 전부 검토 통과**(§7·§8). 남은 것은 동결 게이트 자체(전량+쌍굴+지도
+evidence, `TEST_GATES.md §7`)와 태그·hash manifest = 순서 5단.
 
 ## 3. 실차 검증 사다리 R0~R8 (통과 전 다음 단계 금지, 전 단계 rosbag 기록)
 

@@ -22,7 +22,8 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (07-24, GoalManager 2/3 + 0723검토 P1 2회 보완): pytest **159 passed** / colcon **165 tests, 0 fail, 2 skip** / E2E 4종 PASS.
+기준선 (07-24, 구조 분리 3/3 완료 시점 — GoalManager P1 2회 보완 + E2E 하네스 추출): pytest **159 passed** / colcon **165 tests, 0 fail, 2 skip** / E2E 4종 PASS.
+(하네스 추출은 순수 리팩터라 개수 무변동 — 0723검토 §8 이 같은 수치로 독립 재현.)
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).
 **갱신을 잊어도 `doc_check.sh` 가 실제 개수와 대조해 잡는다** — 기억이 아니라 기계가 지키는 구조.
 `make_map.sh` 는 이 게이트에 포함하지 않는다 (지도 자산 변경 — 명시 승인 시에만).

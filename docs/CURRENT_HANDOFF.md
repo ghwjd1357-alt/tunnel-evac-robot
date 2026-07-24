@@ -3,69 +3,89 @@
 > 작업 완료 시 구현자가 갱신하고 검토자가 사실관계·테스트 결과를 확인한다.
 > 이전 묶음 내용은 날짜별 현황으로 보낸다. 항상 이 한 묶음만 유지.
 
-- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — E2E 공통 하네스 추출 = 구조 분리 3/3 구현 완료, 07-24)
-- **현재 단계**: 마스터플랜 12단계 중 4단 — 구조 분리 **3/3 E2E 공통 하네스 구현 완료 · Codex 독립 검토 대기**
-  (검토 통과 시 구조 분리 3종 완결 → 5단 platform-core-freeze. 검토 범위 = `docs/TEST_GATES.md §7` 셸 도구).
-- **직전 완료**: E2E 공통 하네스 추출 — `tools/lib_e2e.sh` 신설(cleanup·fail·trap·state·deadline·
-  wait_nav2_ready·send_goal 공통화), 4개 E2E 가 source 로 교체. 판정 기준(PASS·오차·타임아웃) 무변경
-  순수 리팩터, 4 E2E 전부 리팩터 전과 동일 PASS(abort 0.0m·3goals 0.138m·negative 금지3 ABORTED·
-  mission ESCAPED). 구현 기록 = `0723_현황.md §10`. (선행 GoalManager 2/3 는 §7 검토 통과 —
-  `CODEX 현황/0723검토현황.md §7`.)
+- **현재 기준 커밋**: 이 파일과 같은 커밋 (main — 구조 분리 3종 전부 독립 검토 통과, 07-24)
+- **현재 단계**: 마스터플랜 12단계 중 **5단 platform-core-freeze 착수** (동결 게이트 + release tag).
+  4단 구조 분리 3종은 전부 Codex 독립 검토 통과로 **종료**됐다.
+- **직전 완료**: E2E 공통 하네스 3/3 (`4fe060d`) — **0723검토 §8 에서 P0/P1/P2 0건 기술 통과**
+  (`CODEX 현황/0723검토현황.md §8`: 셸 5파일 `bash -n`, 공통 함수 표적 프로브, pytest 159,
+  colcon 165, `doc_check --strict`/`--after-push` 전부 PASS). 구조 분리 3종 종결 =
+  SpeedManager `f94da44`(+보완 6회) / GoalManager `9a03d1f`(+P1 보완 2회, §7 통과) /
+  하네스 `4fe060d`(§8 통과). 구현 기록 = `0723_현황.md §10`.
 
-## 이번 한 묶음 목표 — E2E 공통 하네스 추출 (구조 분리 3/3)
+## 이번 한 묶음 목표 — platform-core-freeze (동결 게이트 + release tag)
 
-> ✅ **구현 완료 (07-24)** — `tools/lib_e2e.sh` 추출, 4 E2E 동일 PASS (`0723_현황.md §10`).
-> 아래는 이 묶음의 요구·검토 기준(검토자 참조용). Codex 독립 검토(범위 `docs/TEST_GATES.md §7`)
-> 통과 시 → 구조 분리 3종 완결 → platform-core-freeze.
+"주행·정지·목표·속도·지도·고장 처리의 **기반**이 완성됐다"를 선언하고, 실차에서 문제가 났을 때
+**되돌아갈 기준점**을 못 박는 단계다 (`MASTER_PLAN.md §1` 5단 · 정의 `PROJECT_CONTEXT.md §6` ·
+근거 `0719_실차전환_마스터플랜.md §7.1`).
 
-readiness 활성 대기·프로세스 cleanup·`send_goal` 재전송·deadline 계산을 4개 E2E 스크립트
-(`mission_e2e`·`abort_e2e`·`regression_negative`·`regression_3goals`)가 각자 복붙하고 있다.
-이를 **셸 함수 라이브러리 하나로 추출**해 중복을 없애고, readiness "최대 90초" 문구·deadline
-함수를 한 곳으로 통일한다 (Codex §14.5 P2 — `MASTER_PLAN.md §7`).
+★ 이 묶음은 **코드를 더 쓰는 묶음이 아니라 증거를 모아 태그로 고정하는 묶음**이다.
+동결 후 platform-core 코드는 **실차 이슈 대응 외에는 손대지 않는다** (미션 시나리오는 별도 트랙).
 
 ## 완료조건
 
-1. 공통 셸 함수 라이브러리(예: `tools/lib_e2e.sh`)를 신설하고 4개 E2E 스크립트가 그것을
-   source 해서 쓴다: 프로세스 cleanup(부모 launch 먼저 → nav2 → gazebo, 브래킷 트릭),
-   Nav2 readiness 대기(단일 함수·단일 문구), goal send + 응답 대기, deadline/경과시간 계산.
-2. readiness "최대 90초" 문구와 deadline 함수를 라이브러리 한 곳에만 둔다(중복 제거).
-3. E2E 판정 기준(PASS 조건·허용 오차·타임아웃)은 **한 글자도 바꾸지 않는다** — 순수 리팩터.
-4. 4개 E2E가 리팩터 전과 동일하게 PASS하는지 각각 실행해 확인한다(수치 회귀 기록).
-5. `bash -n`(문법)과 shellcheck(있으면)로 각 스크립트를 검사한다.
+1. **동결 게이트 전량 PASS** — `TEST_GATES.md §1` 전량(pytest · colcon test · colcon
+   test-result · E2E 4종) **+ 쌍굴 mission**(`bash tools/mission_e2e.sh twin`) **+ 지도 승격
+   evidence**. 이 3종 묶음이 `TEST_GATES.md §7` 표의 **동결 게이트** 행이다.
+   실패 시 `TEST_GATES.md §5` 로 **원인 한 줄 분류 전 재실행 금지**.
+2. **지도 evidence 는 실런 없이 재확인** — 현재 정본 `maps/tunnel_localization.posegraph` ·
+   `maps/tunnel_localization.data` 의 sha256 이 `maps/tunnel_localization.manifest.txt` 기록과
+   일치하는지 대조하고, 그 대조 결과를 evidence 로 남긴다(불일치 = **동결 중단**, 원인 규명 먼저).
+   ⚠ `make_map.sh` 실런은 이 묶음에 없다 — 새 지도 제작이 필요하다는 판단이 서면 **사용자 명시
+   승인**을 받아 별도 묶음으로 분리한다 (`AGENTS.md §5` · `TEST_GATES.md §4`).
+3. **hash manifest 신설** (파일 1개, 예 **docs/FREEZE_MANIFEST.md** — 아직 없는 파일이라
+   백틱 참조로 쓰지 않는다: `doc_check.sh` 는 백틱 안 `*.md` 를 "실재해야 할 문서"로 검사한다) — 최소 항목:
+   태그 대상 커밋 해시 / 지도 정본 sha256(§2 대조값 + `tunnel_map_loc`·`twin_*` 포함) /
+   설정·URDF sha256(`src/tunnel_sim/config/*.yaml` · `src/tunnel_sim/urdf/robot.urdf`) /
+   **`src/sllidar_ros2` upstream commit** / 게이트 결과 수치.
+   ★ `src/sllidar_ros2` 는 `.gitignore` 대상이라 **git 스냅샷에 없다** — 해시를 손으로 남기지
+   않으면 동결 시점 구성을 재현할 수 없다 (0719 종료 게이트가 "sllidar commit"을 명시한 이유).
+4. 기록·문서 동기화 → **한 커밋 + push** (= 검토 대상 커밋): `0723_현황.md` 다음 절에 게이트
+   수치 전량·남은 위험·구현자 주장, `MASTER_PLAN.md §1` 5단 ✅, `TEST_GATES.md §1` 기준선,
+   `bash tools/doc_check.sh --strict` → 커밋+push → `bash tools/doc_check.sh --after-push`.
+5. **Codex 독립 검토(동결 판정) 통과** — 검토 범위는 `TEST_GATES.md §7` 동결 게이트 행(전량 +
+   쌍굴 + 지도 승격 evidence). 이 묶음은 검토 통과로만 닫힌다.
+6. 통과 후 **annotated tag** `platform-core-freeze-YYMMDD`(실제 태그일) 를 그 커밋에 붙이고
+   `git push --tags`. 태그 메시지 = 게이트 결과 요약 한 화면.
+   ★ 태그는 **검토 통과 뒤에** 붙인다 — 불승인 커밋에 동결 태그가 남으면 기준점이 오염된다.
 
 ## 허용 파일/범위
 
-- `tools/lib_e2e.sh` (신설) 또는 유사 공통 라이브러리
-- `tools/mission_e2e.sh` · `tools/abort_e2e.sh` · `tools/regression_negative.sh` ·
-  `tools/regression_3goals.sh` (공통부 추출·source 로 교체)
+- **docs/FREEZE_MANIFEST.md**(신설) · `docs/MASTER_PLAN.md` · `docs/TEST_GATES.md` ·
+  `docs/CURRENT_HANDOFF.md` · `docs/PROJECT_CONTEXT.md`(동결 표기) · `~/Desktop/개발현황/0723_현황.md`
+- git tag 생성/push (코드 변경 없음)
 
 ## 금지 범위
 
-`mission_node.py`·`speed_manager.py`·`goal_manager.py` 동작 변경, Nav2 파라미터·costmap·
-planner·지도 자산·`make_map.sh` 실런을 섞지 않는다. E2E 판정 기준(PASS 조건·허용치·타임아웃)
-변경 금지 — 셸 중복 제거만.
+- **코드·설정 동작 변경 금지** — 게이트 중 결함이 나오면 **별도 묶음**으로 분리해 고친 뒤 다시
+  게이트를 돌린다. 동결 커밋에 수정을 섞지 않는다(동결의 의미가 사라진다).
+- `make_map.sh` 실런 금지(완료조건 2), Nav2 파라미터·costmap·planner·지도 자산 변경 금지.
+- 게이트 실패를 원인 분류 없이 재실행 금지(flake 은폐), Gazebo E2E 동시 실행 금지.
 
 ## 보존해야 할 안전 불변조건
 
-- cleanup 은 부모(`ros2 launch`)부터 kill → `pkill -9 -f "lib/nav2[_]"` (좀비 bt_navigator
-  가로챔 방지, `AGENTS.md §4`). 브래킷 트릭으로 자기 매칭 자살 금지.
-- 각 E2E 의 완료 판정(abort 실정지·3goals 오차≤0.3m·negative 3종 ABORTED·mission ESCAPED)
-  기준은 리팩터 전후 동일해야 한다.
-- Gazebo E2E 는 어떤 worktree 에서도 동시 실행 금지 (전역 프로세스 cleanup 충돌).
+- E2E cleanup 은 부모(`ros2 launch`)부터 kill → `pkill -9 -f "lib/nav2[_]"`, 브래킷 트릭
+  (`AGENTS.md §4`). 좀비 bt_navigator 가 goal 을 가로채면 게이트 결과 자체가 무효다.
+- 각 E2E 판정 기준(abort 실정지 ≤0.10m · 3goals ≤0.3m · negative 금지 3종 ABORTED ·
+  mission ESCAPED)은 동결 게이트에서도 그대로다 — 통과시키려고 완화하지 않는다.
+- 지도 정본은 `map_promote.sh` fail-closed transaction 밖에서 손으로 교체하지 않는다.
 
 ## 완료 판정 + 필수 테스트
 
-변경 직후 `bash -n` 전 스크립트, 묶음 완료 시 `TEST_GATES.md §1` 전량(E2E 4종)을 순차 실행해
-리팩터 전과 동일 PASS를 확인한다. 테스트 수치·남은 위험을 `0723_현황.md` 다음 절에 기록하고,
-`bash tools/doc_check.sh --strict` → 한 커밋+push → `bash tools/doc_check.sh --after-push`
-순서를 지킨다. 검토자 실행 범위는 `TEST_GATES.md §7`(셸 도구 변경 = `doc_check` + `bash -n`).
+**한 문장 완료판정**: "`TEST_GATES.md §1` 전량 + 쌍굴 mission + 지도 hash 대조가 전부 PASS 한
+커밋에, hash manifest 와 `platform-core-freeze-*` annotated tag 가 붙어 원격에 push 되어 있다."
+
+실행 순서 = `TEST_GATES.md §1` 그대로 + `bash tools/mission_e2e.sh twin` + 지도 sha256 대조.
+E2E 는 **동시 실행 금지** — 한 스크립트 완전 종료 후 다음.
 
 ## 완료 후 다음 단계
 
-E2E 하네스 독립 검토 통과 → 구조 분리 3종 완료 → **platform-core-freeze**
-(release tag + hash manifest, `MASTER_PLAN.md §1` 5단계).
+6단 **역할 B V1 최소 계약 세부 확정**(필드·주기·실패 표현 — 병렬 진행 가능, `PROJECT_CONTEXT.md §4`)
+→ 7단 **실차 R0~R8**(`MASTER_PLAN.md §3`, 트리거 = 구동부 "3m 직진 오차 3% 이내" 선언).
+동결 후 트랙이 갈리므로, 동결 커밋 해시를 다음 핸드오프 첫 줄에 남긴다.
 
 ## 근거 문서
 
-`docs/MASTER_PLAN.md §2` · `docs/MASTER_PLAN.md §7` · `docs/TEST_GATES.md §1` ·
-`docs/PITFALLS.md §1` · `~/Desktop/개발현황/0723_현황.md §1`
+`docs/MASTER_PLAN.md §1` · `docs/MASTER_PLAN.md §2` · `docs/TEST_GATES.md §1` ·
+`docs/TEST_GATES.md §7` · `docs/TEST_GATES.md §4` · `docs/PROJECT_CONTEXT.md §6` ·
+`~/Desktop/개발현황/0719_실차전환_마스터플랜.md §7.1` ·
+`~/Desktop/개발현황/CODEX 현황/0723검토현황.md §8` · `~/Desktop/개발현황/0723_현황.md §10`
