@@ -42,6 +42,21 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 | mission_e2e | 미션 전체 흐름 | GUIDE 0.12 실측 → SEARCH_BACK → 재발견 → ESCAPED |
 | abort_e2e | "취소 호출"≠"실제 정지" 검증 | FAULT + 5초 이동 ≤0.10m + nonzero cmd_vel 0 (angular.z 포함) + 취소 접수 로그 |
 
+★ **mission_e2e SEARCH_BACK 예산 = 180s** (`T_SEARCHBACK`, T자·쌍굴 공통 — 07-24 e2e-harness-fix
+재산정, **옛 90s 대체**). 근거는 아래 둘을 함께 남긴다(둘 중 하나만으론 '숫자만 올린 기준 완화'다):
+- **관측 도달 분포**: 표준환경 신규 7회(T자 3·쌍굴 4) 전부 **9s** 로 수렴. 역사 표본은 **9s ~ ≈90s**
+  (daemon flake·Nav2 플래닝 지연 환경 — `FREEZE_MANIFEST.md §8`). GATHER 도달은 T자 9s·쌍굴 45~48s
+  (역사 48/126/48). 변동성은 지형이 아니라 인프라 상태에 좌우돼 강제 재현이 어렵고, 역사 outlier 가
+  최악을 실증한다.
+- **상한이 보호하는 것**: "미션은 건강한데 팔로워 간격 벌어짐(≥(2.5−1.2)/0.12 ≈ 11s) + `lost_sec` 3s
+  디바운스 + 재플래닝·goal 재전송 지연 + detection flicker 로 놓침 확정이 늦어지는 최악". 관측 최악
+  ≈90s(옛 예산 경계에서 스쳐 실패)의 **2배 마진**. 이 상한을 넘으면 '건강한 지연'이 아니라 놓침이
+  구조적으로 확정 안 되는 이상(follower `stop` 미수신·`lost` 미발화)이므로 **여전히 FAIL** 해야 한다.
+  실측 부정 회귀: `T_SEARCHBACK=3` 으로 도달 불가 시 `FAIL: SEARCH_BACK 대기 타임아웃(3s), 마지막
+  상태='GUIDE'` — 타임아웃 판정과 '마지막 상태' 보고가 같은 읽기라 자기모순이 없다(옛 폴링 race 제거).
+- ⚠ 이 예산은 **판정 기준**이라 동결 태그 `platform-core-freeze-260724` 의 게이트 수치는 **옛 90s
+  기준**으로 얻은 것이다 — 두 기준의 구분은 `FREEZE_MANIFEST.md §8`.
+
 변경 영역별 최소 조합: 코드 변경 = pytest 무조건 + 해당 영역 E2E / goal·취소·미션 명령 = +abort_e2e /
 안전 정책·Nav2 설정·정본 지도 수동 교체 = +negative / 구조 분리 묶음 완료 = §1 전량.
 

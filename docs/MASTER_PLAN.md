@@ -102,12 +102,12 @@
    없어 cmd_vel 이 끊기면 마지막 속도를 무한 유지한다. 실차는 R0 통과조건에 watchdog(단절 0.5s 내
    정지)이 있으나 **아직 실측 전** — R0 실측 결과를 받은 뒤 시뮬 쪽 정합을 결정한다.
    ⚠ 동결의 §6 수용은 이 R0 실측 통과를 전제로 한 **조건부** 수용이다 (`docs/FREEZE_MANIFEST.md §6`).
-6. **`mission_e2e.sh` ⑦ `ros2 param get` 에 타임아웃 가드** — 가드가 없어 13분 27초 무한 행이
-   실측됐다(07-24 쌍굴 3회차). 같은 파일 `wait_state`·readiness 는 이미 방어가 있는데 이 줄만
-   무방비다. **T자·쌍굴 공통 파일**이라 T자도 같은 위험을 갖는다 (`0723_현황.md §11.5.2`).
-7. **`mission_e2e.sh` ⑧ SEARCH_BACK 90초 예산 재산정** — 놓침 확정까지 9s~≈90s 로 흔들려 경계
-   실패가 실측됐다(07-24 쌍굴 2회차). 판정 기준이므로 근거 수치를 모아 별도 묶음에서 조정
-   (`0723_현황.md §11.5.1`).
+6. ~~**`mission_e2e.sh` ⑦ `ros2 param get` 타임아웃 가드**~~ ✅ **07-24 e2e-harness-fix 완료** —
+   `read_param_float`(timeout 8 + daemon 재시작 1회) + `-w 1` pub 3종 timeout 가드
+   (`docs/FREEZE_MANIFEST.md §8.1` · `0723_현황.md §15`).
+7. ~~**`mission_e2e.sh` ⑧ SEARCH_BACK 90초 예산 재산정**~~ ✅ **07-24 완료** — 폴링 race 제거(⑧-a) +
+   예산 **90s→180s** 재산정(⑧-b, 관측 최악 ≈90s 2배 마진, 근거·분포 = `docs/TEST_GATES.md §2`,
+   판정기준 변경 고지 = `docs/FREEZE_MANIFEST.md §8.1`).
 
 ## 8. 유효 결정 색인 (한 줄씩 — 상세 근거는 링크 절. 100줄 초과 시 별도 파일로 분리)
 
@@ -138,4 +138,5 @@
 | **platform-core 동결 기준점 = `212885a` / tag `platform-core-freeze-260724`** — 이후 platform-core 는 실차 이슈 대응 외 변경 금지 (미션 시나리오는 별도 트랙) | 07-24 | `docs/FREEZE_MANIFEST.md §1` |
 | 동결의 잔류 cmd_vel 위험은 "해소"가 아니라 **R0 watchdog 실측 통과를 전제한 조건부 수용** — R0 미통과 시 재개방 (시뮬 abort PASS 는 실차 조건을 대신 증명하지 않는다) | 07-24 | `docs/FREEZE_MANIFEST.md §6` |
 | 동결 게이트 중 발견된 결함은 동결 커밋에 섞지 않고 예약(§7 6·7)으로 분리 — 동결 커밋은 **증거만** 담는다 | 07-24 | `docs/FREEZE_MANIFEST.md §8` |
+| E2E 하네스 판정 기준은 근거(관측 분포 + 상한의 의미) 없이 올리지 않는다 — SEARCH_BACK 예산 90s→180s 는 관측 최악 ≈90s 2배 마진, 도달 실패는 여전히 FAIL | 07-24 | `docs/TEST_GATES.md §2` · `docs/FREEZE_MANIFEST.md §8.1` |
 | 통과한 회차만 인용하지 않는다 — 쌍굴 4회(2 PASS / 2 FAIL) 전량을 동결 증거에 공개 기록 | 07-24 | `docs/FREEZE_MANIFEST.md §8` |

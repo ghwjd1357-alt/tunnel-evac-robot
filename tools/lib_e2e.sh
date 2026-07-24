@@ -69,6 +69,24 @@ state() {
     | sed -n 's/^data: //p' | head -1
 }
 
+# --- 파라미터 float 1개 읽기 (timeout + daemon 재시작 1회 재시도) -------------
+# ★ ⑦ (07-24 e2e-harness-fix): `ros2 param get` 은 CLI/daemon flake(§5 ③) 때
+#   무한 행할 수 있다 — 무방비 호출이 쌍굴 3회차에서 13분 27초 매달렸다
+#   (FREEZE_MANIFEST §8). readiness 관문(`timeout 8`)·`wait_state`(빈 읽기 시 daemon
+#   재시작)가 이미 쓰는 방어를 이 조회에도 단일화한다: 매 조회 `timeout 8`, 빈 결과면
+#   `ros2 daemon` 재시작 1회 후 재시도. 두 번 다 비면 '' 를 돌려준다(상한 ≈19s).
+#   ⚠ 여기서 보장하는 것은 '유한 시간에 읽거나 포기'뿐이다 — 읽은 값이 옳은지의 판정은
+#   호출자 몫이다. '못 읽음(§5 ③ 인프라)'과 '값이 틀림(코드 결함)'을 뒤섞지 않기 위함.
+read_param_float() {  # $1=노드 $2=파라미터명 → float 문자열(예: 0.12) 또는 '' (읽기 실패)
+  local out
+  out=$(timeout 8 ros2 param get "$1" "$2" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  if [ -z "$out" ]; then
+    ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+    out=$(timeout 8 ros2 param get "$1" "$2" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  fi
+  printf '%s' "$out"
+}
+
 # --- Nav2 활성화 대기 (4개 스크립트 공통 — "최대 90초" 문구 단일 출처) --------
 # 3단 관문: ① controller_server 파라미터 존재 → ② bt_navigator lifecycle active →
 #   ③ navigate_to_pose action 서버 discovery. 셋은 '한 번' 찍은 기준시각(deadline_start)

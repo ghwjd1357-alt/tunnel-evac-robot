@@ -41,12 +41,14 @@ if [ "$MODE" = "twin" ]; then
   ESCAPE_WORLD="(-17, 0)"        # 탈출구 = 스폰 지점 (world)
   # 쌍굴은 순찰 루프가 길어(굴 2개 순회) 상태 대기 상한을 늘린다
   T_GATHER=420; T_ESCAPED=600
+  T_SEARCHBACK=180   # ⑧-b 재산정(07-24): 관측 최악 ≈90s 의 2배 마진 — 분포·근거 = TEST_GATES §2
 else
   WORLD_ARGS=()
   WAYPOINTS_FILE=""              # 빈값 = mission_node 기본(waypoints.yaml)
   FIRE_X=14.0; FIRE_Y=0.0
   ESCAPE_WORLD="(-12, 0)"
   T_GATHER=240; T_ESCAPED=300
+  T_SEARCHBACK=180   # ⑧-b 재산정(07-24): 관측 최악 ≈90s 의 2배 마진 — 분포·근거 = TEST_GATES §2
 fi
 
 EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localization:=false)
@@ -57,10 +59,20 @@ wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재�
   # ★ F7 방어 (07-19 실측): CLI echo 가 240초 내내 빈값('')인 flake —
   #   미션 노드 로그는 전 상태 정상 진행 = 코드 아닌 ros2 CLI/데몬 결함.
   #   빈 읽기 5연속(≈15s)이면 daemon 재시작 1회로 자가 복구 시도.
+  # ★ ⑧-a 폴링 race 봉쇄 (07-24 e2e-harness-fix): 예산 안에 목표 상태에 도달했으면
+  #   폴링 격자와 무관하게 PASS, 못 하면 FAIL — 두 메시지가 서로 모순되지 않는다.
+  #   핵심: 타임아웃 판정과 '마지막 상태' 보고를 **같은 읽기(s)** 로 한다. 구판은 루프
+  #   종료 뒤 fail 이 상태를 한 번 더 독립적으로 읽어, 그 사이 전이가 일어나면 "타임아웃
+  #   인데 마지막 상태는 목표 상태"라는 자기모순을 냈다 (쌍굴 2회차, FREEZE_MANIFEST §8).
+  #   while:(무한) 로 바꿔 t≥예산 시점의 마지막 읽기까지 판정에 포함시킨다(경계 t 재확인).
   local t=0 s empty=0 kicked=0
-  while [ "$t" -lt "$2" ]; do
+  while :; do
     s=$(state)
     if [ "$s" = "$1" ]; then echo "  ✓ $1 도달 (${t}s)"; return 0; fi
+    if [ "$t" -ge "$2" ]; then
+      # 판정에 쓴 그 읽기(s)를 그대로 보고 — 독립 재읽기 금지(모순의 원천)
+      fail "$1 대기 타임아웃(${2}s), 마지막 상태='$s'"
+    fi
     if [ -z "$s" ]; then
       empty=$((empty+1))
       if [ "$empty" -ge 5 ] && [ "$kicked" = 0 ]; then
@@ -73,7 +85,6 @@ wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재�
     fi
     sleep 3; t=$((t+3))
   done
-  fail "$1 대기 타임아웃(${2}s), 마지막 상태='$(state)'"
 }
 
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
@@ -106,7 +117,10 @@ echo "== ⑤ 🔥 화재 알람 발사 → APPROACH"
 # ★ 알람은 상태 전이 확인까지 재시도 (07-07): -w 1 + --times 로도 간헐 유실 실측
 #   (mission.log 에 '알람' 0건). 전이 안 됐으면 그냥 한 번 더 쏘면 되는 멱등 신호.
 for try in 1 2 3; do
-  ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
+  # ⑦ 스윕 (07-24): -w 1 은 구독자 매칭까지 블록한다 — 미들웨어 이상 시 무한 대기 가능
+  #   (param get 과 같은 실패양식). 구독자(mission_node)는 정상 시 즉시 뜨므로 happy path
+  #   영향 0, 병리 시 timeout 으로 상한을 씌운다. --times 로도 이미 유한하지만 이중 방어.
+  timeout 12 ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
     "{header: {frame_id: map}, pose: {position: {x: $FIRE_X, y: $FIRE_Y}}}" >/dev/null 2>&1
   sleep 4
   [ "$(state)" = "APPROACH" ] && break
@@ -122,25 +136,31 @@ echo "== ⑦ 유도 15초 진행 후 놓침 재현 (follower stop)"
 sleep 5
 # ★ S1-5 (07-19): 상태 전이만 보지 말고 GUIDE 저속이 '실제로' 적용됐는지 —
 #   set_nav_speed 요청이 조용히 실패하면 사람 걸음 배려 없이 0.26 으로 유도하는 구멍
-v=$(ros2 param get /controller_server FollowPath.desired_linear_vel 2>/dev/null \
-    | grep -oE '[0-9]+\.[0-9]+')
-if [ "$v" = "0.12" ]; then
+# ★ ⑦ 타임아웃 가드 (07-24 e2e-harness-fix): 구판은 이 param get 이 무방비라 CLI/daemon
+#   flake(§5 ③) 때 13분 27초 무한 행이 실측됐다(쌍굴 3회차, FREEZE_MANIFEST §8).
+#   read_param_float 가 timeout 8 + daemon 재시작 1회 재시도로 상한(≈19s)을 씌운다.
+#   ⚠ '못 읽음(§5 ③ 인프라)'과 '값이 틀림(S1-5 코드 결함)'을 절대 뒤섞지 않는다 —
+#   빈 결과는 인프라 결함으로 분류해 FAIL(조용한 통과 없음), 값이 있으면 0.12 비교로 판정.
+v=$(read_param_float /controller_server FollowPath.desired_linear_vel)
+if [ -z "$v" ]; then
+  fail "desired_linear_vel 조회 무응답 — ros2 param CLI/daemon 결함(§5 ③), timeout+daemon 재시작 재시도도 실패(상한 ≈19s)"
+elif [ "$v" = "0.12" ]; then
   echo "  ✓ GUIDE 저속 0.12 m/s 실측 확인"
 else
   fail "GUIDE 중 desired_linear_vel=$v ≠ 0.12 (속도 변경 미적용 — S1-5)"
 fi
 sleep 10
-ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
-  "{data: stop}" >/dev/null 2>&1
+timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
+  "{data: stop}" >/dev/null 2>&1   # ⑦ 스윕: -w 1 블록 방지 timeout (구독자=fake_follower)
 grep -q "stop" "$LOGDIR/follower.log" || echo "  (경고: follower 로그에 stop 미확인)"
 
 echo "== ⑧ SEARCH_BACK 진입 대기 (거리 벌어짐 + 3초 디바운스)"
-wait_state SEARCH_BACK 90
+wait_state SEARCH_BACK "$T_SEARCHBACK"
 
 echo "== ⑨ 추종 재개 (follow) → 재발견 → GUIDE 복귀"
 sleep 3
-ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
-  "{data: follow}" >/dev/null 2>&1
+timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
+  "{data: follow}" >/dev/null 2>&1   # ⑦ 스윕: -w 1 블록 방지 timeout (구독자=fake_follower)
 wait_state GUIDE 120
 grep -q "재발견" "$LOGDIR/mission.log" && echo "  ✓ 미션 로그에 '재발견' 확인"
 
