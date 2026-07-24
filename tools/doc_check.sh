@@ -179,21 +179,28 @@ done
 #   07-24 실사고(Codex 0723검토 §10 P2): manifest 가 "CURRENT_HANDOFF 완료조건 6"을
 #   태그 순서의 근거로 걸어 뒀는데, 같은 커밋이 핸드오프를 교체해 그 번호가 무관한
 #   항목이 됐다. 위 5·6번 검사는 링크와 절의 '존재'만 보므로 이 의미 드리프트를 PASS 했다.
-# 허용 = ① 커밋 고정 형태(git show <hash>:docs/CURRENT_HANDOFF.md)
-#        ② 내용 인용 없이 파일명만 언급 (구조 설명 등)
-# ⚠ 한계: 검출 대상은 docs/*MANIFEST*.md 다 — 새 영구 증거 문서는 이 이름 규칙을 따를 것.
+# 허용 = ① 그 핸드오프 경로 자체가 해시로 고정된 참조(git show <hash>:docs/CURRENT_HANDOFF.md)
+#        ② 내용 인용 없이 파일명만 언급 (파일 생명주기 설명 등)
+#
+# ★ 07-24 개정 (Codex 0723검토 §11.2 P2) — 초판은 **줄 단위**로 검사해 두 가지로 우회됐다:
+#   ⓐ Markdown 은 폭에 맞춰 줄을 바꾸므로 'CURRENT_HANDOFF' 와 절 이름이 다른 줄에 놓이면 놓쳤다.
+#   ⓑ 무관한 `git show <hash>:README.md` 가 같은 줄 앞에 있기만 해도 줄 전체가 예외 처리됐다.
+#   → ⓐ 공백을 한 칸으로 정규화해 **줄바꿈 위치와 무관**하게 보고,
+#     ⓑ 예외를 '핸드오프 경로 자체가 고정된 참조'로 좁혀 **그 참조만 지운 뒤** 남은 것을 검사한다.
+# ⚠ 한계 2가지 (은폐하지 않는다):
+#   · 검출 대상은 docs/*MANIFEST*.md — 새 영구 증거 문서는 이 이름 규칙을 따를 것.
+#   · 근접 창(HWIN)보다 멀리 떨어뜨려 쓰면 놓친다. 창은 '표현을 바꿔 우회'까지 막지는 못한다.
 HSEC='완료조건|금지 범위|허용 파일|완료 판정|이번 한 묶음|현재 단계'
+HWIN=120        # 근접 창(정규화 후 문자 수) ≈ 줄바꿈으로 갈라진 인접 1~2줄
 DRIFT=""
 for f in docs/*MANIFEST*.md; do
     [ -f "$f" ] || continue
-    while IFS= read -r hit; do
-        txt="${hit#*:}"
-        # 커밋을 고정한 참조는 불변이므로 통과
-        printf '%s' "$txt" | grep -qP 'git show +[0-9a-f]{7,40}:' && continue
-        printf '%s' "$txt" \
-            | grep -qP "(CURRENT_HANDOFF.*($HSEC))|(($HSEC).*CURRENT_HANDOFF)" \
-            && DRIFT="$DRIFT $f:${hit%%:*}"
-    done < <(grep -n 'CURRENT_HANDOFF' "$f")
+    # ① 줄바꿈·들여쓰기를 한 칸으로 정규화  ② 해시 고정된 핸드오프 참조는 통째로 제거
+    hit=$(tr -s '[:space:]' ' ' < "$f" \
+          | sed -E 's#git show +[0-9a-f]{7,40}:[^ ]*CURRENT_HANDOFF[^ ]*##g' \
+          | grep -oP "(CURRENT_HANDOFF.{0,$HWIN}?($HSEC))|(($HSEC).{0,$HWIN}?CURRENT_HANDOFF)" \
+          | head -1)
+    [ -n "$hit" ] && DRIFT="$DRIFT [$f → \"$hit\"]"
 done
 [ -z "$DRIFT" ] && ok "영구 증거가 가변 핸드오프 내용을 인용하지 않음" \
                 || bad "영구 증거가 교체되는 핸드오프 내용을 인용:$DRIFT → 불변 역사 절 또는 커밋 고정(git show <hash>:…)으로 바꿀 것"
