@@ -66,9 +66,10 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 ## 6. 아키텍처 구분 (동결 단위의 근거)
 
 - **platform-core** (모든 시나리오 공통 메커니즘): Nav2 goal 사슬·속도 검증·scan watchdog·알람 신뢰경계·그래프 투영·설정 검증·지도 생명주기·테스트 인프라·관제.
+  ★ **07-24 동결됨** — tag `platform-core-freeze-260724`. 이후 이 영역은 **실차 이슈 대응 외 변경 금지**이며, 변경이 필요하면 근거를 `docs/FREEZE_MANIFEST.md` 기준으로 남긴다.
 - **mission policy** (시나리오 종속): 상태 전이 규칙·대기시간·SEARCH_BACK 정책·E2E 대본.
 - **Perception Adapter** (역할 A 신설 예정): YOLO 원시 관측 → 검증 → FireEvent/PersonEvent → FSM 은 출처 무관 이벤트만 소비. 관제 수동 화재 지정도 별도 출처의 동일 이벤트 (영구 보존).
-- **동결 3단**: `platform-core-freeze`(구조 분리 후) → `mission-logic-RC`(최종 시나리오 확정 후) → `mission-v1-freeze`(Orbbec·YOLO 실측 통합+통제환경 시험 후). 인지 주입만 통과한 상태를 freeze 라 부르지 않는다.
+- **동결 3단**: ✅ `platform-core-freeze`(구조 분리 후 — **07-24 완료**, `212885a`, 증거 `docs/FREEZE_MANIFEST.md`) → `mission-logic-RC`(최종 시나리오 확정 후) → `mission-v1-freeze`(Orbbec·YOLO 실측 통합+통제환경 시험 후). 인지 주입만 통과한 상태를 freeze 라 부르지 않는다.
 - **가상 시나리오 = 제품 사양이 아니라 검증 대본.** 최종 시나리오는 실차 R0~R8 경험 후 확정.
 
 ## 7. ★ 통찰 (왜 시뮬 먼저 하나)
@@ -79,6 +80,7 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 
 **repo 정본 (`~/ros2_ws/`)**: `AGENTS.md`(공통 규칙) · `CLAUDE.md`(Claude 진입점) ·
 `docs/{PROJECT_CONTEXT, MASTER_PLAN, CURRENT_HANDOFF, TEST_GATES, PITFALLS, REAL_ROBOT_VALUES}.md` ·
+**`docs/FREEZE_MANIFEST.md`**(동결 증거 — 해시·게이트 수치·조건부 위험·검토 결과. 07-24 신설) ·
 `docs/legacy/CLAUDE_pre-restructure_0720.md`(개편 전 CLAUDE.md 백업, git `8042464`와 동일).
 
 **Desktop 역사·근거 (`~/Desktop/개발현황/`)**: 날짜별 `06xx/07xx_현황.md`(상세 학습기록) ·
@@ -86,7 +88,8 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 **`0720_현황.md`**(SpeedManager 전용 서사 — §18.3 인계 / §19 구현 / §20 Codex 검토·P1 보완.
 07-20 에 0719 에서 이관, **절 번호 보존**) · `CODEX 현황/0719검토현황.md`(Codex 원문, §14=최종 승인) ·
 `CODEX 현황/0720검토현황.md`(SpeedManager 추출 독립 검토 — P1 1건, GoalManager HOLD) ·
-`CODEX 현황/0723검토현황.md`(GoalManager 2/3 = §7 통과 / E2E 하네스 3/3 = §8 통과 — 구조 분리 종결) ·
+`CODEX 현황/0723검토현황.md`(GoalManager 2/3 = §7 통과 / E2E 하네스 3/3 = §8 통과 — 구조 분리 종결 /
+**§9 = platform-core-freeze 동결 판정 통과, P0·P1·P2 0건**) ·
 `0719_실차전환_마스터플랜.md`(계획 근거·개정 이력 — 실행 정본은 repo MASTER_PLAN) ·
 `0705_실차전_전략.md` · `0707_로드맵_통합계획.md`(구판, 마스터플랜이 개정) · `0718_관제시스템.md`(관제 설계 정본) ·
 `0718_구동부_배선맵핑_검증절차.md` · `실차값_수령체크리스트.md`(구판, `docs/REAL_ROBOT_VALUES.md` 로 이관) ·

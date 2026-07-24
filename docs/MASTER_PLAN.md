@@ -12,7 +12,10 @@
 
 1. ~~G 묶음 봉합~~ ✅ → 2. ~~전체 회귀 녹색 기준선~~ ✅ → 3. ~~중간보고서~~ ✅
 4. ~~SpeedManager → GoalManager → E2E 공통 하네스 단계적 분리~~ ✅ (§2 — 3종 전부 독립 검토 통과, 07-24)
-5. **platform-core-freeze** (release tag + hash manifest)
+5. ~~**platform-core-freeze** (release tag + hash manifest)~~ ✅ **07-24 동결 완료** —
+   tag **`platform-core-freeze-260724`** @ `212885a`, 증거 `docs/FREEZE_MANIFEST.md`,
+   Codex 동결 판정 통과(`CODEX 현황/0723검토현황.md §9`, P0/P1/P2 0건).
+   ★ 이후 platform-core 코드는 **실차 이슈 대응 외에는 손대지 않는다.**
 6. 역할 B V1 최소 계약 확정 — ★ 책임경계 (b) camera-frame 3D 는 07-20 확정, 세부(필드·주기·실패 표현)만 잔여 (병렬 진행 가능)
 7. 가상 시나리오를 검증 대본으로 실차 R0~R8 진행 (§3)
 8. 실차 경험 반영 → 최종 시나리오 확정 (정책 8문항 = §4)
@@ -40,8 +43,9 @@
 
 각 단계 완료 게이트 = `TEST_GATES.md` §1 전체 게이트 전량 PASS → 한 커밋+push → Codex 독립 검토.
 세 분리 + Codex 최종 게이트 통과 후에만 platform-core-freeze 태그.
-→ **세 분리는 07-24 로 전부 검토 통과**(§7·§8). 남은 것은 동결 게이트 자체(전량+쌍굴+지도
-evidence, `TEST_GATES.md §7`)와 태그·hash manifest = 순서 5단.
+→ **세 분리 검토 통과(07-24, §7·§8) → 동결 게이트 전량 PASS → Codex 동결 판정 통과(§9) →
+태그 `platform-core-freeze-260724` 부착으로 이 절 전체가 종결**됐다 (§1 5단 ✅).
+남은 4번(FSM 순수화)은 시나리오 확정 후(순서 9) — **동결 대상이 아니다.**
 
 ## 3. 실차 검증 사다리 R0~R8 (통과 전 다음 단계 금지, 전 단계 rosbag 기록)
 
@@ -131,3 +135,7 @@ evidence, `TEST_GATES.md §7`)와 태그·hash manifest = 순서 5단.
 | FAULT→SEARCH_BACK 자동 재시도 복귀도 `request_guide` 재무장 — GUIDE 만 하면 소진 술어 잔존→즉시 재-FAULT | 07-23 | `0720_현황.md §25.3` |
 | GUIDE·SEARCH_BACK **신규** goal은 `guide_speed_applied=True`에서만 전송 — 일시 표류 중 기존 goal 비취소(§22.3)와 신규 과속 출발 차단을 분리 | 07-23 | `0720_현황.md §26.2` |
 | goal 수명주기(전송·응답·취소확인·stale·유도정지 종결 직렬화 B)는 GoalManager 소유 — 노드는 정책+콜백만. B: 저속상실 취소는 CANCELED 종결 전 신규 goal 재전송 금지, 실패 시 FAULT | 07-23 | `0723_현황.md §1` |
+| **platform-core 동결 기준점 = `212885a` / tag `platform-core-freeze-260724`** — 이후 platform-core 는 실차 이슈 대응 외 변경 금지 (미션 시나리오는 별도 트랙) | 07-24 | `docs/FREEZE_MANIFEST.md §1` |
+| 동결의 잔류 cmd_vel 위험은 "해소"가 아니라 **R0 watchdog 실측 통과를 전제한 조건부 수용** — R0 미통과 시 재개방 (시뮬 abort PASS 는 실차 조건을 대신 증명하지 않는다) | 07-24 | `docs/FREEZE_MANIFEST.md §6` |
+| 동결 게이트 중 발견된 결함은 동결 커밋에 섞지 않고 예약(§7 6·7)으로 분리 — 동결 커밋은 **증거만** 담는다 | 07-24 | `docs/FREEZE_MANIFEST.md §8` |
+| 통과한 회차만 인용하지 않는다 — 쌍굴 4회(2 PASS / 2 FAIL) 전량을 동결 증거에 공개 기록 | 07-24 | `docs/FREEZE_MANIFEST.md §8` |

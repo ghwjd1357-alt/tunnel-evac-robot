@@ -9,12 +9,23 @@
 | 항목 | 값 |
 |---|---|
 | 게이트 실행 기준 커밋 | `a7b9da825b168327a88acca844618bb82a4acfb0` (작업트리 깨끗 — 게이트 중 코드 변경 0) |
-| release tag | `platform-core-freeze-260724` — **Codex 동결 판정 통과 후** 이 manifest 를 담은 커밋에 부착 |
+| **동결 기준점 커밋** ★ | `212885a8292d1e86677d5beeb9f5358d76fe9b40` (이 manifest 최종본 = Codex 승인 대상) |
+| release tag | ✅ **`platform-core-freeze-260724`** — annotated, `212885a` 에 부착 + 원격 push 완료 (2026-07-24) |
 | 게이트 실행일 | 2026-07-24 |
 | 실행 환경 | Ubuntu 22.04 · ROS2 Humble · Gazebo Classic 11.10.2 · 전용 시뮬 PC(노트북 `minwoo`) |
 
-★ 태그는 검토 통과 뒤에 붙인다 — 불승인 커밋에 동결 태그가 남으면 기준점이 오염된다
-(`CURRENT_HANDOFF.md` 완료조건 6).
+★ 태그는 검토 통과 뒤에 붙였다 — 불승인 커밋에 동결 태그가 남으면 기준점이 오염된다
+(`CURRENT_HANDOFF.md` 완료조건 6). 실제 순서 = 검토 통과(§9) → 태그 → 이 문서 갱신.
+
+**되돌아가는 법** (실차에서 문제가 났을 때의 기준점 — 이게 동결의 존재 이유다):
+
+```bash
+git show platform-core-freeze-260724          # 게이트 결과 요약 + 조건부 위험이 태그 메시지에 있다
+git diff platform-core-freeze-260724 --stat   # 동결 이후 무엇이 바뀌었나
+git checkout platform-core-freeze-260724      # 그 시점 소스로 복귀 (detached HEAD — 작업은 브랜치 파서)
+```
+
+⚠ `src/sllidar_ros2` 는 git 밖이라 checkout 으로 안 돌아온다 → §4 의 재획득 명령을 같이 쓴다.
 
 ## 2. 지도 정본 sha256
 
@@ -137,3 +148,38 @@ T자가 통과해 온 것은 여유가 있었을 뿐이다.
 **동결 범위 밖으로 분리한 이유**: 둘 다 판정 기준·도구 변경이라 동결 묶음의 금지 범위에 걸린다
 (`CURRENT_HANDOFF.md` 금지 범위 — "게이트 중 결함이 나오면 별도 묶음"). 후속 =
 `MASTER_PLAN.md §7` 예약 항목 **6·7**. 상세 = `~/Desktop/개발현황/0723_현황.md §11.5`.
+
+## 9. ✅ 독립 검토 결과 (Codex 동결 판정 — 2026-07-24)
+
+정본 = `~/Desktop/개발현황/CODEX 현황/0723검토현황.md §9`. **P0/P1/P2 0건 — 기술 통과.**
+검토 범위 = `TEST_GATES.md §7` 동결 게이트 행(§1 전량 + 쌍굴 + 지도 승격 evidence),
+대상 = `47bc440`(manifest 최초) + `212885a`(GLX 복구 후 재확인·정정).
+
+검토자는 **구현자 수치를 재독해한 것이 아니라 전부 다시 실행**했다 (아래는 검토자 독립 실행값):
+
+| 항목 | 구현자 (§5) | 검토자 독립 재현 (§9.3) |
+|---|---|---|
+| pytest | 159 passed | **159 passed** |
+| colcon test-result | 165 / 0 fail / 2 skip | **165 / 0 fail / 2 skip** |
+| `regression_negative` | PASS, 대조군 0.085m | **PASS**, 대조군 0.079m |
+| `regression_3goals` | PASS, 0.142m | **PASS**, 0.137m |
+| `mission_e2e` (T자) | PASS | **PASS** — ESCAPED 15s |
+| `abort_e2e` | PASS, 실정지 0.0m | **PASS**, 실정지 **0.0m** |
+| `mission_e2e twin` (쌍굴) | PASS, ESCAPED 111s | **PASS**, ESCAPED 114s, world (-16.88, 0.08) |
+| hash evidence | 16/16 MATCH | **16/16 일치** + sllidar commit 일치 |
+
+- 변경 표면 정적 검토: `a7b9da8..212885a` 는 문서 4개뿐, **코드·설정·지도 변경 0건** 확인.
+- 검토자의 Gazebo 5종 로그에도 `X_GLXCreateContext`·`Service /spawn_entity unavailable` **0건**
+  → §7 환경 이탈이 실제로 해소됐음을 제3자가 독립 확인.
+- 검토 중 실패 2건(`regression_negative` 샌드박스 read-only / `abort_e2e` lifecycle 응답 유실)은
+  **원인 한 줄 분류 후에만 재실행**됐고, 대상 커밋의 결함으로 분류할 근거가 없었다
+  (`AGENTS.md §3-6` 준수 — `CODEX 현황/0723검토현황.md §9.4`).
+
+**★ 검토자가 명시적으로 못 박은 것** (`CODEX 현황/0723검토현황.md §9.5`) — 이 문서의 §6·§8 과 동일 취지:
+
+1. §6 잔류 cmd_vel 활주는 "해소"가 아니라 **R0 watchdog 실측 통과 전제의 조건부 수용**이며,
+   **이번 abort PASS 가 그 실차 조건을 대신 증명하지 않는다.** R0 미통과 시 재개방한다.
+2. §8 하네스 결함 2건은 이번 독립 실행에서 재현되지 않았지만 **"수리 완료"로 승격하지 않는다**
+   (`MASTER_PLAN.md §7` 예약 6·7 유지).
+
+즉 **동결 = "결함 0"이 아니라 "무엇을 안고 얼렸는지 양쪽이 같은 문장으로 합의한 상태"**다.
