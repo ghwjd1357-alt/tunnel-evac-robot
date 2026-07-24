@@ -173,6 +173,31 @@ for f in $(grep -rhoP '[0-9]{4}_[가-힣A-Za-z_]+\.md' "${SRC[@]}" 2>/dev/null |
 done
 [ -z "$MISSD" ] && ok "Desktop 역사 문서 참조 유효" || bad "Desktop 에 없는 문서:$MISSD"
 
+# ── 9. 영구 증거 문서가 '가변 핸드오프의 내용'을 근거로 삼지 않는가 ──────
+# CURRENT_HANDOFF 는 묶음마다 통째로 교체된다. 영구 증거(동결 manifest)가 그 파일의
+# 완료조건·금지 범위를 인용하면, 교체되는 순간 같은 문장이 조용히 다른 뜻이 된다.
+#   07-24 실사고(Codex 0723검토 §10 P2): manifest 가 "CURRENT_HANDOFF 완료조건 6"을
+#   태그 순서의 근거로 걸어 뒀는데, 같은 커밋이 핸드오프를 교체해 그 번호가 무관한
+#   항목이 됐다. 위 5·6번 검사는 링크와 절의 '존재'만 보므로 이 의미 드리프트를 PASS 했다.
+# 허용 = ① 커밋 고정 형태(git show <hash>:docs/CURRENT_HANDOFF.md)
+#        ② 내용 인용 없이 파일명만 언급 (구조 설명 등)
+# ⚠ 한계: 검출 대상은 docs/*MANIFEST*.md 다 — 새 영구 증거 문서는 이 이름 규칙을 따를 것.
+HSEC='완료조건|금지 범위|허용 파일|완료 판정|이번 한 묶음|현재 단계'
+DRIFT=""
+for f in docs/*MANIFEST*.md; do
+    [ -f "$f" ] || continue
+    while IFS= read -r hit; do
+        txt="${hit#*:}"
+        # 커밋을 고정한 참조는 불변이므로 통과
+        printf '%s' "$txt" | grep -qP 'git show +[0-9a-f]{7,40}:' && continue
+        printf '%s' "$txt" \
+            | grep -qP "(CURRENT_HANDOFF.*($HSEC))|(($HSEC).*CURRENT_HANDOFF)" \
+            && DRIFT="$DRIFT $f:${hit%%:*}"
+    done < <(grep -n 'CURRENT_HANDOFF' "$f")
+done
+[ -z "$DRIFT" ] && ok "영구 증거가 가변 핸드오프 내용을 인용하지 않음" \
+                || bad "영구 증거가 교체되는 핸드오프 내용을 인용:$DRIFT → 불변 역사 절 또는 커밋 고정(git show <hash>:…)으로 바꿀 것"
+
 # ── 8. 원격 동기 (커밋 직전 기준 — 새 커밋은 --after-push 로 재확인) ─────
 remote_check
 
