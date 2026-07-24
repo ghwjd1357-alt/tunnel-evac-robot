@@ -64,27 +64,72 @@ deadline_exceeded() { [ $(( SECONDS - E2E_T0 )) -ge "$1" ]; }
 
 # --- 미션 상태 1개 읽기 (mission_e2e·abort_e2e 공용) -------------------------
 # /mission_state 는 2Hz 발행이라 3초 timeout 이면 1개 읽기에 충분하다.
-state() {
-  timeout 3 ros2 topic echo /mission_state --once 2>/dev/null \
+# ★ 07-24 §14 P1: timeout 을 인자로 받는다(기본 3). wait_state 가 '남은 예산'만큼만
+#   읽어 벽시계 deadline 을 넘기지 않게 하려는 것 — 인자 없이 부르는 abort_e2e 는 기본 3 유지.
+state() {  # $1=timeout 초 (기본 3)
+  timeout "${1:-3}" ros2 topic echo /mission_state --once 2>/dev/null \
     | sed -n 's/^data: //p' | head -1
 }
 
-# --- 파라미터 float 1개 읽기 (timeout + daemon 재시작 1회 재시도) -------------
+# --- 파라미터 float 1개 읽기 (복구 시퀀스 전체에 유한 상한) --------------------
 # ★ ⑦ (07-24 e2e-harness-fix): `ros2 param get` 은 CLI/daemon flake(§5 ③) 때
-#   무한 행할 수 있다 — 무방비 호출이 쌍굴 3회차에서 13분 27초 매달렸다
-#   (FREEZE_MANIFEST §8). readiness 관문(`timeout 8`)·`wait_state`(빈 읽기 시 daemon
-#   재시작)가 이미 쓰는 방어를 이 조회에도 단일화한다: 매 조회 `timeout 8`, 빈 결과면
-#   `ros2 daemon` 재시작 1회 후 재시도. 두 번 다 비면 '' 를 돌려준다(상한 ≈19s).
+#   무한 행할 수 있다 — 무방비 호출이 쌍굴 3회차에서 13분 27초 매달렸다 (FREEZE_MANIFEST §8).
+# ★ 07-24 §14 P1 보완: 복구용 `ros2 daemon stop/start` **자체도** 같은 무한 행 표면이었다
+#   (원 결함이 daemon flake인데 복구 명령을 무방비로 부르면 도로아미타불). param get 8초 +
+#   daemon stop/start 각 5초 + 재시도 param get 8초 = **복구 시퀀스 전체 상한 ≈26s** 로 못 박는다.
 #   ⚠ 여기서 보장하는 것은 '유한 시간에 읽거나 포기'뿐이다 — 읽은 값이 옳은지의 판정은
 #   호출자 몫이다. '못 읽음(§5 ③ 인프라)'과 '값이 틀림(코드 결함)'을 뒤섞지 않기 위함.
 read_param_float() {  # $1=노드 $2=파라미터명 → float 문자열(예: 0.12) 또는 '' (읽기 실패)
   local out
   out=$(timeout 8 ros2 param get "$1" "$2" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
   if [ -z "$out" ]; then
-    ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+    timeout 5 ros2 daemon stop  >/dev/null 2>&1   # ★ 복구 명령도 유한 timeout
+    timeout 5 ros2 daemon start >/dev/null 2>&1
     out=$(timeout 8 ros2 param get "$1" "$2" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
   fi
   printf '%s' "$out"
+}
+
+# --- 미션 상태가 목표에 도달할 때까지 대기 (벽시계 deadline — mission_e2e 전용) ---
+# ★ 07-24 §14 P1 보완: 예산 $2 를 sleep 누적이 아니라 '벽시계 실경과'(SECONDS-t0)로 잰다.
+#   구판은 `t += sleep 3` 만 세고 state()가 timeout 을 소비한 시간을 빼먹어, state 가 매번
+#   3초 걸리는 flake 에서 선언 3초 예산이 벽시계 9초까지 늘었다(재현됨). 게다가 빈 읽기 시
+#   daemon 재시작이 무방비라 걸리면 무한대였다. 불변식:
+#   ① 예산 안(el<$2)에 목표면 PASS, el≥$2 면 FAIL — 판정과 '마지막 상태' 보고는 **같은 s**.
+#   ② FAIL 메시지에 벽시계 경과(el)를 함께 찍는다. el≥예산이 FAIL 근거라, s 가 목표여도
+#      "예산 밖에서 늦게 도달"이 명시돼 옛 ⑧-a 자기모순(타임아웃인데 마지막=목표)이 재발 안 한다.
+#   ③ 읽기·대기 timeout 을 매번 '남은 예산'으로 제한 → 예산을 크게 넘겨 반환하지 않는다.
+#      잔여 오차 상한 = 마지막 read/sleep 한 주기(≈1s) 수준의 스케줄링 허용치.
+#   ④ 내부 daemon 재시작도 각 timeout 5 (복구 명령 무한 행 봉쇄 — §14 P1 과 동일 취지).
+#   ⚠ mission 전용(F7 daemon-kick 포함)이지만 격리 단위 테스트를 위해 라이브러리에 둔다.
+wait_state() {  # $1=원하는 상태 $2=예산(벽시계 초)
+  local t0=$SECONDS s empty=0 kicked=0 el rem
+  while :; do
+    rem=$(( $2 - (SECONDS - t0) ))                          # 남은 예산으로 읽기 timeout 제한
+    if [ "$rem" -gt 3 ]; then rem=3; elif [ "$rem" -lt 1 ]; then rem=1; fi
+    s=$(state "$rem")
+    el=$(( SECONDS - t0 ))
+    if [ "$el" -lt "$2" ] && [ "$s" = "$1" ]; then          # 예산 안에서 목표 도달
+      echo "  ✓ $1 도달 (${el}s)"; return 0
+    fi
+    if [ "$el" -ge "$2" ]; then                             # 예산 소진 — 판정=보고 동일 샘플
+      fail "$1 대기 타임아웃(예산 ${2}s, 경과 ${el}s), 마지막 상태='$s'"
+    fi
+    if [ -z "$s" ]; then                                    # F7: 빈 읽기 5연속 시 daemon 재시작
+      empty=$((empty+1))
+      if [ "$empty" -ge 5 ] && [ "$kicked" = 0 ]; then
+        echo "  (⚠ /mission_state 빈 읽기 ${empty}연속 — ros2 daemon 재시작으로 자가 복구 시도)"
+        timeout 5 ros2 daemon stop  >/dev/null 2>&1
+        timeout 5 ros2 daemon start >/dev/null 2>&1
+        kicked=1
+      fi
+    else
+      empty=0
+    fi
+    rem=$(( $2 - (SECONDS - t0) ))                          # 다음 폴링 대기도 예산으로 제한
+    if [ "$rem" -gt 3 ]; then rem=3; elif [ "$rem" -lt 1 ]; then rem=1; fi
+    sleep "$rem"
+  done
 }
 
 # --- Nav2 활성화 대기 (4개 스크립트 공통 — "최대 90초" 문구 단일 출처) --------

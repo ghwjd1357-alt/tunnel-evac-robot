@@ -55,37 +55,9 @@ EXTRA_ARGS=("$@")           # 인자는 그대로 런치에 전달 (예: localiz
 LOGDIR=$(mktemp -d /tmp/mission_e2e.XXXX)
 echo "로그: $LOGDIR (모드: $MODE)"
 
-wait_state() {  # $1=원하는 상태 $2=제한시간(초) — FAULT 자동재시도는 통과시킴
-  # ★ F7 방어 (07-19 실측): CLI echo 가 240초 내내 빈값('')인 flake —
-  #   미션 노드 로그는 전 상태 정상 진행 = 코드 아닌 ros2 CLI/데몬 결함.
-  #   빈 읽기 5연속(≈15s)이면 daemon 재시작 1회로 자가 복구 시도.
-  # ★ ⑧-a 폴링 race 봉쇄 (07-24 e2e-harness-fix): 예산 안에 목표 상태에 도달했으면
-  #   폴링 격자와 무관하게 PASS, 못 하면 FAIL — 두 메시지가 서로 모순되지 않는다.
-  #   핵심: 타임아웃 판정과 '마지막 상태' 보고를 **같은 읽기(s)** 로 한다. 구판은 루프
-  #   종료 뒤 fail 이 상태를 한 번 더 독립적으로 읽어, 그 사이 전이가 일어나면 "타임아웃
-  #   인데 마지막 상태는 목표 상태"라는 자기모순을 냈다 (쌍굴 2회차, FREEZE_MANIFEST §8).
-  #   while:(무한) 로 바꿔 t≥예산 시점의 마지막 읽기까지 판정에 포함시킨다(경계 t 재확인).
-  local t=0 s empty=0 kicked=0
-  while :; do
-    s=$(state)
-    if [ "$s" = "$1" ]; then echo "  ✓ $1 도달 (${t}s)"; return 0; fi
-    if [ "$t" -ge "$2" ]; then
-      # 판정에 쓴 그 읽기(s)를 그대로 보고 — 독립 재읽기 금지(모순의 원천)
-      fail "$1 대기 타임아웃(${2}s), 마지막 상태='$s'"
-    fi
-    if [ -z "$s" ]; then
-      empty=$((empty+1))
-      if [ "$empty" -ge 5 ] && [ "$kicked" = 0 ]; then
-        echo "  (⚠ /mission_state 빈 읽기 ${empty}연속 — ros2 daemon 재시작으로 자가 복구 시도)"
-        ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
-        kicked=1
-      fi
-    else
-      empty=0
-    fi
-    sleep 3; t=$((t+3))
-  done
-}
+# wait_state 는 lib_e2e.sh 로 이동했다 (07-24 §14 P1 — 벽시계 deadline 전환 + 격리 단위
+#   테스트 가능화). 예산은 여전히 '무엇을 얼마 안에 확인하는가'라는 판정 기준이고, 여기
+#   호출부(wait_state PATROL 30 … SEARCH_BACK "$T_SEARCHBACK")가 그 기준을 그대로 정한다.
 
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup

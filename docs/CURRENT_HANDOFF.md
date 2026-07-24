@@ -9,13 +9,15 @@
 - **현재 기준 커밋**: 이 파일과 같은 커밋 (main)
 - **현재 단계**: 마스터플랜 5단 완료 + 순서 밖 소묶음 **e2e-harness-fix 완료** → 다음 = 마스터플랜
   **6단 역할 B V1 계약 세부 확정** (`MASTER_PLAN.md §1` 6, 실차 7단과 **병렬 가능**).
-- **직전 완료**: **e2e-harness-fix** (마스터플랜 §7 예약 6·7) — 쌍굴 4회 중 2회를 깨뜨린 하네스 결함
-  2건(⑦ `ros2 param get` 무한 행 · ⑧ 폴링 race + 90s 예산)을 수리. **런타임 코드 무변경, 셸 하네스만**.
-  실측: pytest 159 / colcon 165·0f·2s / T자 PASS ×2 · 쌍굴 PASS ×2 연속 · 부정 회귀 FAIL(의도) 관측.
-  SEARCH_BACK 예산 **90s→180s** 재산정(근거 = `TEST_GATES.md §2`, 판정기준 변경 고지 =
+- **직전 완료**: **e2e-harness-fix** (마스터플랜 §7 예약 6·7) — 쌍굴 하네스 결함 2건(⑦ `ros2 param get`
+  무한 행 · ⑧ 폴링 race + 90s 예산) 수리. **런타임 코드 무변경, 셸 하네스만**. 1차 `0eb285c` 는 Codex
+  `§14 P1` 로 불승인(유한 상한이 벽시계로 미보장) → **벽시계 deadline 으로 보완**(복구 명령 timeout,
+  `wait_state` 벽시계 전환, 격리 테스트 `tools/test_harness_guards.sh` 신설).
+  실측: 격리 5/5 · pytest 159 · colcon 165·0f·2s · T자 PASS · 쌍굴 PASS ×2 연속 · abort PASS(실정지 0.0m).
+  SEARCH_BACK 예산 **90s→180s(벽시계)** 재산정(근거 = `TEST_GATES.md §2`, 판정기준 변경 =
   `FREEZE_MANIFEST.md §8.1`). 구현 기록 = `0723_현황.md §15`.
-  ⚠ **Codex 독립 검토 대기** — 이번엔 판정 기준 자체가 바뀌므로 검토자가 T자·쌍굴을 직접 돌리는
-  것이 타당하다(요청을 기록에 남겼다 = `0723_현황.md §15.4`). 검토 범위 = `TEST_GATES.md §7` "셸 도구" 행.
+  ⚠ **Codex 재검토 대기** (보완 diff 당 1회) — `bash tools/test_harness_guards.sh` + T자·쌍굴 역회귀를
+  함께 요청한다(`0723_현황.md §15.5`). 검토 범위 = `TEST_GATES.md §7` "셸 도구" 행.
 
 ## 이번 한 묶음 목표 — 역할 B `/detections` V1 최소 계약 세부 확정
 
