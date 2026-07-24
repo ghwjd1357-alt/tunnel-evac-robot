@@ -7,7 +7,7 @@
 
 ```bash
 python3 -m pytest src/mission_manager/test/ -q          # ~0.6s
-bash tools/test_harness_guards.sh                        # ~95초 — E2E 하네스 유한 상한 단위(§14·§15 P1)
+bash tools/test_harness_guards.sh                        # ~105초 — E2E 하네스 유한 상한 단위(§14~§16 P1)
 colcon test --packages-select mission_manager tunnel_sim
 colcon test-result --verbose                             # ⚠ 종료코드 말고 이걸로 판정
 bash tools/regression_negative.sh                        # ~6분
@@ -37,7 +37,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 | 검증 | 목적 | PASS 기준 |
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
-| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분) — Gazebo 불필요 | 8 케이스 전부 ✓ (§14·§15 P1) |
+| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) — Gazebo 불필요 | 10 케이스 전부 ✓ (§14~§16 P1) |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
 | regression_3goals | 주행 정확도 회귀 | 3종 SUCCEEDED, 최종 오차 **≤0.3m** |
@@ -59,14 +59,18 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 - ★ **상한 집행은 벽시계(`SECONDS`)로, hard-kill 로 실제 보장한다** (07-24 §14·§15 P1 보완):
   `wait_state` 예산과 `read_param_float` 복구 시퀀스를 sleep 누적이 아니라 실경과시간으로 지킨다.
   예산 밖에서 늦게 도달하면 s 가 목표여도 `경과>예산`이 메시지에 찍혀 FAIL(모순 없음).
-  - **§15 P1 추가**: 모든 ros2 CLI 대기를 공통 `hard_timeout`(=`timeout --kill-after=2`)으로 단일화 —
+  - **§15 P1 추가**: `lib_e2e.sh`가 소유한 ros2 CLI 대기를 공통 `hard_timeout`
+    (= `timeout --kill-after=2`)으로 단일화 —
     GNU `timeout` 은 기본 SIGTERM 만 보내 CLI 가 TERM 을 무시하면 안 죽는다. `--kill-after` 로 TERM 뒤
     2초 유예 후 SIGKILL 을 보장한다. `read_param_float` 실제 hard 상한 = (8+2)+(5+2)+(5+2)+(8+2) = **34s**
     (정상 TERM 응답 시 ≈26s). `wait_state` 의 daemon kick 도 고정 5 가 아니라 **남은 예산 배분**(각 5s
     상한 + 유예까지 rem 안에 수렴)이며, 남은 예산 < 6s 면 복구를 생략하고 deadline FAIL 한다 → daemon
     복구까지 전부 예산 안에서 소모돼 벽시계 상한이 N 을 넘지 않는다.
-  - 이 부정 회귀 4종은 `tools/test_harness_guards.sh` 8케이스가 Gazebo 없이 격리 검증한다
-    (TERM 무시 case 6=34s·예산부족 kick 생략 case 7=13s·kick 발동해도 예산 내 수렴 case 8=30s).
+  - **§16 P1 추가**: `mission_e2e.sh`의 alarm·stop·follow `topic pub` 3곳도 공통
+    `hard_timeout 12`로 통일한다. TERM 무시 fake CLI가 상위 cutoff 없이 각 12s+유예 안에
+    종결하고, 정상 fake CLI는 즉시 반환하며, 실제 wiring이 hard-timeout 3/3인지 함께 검사한다.
+  - 이 부정·역회귀는 `tools/test_harness_guards.sh` 10케이스가 Gazebo 없이 격리 검증한다
+    (case 6=34s·case 7=13s·case 8=30s·case 9=TERM 무시 topic 3종·case 10=정상 topic 3종).
 - ⚠ 이 예산은 **판정 기준**이라 동결 태그 `platform-core-freeze-260724` 의 게이트 수치는 **옛 90s
   기준**으로 얻은 것이다 — 두 기준의 구분은 `FREEZE_MANIFEST.md §8`.
 

@@ -103,8 +103,8 @@
    정지)이 있으나 **아직 실측 전** — R0 실측 결과를 받은 뒤 시뮬 쪽 정합을 결정한다.
    ⚠ 동결의 §6 수용은 이 R0 실측 통과를 전제로 한 **조건부** 수용이다 (`docs/FREEZE_MANIFEST.md §6`).
 6. ~~**`mission_e2e.sh` ⑦ `ros2 param get` 타임아웃 가드**~~ ✅ **07-24 e2e-harness-fix 완료** —
-   `read_param_float`(timeout 8 + daemon 재시작 1회) + `-w 1` pub 3종 timeout 가드
-   (`docs/FREEZE_MANIFEST.md §8.1` · `0723_현황.md §15`).
+   `read_param_float`(hard-timeout + daemon 재시작 1회) + `-w 1` pub 3종 hard-timeout 가드,
+   TERM 무시도 SIGKILL 종결 (`docs/FREEZE_MANIFEST.md §8.1`~`§8.3` · `0723_현황.md §15`).
 7. ~~**`mission_e2e.sh` ⑧ SEARCH_BACK 90초 예산 재산정**~~ ✅ **07-24 완료** — 폴링 race 제거(⑧-a) +
    예산 **90s→180s** 재산정(⑧-b, 관측 최악 ≈90s 2배 마진, 근거·분포 = `docs/TEST_GATES.md §2`,
    판정기준 변경 고지 = `docs/FREEZE_MANIFEST.md §8.1`).

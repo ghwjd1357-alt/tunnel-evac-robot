@@ -9,6 +9,9 @@
 - **`ros2 launch` 백그라운드 부모부터 kill** — 부모 생존 시 자식(planner·bt_navigator·gzserver) 좀비·중복 라이프사이클. **부모 kill -9 는 고아 nav2** → 좀비 bt_navigator 가 goal 가로챔(증상 매번 다름) → cleanup `pkill -9 -f "lib/nav2[_]"` 필수. → 0705_현황 §18
 - 재시작 시 좀비 누적 + `TF_OLD_DATA` 폭주 → `pkill -9` 전부 + `ros2 daemon stop/start`. 백그라운드 런치는 수동 `setsid nohup` 불안정 → Claude 는 Bash `run_in_background`. → 0626_현황
 - **셸 `set -u` 는 ROS setup.bash source 뒤에** (setup.bash 가 미정의 변수 참조 → 즉사). trap 은 `INT TERM` + `exit 130/143` (중단 후 계속 실행 봉쇄). → 0705_현황 §15.7
+- **GNU `timeout N`은 TERM 무시 프로세스를 강제 종료하지 못함** — 실제 hard 상한은
+  `timeout --kill-after=유예 N`처럼 SIGKILL 유예까지 있어야 한다. mission E2E의
+  param/state/daemon뿐 아니라 `-w 1 topic pub`도 같은 helper를 써야 한다. → 0723_현황 §15.7
 - `service call` 응답 파싱은 repr 형식 `success=True` (`success: True` 아님). → 0719_현황 §8
 
 ## 2. ROS 토픽·통신·테스트 자동화

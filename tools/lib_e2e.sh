@@ -66,7 +66,8 @@ deadline_exceeded() { [ $(( SECONDS - E2E_T0 )) -ge "$1" ]; }
 # ★ 07-24 §15 P1: GNU `timeout N` 은 기본 SIGTERM 만 보낸다 — 대상이 TERM 을 무시하거나
 #   (trap '' TERM) 처리 못 하면 N 초에도 안 죽어 무한 행이 그대로 남는다(원 CLI/daemon flake
 #   재현). `--kill-after=유예` 로 TERM 뒤 짧은 유예 후 SIGKILL(catch 불가)을 보장해 '진짜'
-#   벽시계 상한을 만든다. 모든 ros2 CLI 대기를 이 helper 하나로 단일화한다.
+#   벽시계 상한을 만든다. 이 라이브러리와 mission_e2e 가 유한 상한을 요구하는 ros2 CLI 대기를
+#   이 helper 하나로 단일화한다.
 #   실제 상한 = 인자 dur + E2E_KILL_GRACE (TERM 무시 최악). 반환 rc 는 timeout 그대로
 #   (124=TERM 만료, 137=SIGKILL). 정상 TERM 응답 시엔 dur 안에 끝나 유예가 발동 안 한다.
 E2E_KILL_GRACE=2           # hard-timeout: SIGTERM 뒤 SIGKILL 까지 유예(초)

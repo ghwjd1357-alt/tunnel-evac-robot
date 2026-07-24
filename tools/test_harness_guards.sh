@@ -9,9 +9,10 @@
 #   ② wait_state 가 sleep 누적으로만 예산을 재, state timeout 소비분을 빼먹어 벽시계 초과.    (§14)
 #   ③ 모든 timeout 이 SIGTERM 만 보내, CLI 가 TERM 을 무시(trap '' TERM)하면 안 죽음.        (§15)
 #   ④ wait_state 의 daemon kick 이 고정 timeout 5 라, 남은 예산과 무관하게 벽시계 초과.       (§15)
-#   이 테스트가 그 네 부정 회귀를 영구히 박제한다. Gazebo·실 ROS 없이 **fake ros2 실행파일 +
-#   state 스텁 + 벽시계 측정**만으로 돈다 (≈95초 — TERM-무시 케이스가 실제 hard-kill 유예까지
-#   벽시계로 소모하므로 case 6=34s·7=13s·8=30s 가 실시간). 검토자도 같은 하네스로 재확인한다.
+#   ⑤ mission_e2e alarm·stop·follow topic pub 3곳이 일반 timeout 으로 남아 TERM 무시 시 무한 행. (§16)
+#   이 테스트가 그 다섯 부정 회귀를 영구히 박제한다. Gazebo·실 ROS 없이 **fake ros2 실행파일 +
+#   state 스텁 + 벽시계 측정**만으로 돈다 (≈105초 — TERM-무시 케이스가 실제 hard-kill 유예까지
+#   벽시계로 소모하므로 case 6=34s·7=13s·8=30s·9≈9s 가 실시간). 검토자도 같은 하네스로 재확인한다.
 #
 # ★ 실행파일 stub 을 쓰는 이유: `timeout 8 ros2 …` 의 timeout 은 셸 함수를 실행하지 못하고
 #   PATH 상의 실행파일만 부른다. 그래서 ros2 를 함수가 아니라 fake 실행파일로 주입한다.
@@ -26,6 +27,7 @@ trap 'rm -rf "$FAKEBIN"' EXIT
 #   FAKE_PARAM_TRAP  : 1 이면 `param get` 이 SIGTERM 무시(trap '' TERM) + 300초 블록
 #   FAKE_DAEMON_BLOCK: 1 이면 `ros2 daemon stop/start` 가 300초 블록 (TERM 응답형 무한 행)
 #   FAKE_DAEMON_TRAP : 1 이면 `daemon` 이 SIGTERM 무시(trap '' TERM) + 300초 블록 (TERM 무시형)
+#   FAKE_TOPIC_TRAP  : 1 이면 `topic pub` 이 SIGTERM 무시(trap '' TERM) + 300초 블록
 cat > "$FAKEBIN/ros2" << 'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = param ] && [ "${2:-}" = get ]; then
@@ -35,6 +37,10 @@ fi
 if [ "${1:-}" = daemon ]; then
   [ "${FAKE_DAEMON_TRAP:-0}"  = 1 ] && { trap '' TERM; sleep 300; } # TERM 무시 + 블록
   [ "${FAKE_DAEMON_BLOCK:-0}" = 1 ] && sleep 300                    # TERM 응답형 블록
+  exit 0
+fi
+if [ "${1:-}" = topic ] && [ "${2:-}" = pub ]; then
+  [ "${FAKE_TOPIC_TRAP:-0}" = 1 ] && { trap '' TERM; sleep 300; }   # TERM 무시 + 블록
   exit 0
 fi
 exit 0
@@ -145,6 +151,38 @@ el=$((SECONDS-t0))
 [ "$el" -le 34 ] \
   && ok "kick+TERM 무시 daemon 이어도 벽시계 ${el}s ≤ 30s(+허용) — 복구가 남은 예산 안에서 수렴" \
   || ng "벽시계 ${el}s — kick daemon 복구가 예산 밖(§15 P1 회귀: hard-kill/예산배분 미보장)"
+
+# ── 케이스 9: mission topic pub 3종 — TERM 무시도 hard-timeout 으로 유한 종결 ──
+#   §16 P1 부정 회귀. alarm·stop·follow 가 일반 timeout 12 로 남으면 TERM 무시 CLI 를 못 죽인다.
+#   격리에선 상한을 1s 로 축소해 각 호출이 1s+유예(2s) 안에 rc=137 로 종결하는지 확인한다.
+echo "== 9: mission topic pub 3종 — TERM 무시도 hard-timeout 으로 유한 종결"
+topic_hard_ok=1
+for topic_case in alarm stop follow; do
+  t0=$SECONDS
+  FAKE_TOPIC_TRAP=1 hard_timeout 1 ros2 topic pub --times 2 -w 1 \
+    "/$topic_case" std_msgs/msg/String "{data: test}" >/dev/null 2>&1
+  rc=$?
+  el=$((SECONDS-t0))
+  { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && [ "$el" -le 4 ] || topic_hard_ok=0
+done
+plain_pub=$(grep -cE '^[[:space:]]*timeout 12 ros2 topic pub' "$HERE/mission_e2e.sh" || true)
+hard_pub=$(grep -cE '^[[:space:]]*hard_timeout 12 ros2 topic pub' "$HERE/mission_e2e.sh" || true)
+{ [ "$topic_hard_ok" = 1 ] && [ "$plain_pub" = 0 ] && [ "$hard_pub" = 3 ]; } \
+  && ok "TERM 무시 3종이 각 hard 상한 내 종결 + mission wiring hard_timeout 3/3" \
+  || ng "topic_hard_ok=$topic_hard_ok plain_pub=$plain_pub hard_pub=$hard_pub — §16 P1 미종결"
+
+# ── 케이스 10: mission topic pub 정상 경로 — alarm·stop·follow 모두 즉시 반환 ──
+echo "== 10: mission topic pub 3종 — 정상 fake CLI 즉시 반환"
+t0=$SECONDS
+topic_normal_ok=1
+for topic_case in alarm stop follow; do
+  hard_timeout 1 ros2 topic pub --times 2 -w 1 \
+    "/$topic_case" std_msgs/msg/String "{data: test}" >/dev/null 2>&1 || topic_normal_ok=0
+done
+el=$((SECONDS-t0))
+{ [ "$topic_normal_ok" = 1 ] && [ "$el" -le 2 ]; } \
+  && ok "정상 topic pub 3종 즉시 반환(${el}s)" \
+  || ng "topic_normal_ok=$topic_normal_ok el=${el}s — 정상 발행 역회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="

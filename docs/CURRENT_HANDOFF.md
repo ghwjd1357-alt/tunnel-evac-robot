@@ -10,17 +10,21 @@
 - **현재 단계**: 마스터플랜 5단 완료 + 순서 밖 소묶음 **e2e-harness-fix 완료** → 다음 = 마스터플랜
   **6단 역할 B V1 계약 세부 확정** (`MASTER_PLAN.md §1` 6, 실차 7단과 **병렬 가능**).
 - **직전 완료**: **e2e-harness-fix** (마스터플랜 §7 예약 6·7) — 쌍굴 하네스 결함 2건(⑦ `ros2 param get`
-  무한 행 · ⑧ 폴링 race + 90s 예산) 수리. **런타임 코드 무변경, 셸 하네스만**. 검토를 **2라운드** 거쳤다:
+  무한 행 · ⑧ 폴링 race + 90s 예산) 수리. **런타임 코드 무변경, 셸 하네스만**. 검토에서 나온 경계를
+  재현·보완했다:
   1차 `0eb285c` → Codex `§14 P1` 불승인(유한 상한 벽시계 미보장) → 벽시계 deadline 보완 `d70bbaf`
   → Codex `§15 P1` **재불승인**(SIGTERM 무시 시 무한 행 · daemon kick 예산 밖) → **hard-kill 재보완**.
-  재보완 핵심: 모든 ros2 CLI 대기를 공통 `hard_timeout`(`timeout --kill-after=2`, TERM 무시도 SIGKILL)로
-  단일화 · `wait_state` daemon kick 을 **남은 예산 배분**(부족 시 복구 생략, deadline FAIL). `read_param_float`
-  hard 상한 = **34s**(정상 ≈26s). 격리 테스트 `tools/test_harness_guards.sh` **8케이스**(§15 신설 3).
-  실측: 격리 8/8 · pytest 159 · colcon 165·0f·2s · T자·쌍굴·abort (커밋 메시지·`0723_현황.md §15.6`).
+  `853ea7a` → Codex `§16 P1` 불승인(mission alarm·stop·follow 3곳이 일반 timeout으로 남음) →
+  **사용자 명시 예외로 이번 세션 Codex가 최소 보완**. 최종 핵심: mission E2E의 유한 대기 전부를 공통
+  `hard_timeout`(`timeout --kill-after=2`, TERM 무시도 SIGKILL)으로 통일 · `wait_state` daemon kick은
+  **남은 예산 배분**(부족 시 복구 생략, deadline FAIL). `read_param_float` hard 상한 = **34s**(정상 ≈26s).
+  격리 테스트 `tools/test_harness_guards.sh` **10케이스**(§16 topic-pub TERM 무시·정상 역회귀 포함).
+  이번 최종 실측: 격리 **10/10** · pytest **159** · colcon **165·0f·2s** · T자 PASS(GATHER 15s,
+  SEARCH_BACK 14s, ESCAPED 22s) · 쌍굴 PASS(GATHER 76s, SEARCH_BACK 14s, ESCAPED 164s).
   SEARCH_BACK 예산 **90s→180s(벽시계)** 재산정(근거 = `TEST_GATES.md §2`, 판정기준 변경 =
-  `FREEZE_MANIFEST.md §8.1`·`FREEZE_MANIFEST.md §8.2`).
-  ⚠ **Codex 재검토 대기** (§15 P1 보완 diff 당 1회) — `bash tools/test_harness_guards.sh` + T자·쌍굴
-  역회귀를 함께 요청한다(`0723_현황.md §15.6`). 검토 범위 = `TEST_GATES.md §7` "셸 도구" 행.
+  `FREEZE_MANIFEST.md §8.1`~`§8.3`). 구현·검증 기록 = `0723_현황.md §15.7`.
+  ⚠ 구현자=검토자 예외는 **이번 세션 사용자 명시 승인에 한정**한다. §16이 허용된 연장 검토였으므로
+  추가 Codex 검토 루프는 열지 않고 사용자 최종 승인으로 닫는다.
 
 ## 이번 한 묶음 목표 — 역할 B `/detections` V1 최소 계약 세부 확정
 

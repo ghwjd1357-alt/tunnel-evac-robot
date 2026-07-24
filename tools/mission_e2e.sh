@@ -92,7 +92,9 @@ for try in 1 2 3; do
   # ⑦ 스윕 (07-24): -w 1 은 구독자 매칭까지 블록한다 — 미들웨어 이상 시 무한 대기 가능
   #   (param get 과 같은 실패양식). 구독자(mission_node)는 정상 시 즉시 뜨므로 happy path
   #   영향 0, 병리 시 timeout 으로 상한을 씌운다. --times 로도 이미 유한하지만 이중 방어.
-  timeout 12 ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
+  # ★ 07-24 §16 P1: 일반 timeout 은 TERM 무시 CLI 를 못 죽인다. 공통 hard_timeout 으로
+  #   alarm 발행도 12s + SIGKILL 유예 안에 반드시 종결한다.
+  hard_timeout 12 ros2 topic pub --times 2 -w 1 /alarm geometry_msgs/msg/PoseStamped \
     "{header: {frame_id: map}, pose: {position: {x: $FIRE_X, y: $FIRE_Y}}}" >/dev/null 2>&1
   sleep 4
   [ "$(state)" = "APPROACH" ] && break
@@ -123,7 +125,7 @@ else
   fail "GUIDE 중 desired_linear_vel=$v ≠ 0.12 (속도 변경 미적용 — S1-5)"
 fi
 sleep 10
-timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
+hard_timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
   "{data: stop}" >/dev/null 2>&1   # ⑦ 스윕: -w 1 블록 방지 timeout (구독자=fake_follower)
 grep -q "stop" "$LOGDIR/follower.log" || echo "  (경고: follower 로그에 stop 미확인)"
 
@@ -132,7 +134,7 @@ wait_state SEARCH_BACK "$T_SEARCHBACK"
 
 echo "== ⑨ 추종 재개 (follow) → 재발견 → GUIDE 복귀"
 sleep 3
-timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
+hard_timeout 12 ros2 topic pub --times 3 -w 1 /follower_cmd std_msgs/msg/String \
   "{data: follow}" >/dev/null 2>&1   # ⑦ 스윕: -w 1 블록 방지 timeout (구독자=fake_follower)
 wait_state GUIDE 120
 grep -q "재발견" "$LOGDIR/mission.log" && echo "  ✓ 미션 로그에 '재발견' 확인"
