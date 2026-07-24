@@ -43,11 +43,14 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 | 출력 | `/cmd_vel` | Twist | Nav2 → Teensy (`linear.x`·`angular.z`만) |
 | 출력 | `/map`, `/tf` | — | SLAM |
 
-### 4.1 `/detections` V1 계약 (★ 07-20 책임경계 (b) 확정)
+### 4.1 `/detections` V1 계약 초안 (★ 역할 B 공동 합의 전)
 
-- **YOLO(역할 B) 측이 depth 결합까지 담당 — camera-frame 3D position 제공.**
-  V1 = header(stamp=촬영시각, frame=camera optical frame) · class_name · confidence · bbox · position(m).
-- `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** → V1 최소 계약 고정, 확장은 V2 별도 메시지 (07-19 개정).
+- **역할 A 내부안**: YOLO(역할 B) 측이 depth 결합까지 담당해 camera-frame 3D position 제공.
+  역할 B의 확인·동의는 아직 받지 않았으며 V1 공동 합의에서 확정한다.
+- V1 필드 골격 초안 = header(stamp=촬영시각, frame=camera optical frame) · class_name · confidence ·
+  bbox · position(m). 세부 타입·주기·QoS·실패 표현과 함께 **전부 역할 B 확인 전**이다.
+- `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** → 공동 합의 뒤 V1 최소 계약을 고정하고,
+  확장은 V2 별도 메시지로 한다 (07-19 개정).
 - map 좌표 생성·검증(timestamp·frame·반복관측·오탐 억제)은 역할 A **Perception Adapter** 책임.
 - 계약 정본 = `~/Desktop/YOLO_탐지연동_합의사항.md` (구 `역할B_detection_토픽계약_전달.md` 는 대체됨).
 - 수신은 **funnel 구조** (콜백 1개 → 내부 dict) — 필드 추가 시 콜백 한 곳만 수정.
