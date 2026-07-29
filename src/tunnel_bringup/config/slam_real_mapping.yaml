@@ -1,0 +1,76 @@
+# slam_real_mapping.yaml — 실터널 지도 제작용 SLAM (R5)
+# =====================================================================
+# [언제 쓰나]  ros2 launch tunnel_bringup real_mapping.launch.py
+#   실제 터널에서 저속 왕복 주행하며 지도를 만든다. 만든 결과(posegraph)를
+#   저장해 두고, 운영(R6~R7)에서는 slam_real_localization.yaml 로 그 지도를 읽는다.
+#
+# [시작값을 어디서 가져왔나 — 중요]
+#   시뮬 정본(slam_params.yaml)이 아니라 **slam_params_realodom.yaml** 을 시작값으로 삼았다.
+#   이유(PITFALLS.md §7 · 시뮬 realodom 파일 머리말):
+#     시뮬 정본의 distance_variance_penalty 0.02 는 "EKF odom 이 사실상 완벽"이라는
+#     시뮬 전제 위의 값이다. 오돔에 +5% 거짓을 주입한 실험에서 이 값은 **거짓말까지
+#     통째로 삼켰다** (12.87 m 주행에 +0.622 m 오차 = 거짓 그대로). 특징 지형을 지나도
+#     교정하지 못했다. 실차 오돔은 4륜 슬립까지 있어 시뮬보다 나쁠 것이 확실하므로,
+#     그 실험이 찾아낸 완화값에서 출발한다.
+#
+# [벌점 파라미터 읽는 법 — 자주 헷갈리는 지점]
+#   `*_variance_penalty` 는 **분모**다. 키우면 벌점이 약해진다(= odom 을 덜 믿는다).
+#   작게 = odom 신뢰 ↑. 반대로 기억하면 튜닝이 정확히 거꾸로 간다.
+#
+# [지도 만들 때 주의]
+#   · 저속으로, 왕복하며, 갈림길에서는 멈춰 서서 스캔이 쌓이게 한다.
+#   · 지도 자산은 만들자마자 정본으로 쓰지 않는다 — 시뮬과 같은 절차(staging →
+#     스모크 → 수락)를 실차판으로 다시 세우는 것이 R5 의 숙제다.
+#   TODO: R5 후 확정 — 실차 지도 저장·승격 절차와 "시작 pose 재현 방법"(바닥 마킹 등).
+slam_toolbox:
+  ros__parameters:
+
+    # ★ 실차 = 실제 시계.
+    use_sim_time: false
+
+    # --- 솔버 (시뮬과 동일) ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- 프레임/토픽 (URDF·EKF·Nav2 와 정확히 일치) ---
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping
+
+    # --- 지도 해상도/범위 ---
+    resolution: 0.05
+    # RPLIDAR C1 데이터시트 측정거리 12 m (시뮬 가상 라이다는 16 m 였다).
+    # TODO: R3 확인 — bag 의 scan.range_max 실측값으로 맞춘다.
+    max_laser_range: 12.0
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    map_update_interval: 2.0
+
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+
+    # --- 스캔 매칭: 거리 신뢰만 완화 (실차 오돔 오차 전제) ---
+    distance_variance_penalty: 0.1            # 시뮬 정본 0.02 → 완화
+    minimum_distance_penalty: 0.1             # 시뮬 정본 0.05 → 소폭 완화
+    correlation_search_space_dimension: 0.3   # 한 스텝 ±0.15 m 교정 허용
+    # --- 회전 구속은 조인 채로 유지: 실차도 IMU yaw 는 정확하다는 EKF 전제 ---
+    # TODO: R4 후 확정 — EKF 융합 결과 yaw 품질을 보고 유지/완화를 정한다.
+    angle_variance_penalty: 0.05
+    minimum_angle_penalty: 0.1
+    coarse_search_angle_offset: 0.1
+
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    link_match_minimum_response_fine: 0.1
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45

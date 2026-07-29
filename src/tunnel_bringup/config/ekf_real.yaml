@@ -1,0 +1,87 @@
+# ekf_real.yaml — 실차 EKF (robot_localization) 설정
+# =====================================================================
+# [EKF 가 하는 일]
+#   Teensy 가 주는 /odom(휠 오도메트리) + /imu/data(BNO055) 두 정보원을 융합해
+#     ① /odometry/filtered 토픽   ② odom → base_footprint TF
+#   를 발행한다. ★ 실차에서 이 TF 의 발행자는 EKF **하나뿐**이다.
+#   Teensy 는 odom TF 를 발행하지 않기로 합의돼 있다 (TEENSY 합의사항 §2 · §4.2).
+#   둘이 같이 쏘면 TF 싸움 = 위치 널뜀 (PITFALLS.md §7).
+#
+# [시뮬 ekf.yaml 과 다른 점 — 이 파일이 따로 존재하는 이유]
+#   1. 시뮬 시계를 쓰지 않는다 (아래 use_sim_time: false). 실차엔 /clock 이 없다.
+#   2. covariance·프로세스 노이즈는 **아직 못 정한다** — R3 rosbag 이 있어야 한다.
+#   3. IMU 축·부호는 R0 검산, relative 여부는 R4 에서 결정한다.
+#   시뮬 파일을 고치지 않는 이유: 시뮬 T자·쌍굴 회귀는 실차 작업 중에도 계속 도는
+#   살아있는 기준선이다 (docs/REAL_ROBOT_VALUES.md §2).
+#
+# [실행]
+#   런치가 띄운다:  ros2 launch tunnel_bringup real_bringup.launch.py
+#   R4 단독 검증(bag replay):
+#     ros2 run robot_localization ekf_node --ros-args -r __node:=ekf_filter_node \
+#       --params-file $(ros2 pkg prefix tunnel_bringup)/share/tunnel_bringup/config/ekf_real.yaml
+#     (다른 터미널)  ros2 bag play <R3에서 딴 bag>
+#     ⚠ bag 에 /tf 가 들어 있으면 EKF 가 발행하는 odom→base_footprint 와 충돌한다
+#       → 재생 시 그 TF 를 빼거나(--topics 로 선별) EKF 쪽 publish_tf 를 끄고 본다.
+#
+# [융합 매트릭스 읽는 법] 15칸 = [x, y, z, roll, pitch, yaw,
+#                                 vx, vy, vz, vroll, vpitch, vyaw,
+#                                 ax, ay, az]   (true = 그 값을 믿고 융합)
+ekf_filter_node:
+  ros__parameters:
+
+    # ★ 실차 = 실제 시계. 시뮬 전용 시계를 쓰면 stamp 가 전부 어긋나 TF 가 폭주한다.
+    use_sim_time: false
+
+    frequency: 30.0             # 융합 결과 발행 주기(Hz). 입력(odom 50Hz·IMU 100Hz)보다 낮게.
+                                # TODO: R4 실측 후 확정 — Jetson CPU 여유와 Nav2 제어주기
+                                #   20Hz 를 함께 보고 조정한다.
+    two_d_mode: true            # 평면 주행(터널 바닥): z·roll·pitch 를 0 으로 강제.
+    publish_tf: true            # odom → base_footprint TF 발행 (실차 유일 발행자)
+
+    # --- 프레임 (★ URDF·SLAM·Nav2·Teensy 계약과 정확히 일치해야 한다) ---
+    map_frame: map                    # SLAM(slam_toolbox) 담당 — EKF 는 안 건드림
+    odom_frame: odom
+    base_link_frame: base_footprint   # URDF 의 root link, slam_params 의 base_frame 과 동일
+    world_frame: odom                 # "odom 기준 위치를 추정" = odom→base TF 를 만든다는 뜻
+
+    # ===== 입력 ① 휠 오도메트리 /odom (Teensy) =====
+    # 속도(vx, vy, vyaw)만 융합한다. 위치(x,y)를 그대로 믿으면 누적 드리프트까지
+    # 통째로 믿게 된다 — 속도를 받아 EKF 가 직접 적분하는 것이 표준.
+    # vy 도 true 인 이유: 차동구동은 옆으로 못 가므로 "vy=0" 자체가 유용한 제약이다.
+    # ⚠ 4륜 스키드 스티어는 회전 시 슬립이 커서 vyaw 가 시뮬보다 나쁠 것으로 예상된다
+    #   (마스터플랜 R2: "회전은 틀어질 것 — 예상된 실패"). 아래 IMU 가 그걸 교정한다.
+    odom0: /odom
+    odom0_config: [false, false, false,    # x, y, z
+                   false, false, false,    # roll, pitch, yaw
+                   true,  true,  false,    # vx, vy, vz   ← 앞뒤 거리 정보의 원천
+                   false, false, true,     # vroll, vpitch, vyaw
+                   false, false, false]    # ax, ay, az
+    odom0_differential: false
+    odom0_queue_size: 10
+    # TODO: R3~R4 실측 후 확정 — 이상치 거부 문턱(odom0_pose_rejection_threshold 등).
+    #   지금 넣으면 "실제 튐"과 "문턱이 틀림"을 구분할 수 없다.
+
+    # ===== 입력 ② IMU /imu/data (BNO055) =====
+    # yaw(자세) + vyaw(각속도)만 신뢰한다. 가속도(ax..)는 실물 노이즈가 커서 제외.
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, true,      # yaw  ← 절대 방위
+                  false, false, false,
+                  false, false, true,      # vyaw ← 회전 각속도
+                  false, false, false]
+    imu0_differential: false
+    # ★ TODO: R4 실측 후 확정 — false 는 "IMU 가 월드 기준 절대 yaw 를 준다"는 전제다.
+    #   실차 출발 자세가 지도 원점 방위와 다르면 시작 순간 yaw 가 통째로 어긋난다.
+    #   R3 bag 에서 "정지 60초 + 좌우 360°" 를 보고 절대/상대 중 무엇이 맞는지 정한다.
+    #   (합의사항 §4.3: 축 기준 REP-103 ENU 는 아직 '임시 기준, R0 부호 검산 필요')
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true   # 가속도는 안 쓰지만 표준상 명시
+
+    # --- 프로세스 노이즈 / 초기 공분산 ---
+    # TODO: R3~R4 실측 후 확정 (process_noise_covariance · initial_estimate_covariance).
+    #   지금은 robot_localization 기본값을 쓴다. 기본값은 "정해진 값"이 아니라
+    #   "아직 측정 안 했다"는 뜻이며, R3 rosbag 의 정지 60초 구간(드리프트)과
+    #   직진·회전 구간(스케일)을 보고 채운다.
+    #   ⚠ 여기에 그럴듯한 숫자를 미리 넣으면 R4 에서 "튜닝이 덜 됐다"와
+    #     "애초에 가짜였다"를 구분할 수 없다 — 빈 채로 두는 것이 정보다.

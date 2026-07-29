@@ -1,0 +1,168 @@
+<?xml version="1.0"?>
+<!--
+  robot_real.urdf — 실차 '몸 설계도' (2026-07-29 S4 신설)
+  =====================================================================
+  ⚠⚠ 이 URDF 는 **시뮬 robot.urdf 의 복사본이 아니다.** 새로 썼다.
+      두 파일의 목적이 다르기 때문이다:
+        시뮬 URDF = Gazebo 가 로봇을 '물리적으로 만들어 내기 위한' 설계도
+                    (질량·관성·마찰·구동 플러그인·가상 센서 플러그인이 전부 필요)
+        실차 URDF = robot_state_publisher 가 **TF 만** 발행하기 위한 설계도
+                    (몸은 이미 존재한다. 바퀴는 Teensy 가 돌리고 라이다는 실물이다)
+
+  [이 파일이 실제로 하는 일 — 딱 하나]
+      base_footprint → base_link → {lidar_link, imu_link, wheel_*} 의 좌표 관계를
+      /tf_static 으로 발행한다. SLAM 은 base_frame, Nav2 는 robot_base_frame 으로
+      base_footprint 를 쓰고, /scan 은 lidar_link 기준이라 이 관계가 없으면
+      "스캔이 로봇 어디에 붙어 있는지"를 아무도 모른다.
+
+  [Gazebo 태그를 한 줄도 안 넣은 이유 — PITFALLS.md §7]
+      `libgazebo_ros_diff_drive` 나 ray/imu 센서 플러그인이 남아 있으면 실차에서
+      ① 의미 없는 노드가 뜨거나 ② odom TF 를 이중 발행해 위치가 널뛴다.
+      실차의 TF 발행자는 EKF **하나뿐**이다 (TEENSY 합의사항 §2).
+
+  [반영된 실측값 — docs/REAL_ROBOT_VALUES.md §1]
+      wheel_separation  0.49 m   (좌우 바퀴 중심 간격)
+      wheel_radius      0.065 m  (지름 0.13 m)
+      몸통 외형         0.55(폭,y) × 0.57(길이,x) m
+      ※ Nav2 가 쓰는 footprint 꼭짓점은 이 파일이 아니라
+         config/nav2_params_real.yaml 에 있다 (costmap 이 읽는 곳이 거기다).
+
+  [좌표계] x=앞, y=왼쪽, z=위 (REP-103)
+
+  ★★ 미실측 TODO — 이 URDF 로 R5 이상(지도 제작·자율주행)을 하기 전에 반드시 채운다 ★★
+      · base_link → lidar_link 장착 오프셋  (TODO: R5 전 줄자 실측 후 확정)
+      · base_link → imu_link  장착 오프셋·축 정렬 (TODO: R3~R4 rosbag 후 확정)
+      · 몸통 높이 / 바닥면 지상고(차고)        (TODO: 조립 후 실측)
+      · 앞뒤 바퀴축 간격(wheelbase)             (TODO: 조립 후 실측 — 시각화 전용)
+      확인법:  grep -rn "TODO: " src/tunnel_bringup/
+      ⚠ 그럴듯한 숫자로 미리 채우지 않는다. 채우면 R 단계에서 "튜닝이 덜 됐다"와
+        "애초에 가짜 값이었다"를 구분할 수 없게 된다.
+-->
+<robot name="tunnel_robot_real">
+
+  <material name="blue">  <color rgba="0.1 0.2 0.8 1"/></material>
+  <material name="black"> <color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="red">   <color rgba="0.8 0.1 0.1 1"/></material>
+
+  <!-- ① base_footprint : 지면(z=0) 가상 기준점. odom·Nav2·SLAM 이 모두 이 link 기준.
+       TF 체인:  map ─(slam_toolbox)→ odom ─(EKF)→ base_footprint ─(이 파일)→ … -->
+  <link name="base_footprint"/>
+
+  <!-- ② base_footprint → base_link : 바퀴축 높이만큼 띄운다.
+       ★ 실측 바퀴 반지름 0.065 (시뮬 잠정값 0.10 보다 3.5cm 낮다).
+
+       ★★ 차고(belly clearance) 재계산 — PITFALLS.md §5 (함정: 몸통 바닥이 지면에 닿으면
+          아무리 토크가 좋아도 못 간다):
+            시뮬:  바퀴축 0.100 - 몸통바닥 오프셋 0.050 = 지상고 0.050
+            실차:  바퀴축 0.065 - (몸통바닥 오프셋 ?)  = 지상고 ?
+          같은 몸통 오프셋을 그대로 쓰면 지상고가 **0.015 m 밖에 안 남는다.**
+          터널 바닥 요철·케이블 트레이를 생각하면 그대로는 위험하다.
+          → TODO: 조립 후 실측 — 몸통 바닥면의 실제 지상고를 재고, 부족하면
+            (a) 몸통을 프레임 위로 올리거나 (b) 바닥 돌출물을 제거한다.
+            여기 URDF 숫자를 바꿔서 '해결'되는 문제가 아니다 (기구 문제다). -->
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 0.065" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ③ base_link : 로봇 본체 기준 link.
+       visual 은 **실측 footprint(0.57 × 0.55)를 바닥에 깐 얇은 판**만 둔다.
+       몸통 '높이'는 미실측이라 상자를 세우지 않는다 — RViz 에서 로봇이 차지하는
+       평면 크기는 정확히 보이고, 모르는 값(높이)은 그리지 않는다.
+       TODO: 조립 후 실측 — 몸통 높이를 받으면 상자로 교체한다.
+       <collision>·<inertial> 은 넣지 않는다: 물리엔진이 없는 실차에선 아무도 안 읽고,
+       넣으면 "실물과 다른 값이 어딘가에서 쓰이는 것처럼" 보여 혼선만 준다. -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.57 0.55 0.001"/></geometry>
+      <material name="blue"/>
+    </visual>
+  </link>
+
+  <!-- ============================================================
+       ④ 구동 바퀴 — 실측 좌우 간격 0.49 (y = ±0.245), 반지름 0.065.
+
+       ★ 실물은 4륜 스키드 스티어인데 여기 2개만 있는 이유:
+         Teensy 가 4바퀴를 직접 제어하고 /odom 까지 계산해 준다(TEENSY 합의사항 §2).
+         Jetson 쪽에서 바퀴 TF 를 쓰는 소비자는 **하나도 없다** (Nav2·SLAM·costmap 은
+         base_footprint 와 lidar_link 만 본다). 그래서 이 두 link 는
+         "차동구동 좌우 간격 0.49 를 설계도에 기록해 두는" 시각화 목적이다.
+         앞뒤 4륜 배치를 그리려면 wheelbase 실측이 필요하다 → TODO: 조립 후 실측.
+
+       ★ joint type 이 continuous 가 아니라 fixed 인 이유:
+         continuous joint 의 TF 는 robot_state_publisher 가 **/joint_states 를 받아야**
+         발행한다. 실차엔 그 발행자가 없다(Teensy 는 /odom 만 준다) → continuous 로 두면
+         그 TF 가 아예 안 나오고 "TF 트리가 끊겼다"는 경고만 쌓인다.
+         바퀴가 도는 애니메이션이 필요해지면 joint_state_publisher 를 추가한다.
+       ============================================================ -->
+  <link name="wheel_left">
+    <visual>
+      <origin rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.065" length="0.05"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_left_joint" type="fixed">
+    <parent link="base_link"/><child link="wheel_left"/>
+    <origin xyz="0 0.245 0" rpy="0 0 0"/>   <!-- 0.49 / 2 -->
+  </joint>
+
+  <link name="wheel_right">
+    <visual>
+      <origin rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.065" length="0.05"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_right_joint" type="fixed">
+    <parent link="base_link"/><child link="wheel_right"/>
+    <origin xyz="0 -0.245 0" rpy="0 0 0"/>  <!-- -0.49 / 2 -->
+  </joint>
+
+  <!-- ============================================================
+       ⑤ lidar_link : RPLIDAR C1 장착 위치.
+       /scan 의 header.frame_id 가 이 이름이어야 한다 (런치가 sllidar 노드에
+       frame_id:=lidar_link 로 넘긴다). 이름이 어긋나면 costmap 이 스캔을
+       "TF 없는 프레임"으로 버리고, 증상은 "장애물이 안 보인다"로 나타난다.
+
+       ★★ TODO: R5 전 줄자 실측 후 확정 — 지금 값 xyz="0 0 0" 은 **측정값이 아니라
+          '아직 안 쟀다'는 표시**다. 0 은 라이다가 바퀴축 높이에 있다는 뜻이라
+          물리적으로 불가능하므로, 실측을 빼먹으면 지도가 즉시 이상해져 드러난다
+          (그럴듯한 숫자를 넣었다면 조용히 틀린 지도가 나왔을 것이다).
+       ★ 실측 시 지켜야 할 제약 (PITFALLS.md §7 · TEENSY 합의사항 §6.1):
+          라이다 스캔 평면은 **몸통 최상면과 모든 고정 구조물보다 위**여야 한다.
+          같은 높이면 레이저가 자기 몸통 모서리를 상시 타격해(시뮬에서 ±90° 0.20m
+          고정 히트 실측) 지나간 자리마다 유령 장애물을 그리고 경로가 막힌다.
+          임시 기준 = 몸통 최상면 +0.05 m 이상.
+       ============================================================ -->
+  <link name="lidar_link">
+    <visual>
+      <geometry><cylinder radius="0.04" length="0.05"/></geometry>
+      <material name="red"/>
+    </visual>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/><child link="lidar_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>   <!-- TODO: R5 전 줄자 실측 후 확정 (미측정) -->
+  </joint>
+
+  <!-- ============================================================
+       ⑥ imu_link : BNO055 장착 위치. /imu/data 의 frame_id 와 일치해야 한다
+       (TEENSY 합의사항 §4.3 — 현재 'imu_link' 임시 기준, 장착 TF 확정 필요).
+
+       ★★ TODO: R3~R4 rosbag 후 확정 — 위치 오프셋 + **축 정렬(rpy)** 둘 다.
+          BNO055 는 칩 방향에 따라 축이 돌아가 있고, 구동부가 ROS ENU(REP-103)로
+          변환해 주기로 했지만 그 부호는 R0 에서 검산해야 확정된다.
+          rpy 를 지금 추정해 넣으면 R4 에서 "EKF 튜닝 문제"와 "축이 애초에 틀림"을
+          구분할 수 없다 → 0 으로 두고 실측으로 채운다.
+       ★ 장착 위치는 회전 중심에 가깝게(원심가속도 오염 최소) + 모터 전류선과 이격.
+       ============================================================ -->
+  <link name="imu_link"/>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/><child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>   <!-- TODO: R3~R4 실측 후 확정 (미측정) -->
+  </joint>
+
+</robot>

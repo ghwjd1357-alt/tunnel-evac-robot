@@ -21,13 +21,19 @@
 
 ## 2. 실차 반영 지점 (★ 개정 — 시뮬 파일 수정 아님, `tunnel_bringup` 신규 작성)
 
-| # | 값 | 반영할 **신규** 파일 | 내용 |
-|---|---|---|---|
-| 1 | separation 0.49 · 반지름 0.065 | `tunnel_bringup/urdf/robot_real.urdf` | 실측 치수로 **새로 작성**. 바퀴 반경이 작아지므로 belly clearance 재확인 (URDF 함정 ① — `PITFALLS.md §5`) |
-| 2 | footprint 0.55×0.57 | `tunnel_bringup/config/nav2_params_real.yaml` | 꼭짓점 = `[[0.285,0.275],[0.285,-0.275],[-0.285,-0.275],[-0.285,0.275]]` (§3). `inflation_radius ≥ 외접반경 0.40` 확인 (현 0.9 여유 있음) |
-| 3 | 라이다·IMU 장착 오프셋 | `tunnel_bringup/urdf/robot_real.urdf` | 실측 후 `base_link→lidar_link`·`base_link→imu_link` 고정 TF. **라이다는 몸통 최상면보다 위** (자기타격 방지 — 미확인 항목, §4) |
-| 4 | TOTAL_PPR 2644.3 | Teensy 펌웨어 | 구동부 몫 — 역할 A 는 `/odom` 결과만 소비 |
-| 5 | (시뮬 자산) | `src/tunnel_sim/**` | **변경 금지.** T자·쌍굴 회귀 기준선으로 보존 |
+★ 07-29 갱신: 신규 파일은 **전부 생성됐다** (`tunnel_bringup` S4 골격). 아래 '상태' 열은
+파일 존재가 아니라 **그 값이 실제로 반영됐는가**를 가리킨다.
+
+| # | 값 | 반영할 **신규** 파일 | 내용 | 상태 |
+|---|---|---|---|---|
+| 1 | separation 0.49 · 반지름 0.065 | `tunnel_bringup/urdf/robot_real.urdf` | 실측 치수로 **새로 작성**(시뮬 URDF 복사 아님, Gazebo 태그 0). 바퀴 반경이 작아지므로 belly clearance 재확인 (URDF 함정 ① — `PITFALLS.md §5`) | ✅ 반영 (TF 실측: `base_footprint→base_link` z=0.065, `base_link→wheel_left` y=0.245) |
+| 2 | footprint 0.55×0.57 | `tunnel_bringup/config/nav2_params_real.yaml` | 꼭짓점 = `[[0.285,0.275],[0.285,-0.275],[-0.285,-0.275],[-0.285,0.275]]` (§3). `inflation_radius ≥ 외접반경 0.40` 확인 (현 0.9 여유 있음) | ✅ 반영 (local·global costmap 양쪽) |
+| 3 | 라이다·IMU 장착 오프셋 | `tunnel_bringup/urdf/robot_real.urdf` | 실측 후 `base_link→lidar_link`·`base_link→imu_link` 고정 TF. **라이다는 몸통 최상면보다 위** (자기타격 방지 — 미확인 항목, §4) | ❌ **미실측** — `xyz="0 0 0"` + `TODO:` 주석. 0 은 물리적으로 불가능한 값이라 빼먹으면 즉시 드러난다 (추정치로 메우지 않음) |
+| 3-b | 몸통 높이 · 차고 · wheelbase | `tunnel_bringup/urdf/robot_real.urdf` | 바퀴 반경이 0.10→0.065 로 낮아져 **시뮬과 같은 몸통 오프셋이면 지상고가 0.015 m 뿐**이다. URDF 숫자로 해결되는 문제가 아니라 기구 확인 사항 | ❌ **미실측** — TODO |
+| 4 | TOTAL_PPR 2644.3 | Teensy 펌웨어 | 구동부 몫 — 역할 A 는 `/odom` 결과만 소비 | (구동부) |
+| 5 | (시뮬 자산) | `src/tunnel_sim/**` | **변경 금지.** T자·쌍굴 회귀 기준선으로 보존 | ✅ 무변경 유지 |
+
+미실측 항목 전수 확인: `grep -rn "TODO: " src/tunnel_bringup/`
 
 ⚠ 실측 footprint 가 시뮬(0.50×0.40)보다 **커서** 폭 2.5m 피난연결통로 여유가 현재 과대평가돼 있다.
 실차 설정 작성 후 **좁은 통로 통과 검증 필수** (R6 항목).
