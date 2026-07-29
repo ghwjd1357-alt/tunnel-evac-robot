@@ -8,7 +8,8 @@
 ```bash
 python3 -m pytest src/mission_manager/test/ -q          # ~0.6s
 bash tools/test_harness_guards.sh                        # ~105초 — E2E 하네스 유한 상한 단위(§14~§16 P1)
-colcon test --packages-select mission_manager tunnel_sim
+bash tools/test_gate_regression.sh                       # ~2분 — readiness_gate 조건 기동 12케이스(Gazebo 불필요)
+colcon test --packages-select mission_manager tunnel_sim tunnel_bringup
 colcon test-result --verbose                             # ⚠ 종료코드 말고 이걸로 판정
 bash tools/regression_negative.sh                        # ~6분
 bash tools/regression_3goals.sh                          # ~4분
@@ -23,9 +24,13 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (07-24, **platform-core-freeze 동결 기준점** — tag `platform-core-freeze-260724` @ `212885a`): pytest **159 passed** / colcon **165 tests, 0 fail, 2 skip** / E2E 4종 PASS **+ 쌍굴 PASS**.
-(구조 분리 3/3 완료 시점과 같은 수치 — 하네스 추출은 순수 리팩터라 개수 무변동.
-0723검토 **§8·§9 가 같은 수치를 두 번 독립 재현**했다.)
+기준선 (**07-30 갱신** — `tunnel_bringup` colcon 편입 반영): pytest **159 passed** / colcon **181 tests, 0 fail, 3 skip** / E2E 4종 PASS **+ 쌍굴 PASS**.
+★ 07-30 증분 = `tunnel_bringup` **+16** (게이트 판정 단위 13 + lint 3, 그중 copyright 1건 skip).
+pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/` 에 있어 `colcon test` 로만 돈다
+(doc_check 의 pytest 대조 대상은 `src/mission_manager/test/` 하나다).
+⚠ **동결 태그 `platform-core-freeze-260724` @ `212885a` 자체의 수치는 pytest 159 / colcon
+165·0f·2s 로 불변**이다 (07-24 · 0723검토 §8·§9 가 두 번 독립 재현). 위 181 은 그 뒤 증가분이며,
+동결본과 대조할 때는 165 를 쓴다 — 두 수치를 섞지 말 것.
 ★ 이 수치는 이제 단순 기준선이 아니라 **동결 기준점**이다. 앞으로 회귀가 나오면
 `git diff platform-core-freeze-260724 --stat` 이 1차 용의선상 — 증거 전량 = `docs/FREEZE_MANIFEST.md`.
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).
@@ -38,6 +43,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
 | test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) — Gazebo 불필요 | 10 케이스 전부 ✓ (§14~§16 P1) |
+| **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 3 + 음성 9). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3) | 12 케이스 전부 ✓ (~126초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (10케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
 | regression_3goals | 주행 정확도 회귀 | 3종 SUCCEEDED, 최종 오차 **≤0.3m** |
@@ -129,7 +135,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 
 ```bash
 python3 -m pytest src/mission_manager/test/ -q
-colcon test --packages-select mission_manager tunnel_sim   # ⚠ 반드시 직접 실행
+colcon test --packages-select mission_manager tunnel_sim tunnel_bringup   # ⚠ 반드시 직접 실행
 colcon test-result --verbose                                # 판정만 — 재실행 아님
 bash tools/doc_check.sh --strict                            # 문서 검사 본체
 bash tools/doc_check.sh --after-push                        # 원격 ahead/behind 만
@@ -150,6 +156,7 @@ bash tools/doc_check.sh --after-push                        # 원격 ahead/behin
 | `mission_node.py` · `speed_manager.py` · `goal_manager.py` | `mission_e2e` · `abort_e2e` |
 | Nav2 파라미터 · costmap · planner · URDF | `regression_negative` · `regression_3goals` |
 | 지도 자산 | `regression_negative` + 승격 evidence |
+| **`tunnel_bringup/**`** (게이트 판정·런치 배선·실차 파라미터) | `test_gate_regression` (Gazebo 불필요 — 실차 코드라 시뮬 E2E 로는 검출이 안 된다). 실차 자산 자체는 노트북에서 실행 불가이므로 **여기까지가 검증 상한**임을 검토본에 명시할 것 |
 | 셸 도구 · 문서 전용 | 없음 (`doc_check.sh` + `bash -n`) |
 | **동결 게이트** (platform-core-freeze · mission-logic-RC · mission-v1-freeze) | **전량 + 쌍굴 + 지도 승격 evidence** |
 | **위에 없는 런타임 변경** (`follower_monitor.py` · waypoints yaml · launch/wiring 등) | ★ **fail-closed — 검토자가 관련 E2E 를 직접 선정**하고 그 근거를 검토본에 남긴다. "표에 없으니 생략"은 금지 |

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""런치 파일들이 공유하는 '조건 기동' 배선 도구.
+"""
+런치 파일들이 공유하는 '조건 기동' 배선 도구.
 
 [왜 런치 파일이 아니라 여기 있나]
   `launch/` 안의 파일들은 서로 import 할 수 없다. ros2 launch 는 그 파일을 모듈이
@@ -24,7 +25,8 @@ from launch_ros.actions import Node
 
 def make_gate(label, timeout, topics=(), transient_local=(), tf=(), tf_fresh=0.0,
               lifecycle=(), actions=()):
-    """조건 기동 게이트 노드 하나를 만든다.
+    """
+    조건 기동 게이트 노드 하나를 만든다.
 
     label      : 로그 식별자 겸 노드 이름 접미사 (게이트마다 달라야 한다)
     timeout    : 이 시간 안에 조건을 못 채우면 게이트가 실패로 종료한다 (초)
@@ -60,7 +62,8 @@ def make_gate(label, timeout, topics=(), transient_local=(), tf=(), tf_fresh=0.0
 
 
 def when_ready(gate, next_actions, what):
-    """게이트가 0 으로 끝나면 다음 단계를 띄우고, 아니면 런치 전체를 내린다.
+    """
+    게이트가 0 으로 끝나면 다음 단계를 띄우고, 아니면 런치 전체를 내린다.
 
     ★ fail-closed 인 이유: 조건을 못 채웠다는 것은 센서·구동부·Nav2 중 무언가가
       죽었다는 뜻이다. 그 상태로 다음 단계를 띄우면 '반쪽 스택'이 만들어지고,

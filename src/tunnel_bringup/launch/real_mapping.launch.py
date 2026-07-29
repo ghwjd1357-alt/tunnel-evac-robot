@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""real_mapping.launch.py — 실터널 지도 제작 전용 (R5).
+r"""
+real_mapping.launch.py — 실터널 지도 제작 전용 (R5).
 
 실행:
   ros2 launch tunnel_bringup real_mapping.launch.py
@@ -8,7 +9,7 @@
   ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
   # 다 돌고 나서 posegraph 저장 (확장자 없이 준다)
-  ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializeMap \\
+  ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializeMap \
       "{filename: '<저장할 경로>/tunnel_real_localization'}"
 
 [real_bringup 과 무엇이 다른가]

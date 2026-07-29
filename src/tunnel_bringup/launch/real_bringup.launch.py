@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""real_bringup.launch.py — 실차 전체 스택을 한 줄로 (R6~R7).
+r"""
+real_bringup.launch.py — 실차 전체 스택을 한 줄로 (R6~R7).
 
 실행:
   # R6 (자율주행 최초 — 미션 없이 goal 하나만 줘 본다)
   ros2 launch tunnel_bringup real_bringup.launch.py map_file:=<R5에서 만든 posegraph 경로>
 
   # R7 (미션 상태머신까지)
-  ros2 launch tunnel_bringup real_bringup.launch.py map_file:=<...> \\
+  ros2 launch tunnel_bringup real_bringup.launch.py map_file:=<...> \
       mission:=true waypoints_file:=<실터널 좌표 yaml 경로>
 
   ⚠ `map_file` 은 기본값이 없다(필수 인자). 지도 없이 자율주행을 시작하는 경로를
@@ -65,7 +66,8 @@ from tunnel_bringup.launch_util import make_gate, when_ready
 
 
 def check_misconfig(context):
-    """기동 **전에** 잡을 수 있는 오설정을 본다. 문제가 있으면 종료 액션을 돌려준다.
+    """
+    기동 **전에** 잡을 수 있는 오설정을 본다. 문제가 있으면 종료 액션을 돌려준다.
 
     ★ 이 검사가 통과해야만 launch_setup 이 노드를 하나라도 만든다. "일단 띄우고 곧 내린다"가
       아니라 **아무것도 안 뜬다** — 실차에서 micro-ROS agent 나 라이다가 잠깐이라도

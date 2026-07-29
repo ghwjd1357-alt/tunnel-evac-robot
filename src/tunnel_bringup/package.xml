@@ -29,6 +29,12 @@
        선언하면 `rosdep install` 이 "찾을 수 없는 의존성"으로 실패한다.
        설치는 R0 준비물 — 없으면 real_bringup 을 micro_ros:=false 로 띄운다. -->
 
+  <!-- ===== 테스트 (colcon test 대상 편입 — 07-30) ===== -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
   <export>
     <build_type>ament_python</build_type>
   </export>

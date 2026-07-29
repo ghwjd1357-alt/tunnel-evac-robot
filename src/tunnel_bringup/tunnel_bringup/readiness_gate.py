@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""readiness_gate — "앞 단계가 진짜 살아났는가"를 확인하고 종료하는 1회성 노드.
+"""
+readiness_gate — "앞 단계가 진짜 살아났는가"를 확인하고 종료하는 1회성 노드.
 
 [왜 이게 이 패키지의 본체인가]
   시뮬 런치는 다음 단계를 **고정 시간 지연**으로 띄운다 (예: "Nav2 는 8초 뒤, 미션은
@@ -26,6 +27,12 @@
   require_lifecycle_active  : lifecycle 노드가 ACTIVE(3) 인가 (Nav2 활성화 확인)
   require_actions           : 액션 서버가 그래프에 올라왔나 (goal 을 받을 수 있나)
 
+[★ 공통 규칙 — "한 번 관측 = 통과" 금지 (_CONFIRM_MIN)]
+  토픽·lifecycle 은 **서로 다른 폴링에서 2회** 관측돼야 충족이다. 게이트는 조건이 차는
+  순간 죽으므로, 첫 관측으로 통과시키면 그 뒤의 방어(신선도·유효기간)가 실행될 기회
+  자체가 없다 — 술어가 조용히 latch 로 퇴화한다. 대가는 통과가 폴링 1회만큼 늦는 것뿐.
+  예외는 래치 토픽 하나다(설계상 1회 발행 — 2회를 요구하면 영원히 통과 못 한다).
+
 [이 게이트가 확인하지 '않는' 것 — 정직하게 적어 둔다]
   · 값의 품질(오도메트리 정확도·IMU 축 부호·covariance 의미)은 못 본다.
     그건 R2~R4 의 rosbag 이 판정한다. 여기는 '살아 있는가'까지다.
@@ -47,6 +54,17 @@ from lifecycle_msgs.srv import GetState
 
 # lifecycle 상태 ID (lifecycle_msgs/msg/State) — 3 = ACTIVE
 _STATE_ACTIVE = 3
+
+# ★ "한 번 관측 = 통과" 금지 — 조건 하나를 충족으로 인정하려면 **서로 다른 폴링에서
+#   완료된 관측이 이만큼** 있어야 한다.
+#   왜 1 이면 안 되는가 (2026-07-29 Codex P1 실측): 게이트는 조건이 다 차는 순간
+#   종료코드 0 으로 죽는다. 그래서 '첫 관측을 수확한 그 폴링'에서 성공해 버리면
+#   그 뒤 폴링이 아예 없고, 결과 유효기간(_lc_stale)·신선도(topic_fresh) 같은
+#   '나중에 확인하는' 방어는 실행될 기회 자체가 없다. 결국 실효 술어가
+#   "지금 살아 있는가"가 아니라 "한 번이라도 살아 있던 적 있는가"(=latch)로 퇴화한다
+#   — 이 저장소가 금지한 것이다 (MASTER_PLAN.md §8 '게이트 술어 = live').
+#   2 로 두면 조건 충족까지 폴링 1회(=0.5s)가 더 걸린다. 그 지연이 정상 동작이다.
+_CONFIRM_MIN = 2
 
 
 class ReadinessGate(Node):
@@ -77,53 +95,88 @@ class ReadinessGate(Node):
         #     "애초에 가짜였던 값"을 구분할 수 없게 된다.
         self.declare_parameter('stamp_skew_max_sec', 0.0)
 
-        self.label = self.get_parameter('label').value
-        self.req_topics = _clean(self.get_parameter('require_topics').value)
-        self.latched = set(_clean(self.get_parameter('transient_local_topics').value))
-        # 래치 토픽도 검사 대상이다 — 따로 적어도 require_topics 에 없으면 합쳐 준다.
-        for topic in self.latched:
-            if topic not in self.req_topics:
-                self.req_topics.append(topic)
-        self.req_tf = _clean(self.get_parameter('require_tf').value)
-        self.req_lifecycle = _clean(self.get_parameter('require_lifecycle_active').value)
-        self.req_actions = _clean(self.get_parameter('require_actions').value)
-        self.topic_fresh = float(self.get_parameter('topic_fresh_sec').value)
-        self.tf_fresh = float(self.get_parameter('tf_fresh_sec').value)
-        self.timeout = float(self.get_parameter('timeout_sec').value)
-        self.poll = float(self.get_parameter('poll_period_sec').value)
-        self.stamp_skew_max = float(self.get_parameter('stamp_skew_max_sec').value)
+        self.init_conditions(
+            label=self.get_parameter('label').value,
+            topics=_clean(self.get_parameter('require_topics').value),
+            latched=_clean(self.get_parameter('transient_local_topics').value),
+            tf=_clean(self.get_parameter('require_tf').value),
+            lifecycle=_clean(self.get_parameter('require_lifecycle_active').value),
+            actions=_clean(self.get_parameter('require_actions').value),
+            topic_fresh=float(self.get_parameter('topic_fresh_sec').value),
+            tf_fresh=float(self.get_parameter('tf_fresh_sec').value),
+            timeout=float(self.get_parameter('timeout_sec').value),
+            poll=float(self.get_parameter('poll_period_sec').value),
+            stamp_skew_max=float(self.get_parameter('stamp_skew_max_sec').value),
+        )
 
-        # ── 토픽 신선도 추적 ────────────────────────────────────────────
-        # 도착 시각은 ROS 시계가 아니라 monotonic 벽시계로 잰다.
-        # 이유: 시계 종류(sim/real)나 시각 점프에 판정이 흔들리면 안 된다.
-        self._subs = {}          # topic -> Subscription (타입을 알아낸 뒤에 생성)
-        self._last_rx = {}       # topic -> monotonic 도착시각
-        self._last_stamp_skew = {}   # topic -> 마지막 메시지의 stamp 오차(초)
-
-        # ── TF ──────────────────────────────────────────────────────────
+        # ── 여기서부터가 ROS 자원 (단위테스트는 여기를 만들지 않는다) ──
         if self.req_tf:
             self._tf_buffer = tf2_ros.Buffer()
             self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
-        else:
-            self._tf_buffer = None
 
-        # ── lifecycle: 노드마다 get_state 클라이언트 1개 ────────────────
-        self._lc_clients = {}
-        self._lc_pending = {}    # node_name -> (진행 중 future, 보낸 시각)
-        self._lc_state = {}      # node_name -> (가장 최근 완료 결과, 받은 시각)
-        # 조회 결과·미완 조회의 유효기간. 이보다 오래되면 '모른다'로 되돌린다.
-        # 폴링 몇 번은 여유를 주되(느린 Jetson), 무한정 믿지는 않는 값.
-        self._lc_stale = max(5.0, 4.0 * self.poll)
+        # lifecycle: 노드마다 get_state 클라이언트 1개
         for name in self.req_lifecycle:
             srv = name if name.endswith('/get_state') else f'{name}/get_state'
             self._lc_clients[name] = self.create_client(GetState, srv)
 
-        self._t0 = time.monotonic()
+    def init_conditions(self, label, topics, latched, tf, lifecycle, actions,
+                        topic_fresh, tf_fresh, timeout, poll, stamp_skew_max,
+                        now_fn=time.monotonic):
+        """
+        판정에 쓰는 상태를 전부 세팅한다 — ROS 자원은 하나도 만들지 않는다.
+
+        ★ __init__ 에서 굳이 떼어 놓은 이유: 이 게이트의 판정 로직(`_topics_ok` ·
+          `_lifecycle_ok`)은 실차 안전 경계인데, DDS·그래프 없이는 시험할 수 없다면
+          회귀를 짤 수 없다. 여기까지만 부르면 노드 없이 판정만 골라 시험할 수 있다
+          (`test/test_readiness_gate.py` 가 그렇게 쓴다 — mission_manager 단위테스트의
+          '가짜 clock 주입 + 순수 로직' 방식과 같은 결).
+        now_fn 도 같은 이유로 주입식이다. 실동작은 monotonic 벽시계 그대로이고,
+        시험에서만 가짜 시계를 꽂아 '5초 유효기간' 경계를 결정적으로 넘긴다.
+        """
+        self.label = label
+        self.req_topics = list(topics)
+        self.latched = set(latched)
+        # 래치 토픽도 검사 대상이다 — 따로 적어도 require_topics 에 없으면 합쳐 준다.
+        for topic in sorted(self.latched):
+            if topic not in self.req_topics:
+                self.req_topics.append(topic)
+        self.req_tf = list(tf)
+        self.req_lifecycle = list(lifecycle)
+        self.req_actions = list(actions)
+        self.topic_fresh = topic_fresh
+        self.tf_fresh = tf_fresh
+        self.timeout = timeout
+        self.poll = poll
+        self.stamp_skew_max = stamp_skew_max
+        self._now = now_fn
+
+        # ── 토픽 신선도 추적 ────────────────────────────────────────────
+        # 도착 시각은 ROS 시계가 아니라 monotonic 벽시계로 잰다.
+        # 이유: 시계 종류(sim/real)나 시각 점프에 판정이 흔들리면 안 된다.
+        self._subs = {}              # topic -> Subscription (타입을 알아낸 뒤에 생성)
+        self._last_rx = {}           # topic -> monotonic 도착시각
+        self._last_stamp_skew = {}   # topic -> 마지막 메시지의 stamp 오차(초)
+        self._rx_confirm = {}        # topic -> 서로 다른 폴링에서 받은 횟수 (_CONFIRM_MIN 까지)
+        self._rx_seen = {}           # topic -> 직전 폴링에서 본 도착시각 (새 메시지 판별용)
+
+        self._tf_buffer = None
+
+        # ── lifecycle ───────────────────────────────────────────────────
+        self._lc_clients = {}
+        self._lc_pending = {}    # node_name -> (진행 중 future, 보낸 시각)
+        self._lc_state = {}      # node_name -> (가장 최근 완료 결과, 받은 시각)
+        self._lc_confirm = {}    # node_name -> 연속으로 '완료된' ACTIVE 응답 수
+        # 조회 결과·미완 조회의 유효기간. 이보다 오래되면 '모른다'로 되돌린다.
+        # 폴링 몇 번은 여유를 주되(느린 Jetson), 무한정 믿지는 않는 값.
+        self._lc_stale = max(5.0, 4.0 * self.poll)
+
+        self._t0 = self._now()
         self._last_report = 0.0
 
     # ── 토픽 ────────────────────────────────────────────────────────────
     def _ensure_subscriptions(self):
-        """아직 구독 못 한 토픽은 그래프에서 타입을 찾아 구독한다.
+        """
+        아직 구독 못 한 토픽은 그래프에서 타입을 찾아 구독한다.
 
         타입을 미리 코드에 박지 않는 이유: 이 게이트는 /scan·/odom 뿐 아니라
         어떤 토픽에도 쓸 수 있어야 하고, 타입을 박으면 그 메시지 패키지에
@@ -171,7 +224,7 @@ class ReadinessGate(Node):
             self.get_logger().info(f'[{self.label}] 구독 시작: {topic} ({types[0]})')
 
     def _on_msg(self, topic, msg):
-        self._last_rx[topic] = time.monotonic()
+        self._last_rx[topic] = self._now()
         # header 가 있는 메시지면 stamp 와 현재 시각의 차이도 기록해 둔다.
         # (검사 자체는 stamp_skew_max_sec > 0 일 때만 — 기본은 비활성, 위 TODO 참조)
         header = getattr(msg, 'header', None)
@@ -182,19 +235,43 @@ class ReadinessGate(Node):
                 self._last_stamp_skew[topic] = now - stamp
 
     def _topics_ok(self):
+        """
+        토픽이 **지금 흐르고 있는가**. '마지막 수신이 신선하다'만으로는 부족하다.
+
+        ★ 왜 부족한가 (_CONFIRM_MIN 머리말과 같은 결함): 퍼블리셔가 메시지를 딱 1건
+          보내고 죽어도, 그 뒤 topic_fresh(기본 2s) 안에 판정되면 통과한다. 실차에서
+          이건 흔한 입력이다 — USB 드롭아웃으로 라이다가 첫 스캔 직후 끊기는 경우.
+          그래서 **서로 다른 폴링 구간에서** _CONFIRM_MIN 회 수신돼야 충족으로 본다.
+          '수신 건수'가 아니라 '수신된 폴링 수'로 세는 이유: 버스트로 여러 건이
+          한꺼번에 왔다가 끊기는 경우를 건수로 세면 그대로 뚫린다.
+        """
         missing = []
-        now = time.monotonic()
+        now = self._now()
         for topic in self.req_topics:
             rx = self._last_rx.get(topic)
             if rx is None:
                 missing.append(f'{topic}(수신 0건)')
-            elif topic in self.latched:
-                # 래치 토픽은 '한 번 왔는가'가 조건이다. 신선도를 요구하면 발행이
-                # 끝난 뒤라 시간이 흐르는 것만으로 조건이 다시 깨진다.
                 continue
-            elif now - rx > self.topic_fresh:
+            if topic in self.latched:
+                # 래치 토픽은 '한 번 왔는가'가 조건이다. 신선도도, 반복 관측도 요구하지
+                # 않는다 — /map 은 설계상 한 번만 발행되므로 요구하면 영원히 못 통과한다.
+                continue
+            if now - rx > self.topic_fresh:
+                # 흐름이 끊겼다 → 지금까지의 관측을 버린다(한 번 찼다고 latch 되지 않게).
+                self._rx_confirm[topic] = 0
                 missing.append(f'{topic}({now - rx:.1f}s 전이 마지막)')
-            elif self.stamp_skew_max > 0.0:
+                continue
+            if rx != self._rx_seen.get(topic):
+                # 직전 폴링 이후 새 메시지가 왔다 = 관측 1회 추가.
+                self._rx_seen[topic] = rx
+                seen = self._rx_confirm.get(topic, 0)
+                if seen < _CONFIRM_MIN:
+                    self._rx_confirm[topic] = seen + 1
+            seen = self._rx_confirm.get(topic, 0)
+            if seen < _CONFIRM_MIN:
+                missing.append(f'{topic}(흐름 확인 {seen}/{_CONFIRM_MIN})')
+                continue
+            if self.stamp_skew_max > 0.0:
                 skew = self._last_stamp_skew.get(topic)
                 if skew is not None and abs(skew) > self.stamp_skew_max:
                     missing.append(f'{topic}(stamp 오차 {skew:+.2f}s)')
@@ -224,18 +301,33 @@ class ReadinessGate(Node):
 
     # ── lifecycle ───────────────────────────────────────────────────────
     def _lifecycle_ok(self):
-        """lifecycle 노드가 **지금** ACTIVE 인지 본다.
+        """
+        요구된 lifecycle 노드가 **지금** ACTIVE 인지 본다.
 
         ★ "한 번 ACTIVE 였다"를 기억해 두고 통과시키지 않는다(= latch 금지).
           이 저장소가 이미 내린 결정이다 — 게이트가 읽는 술어는 과거 1회 성공이 아니라
           지금의 실효값이어야 한다 (MASTER_PLAN.md §8 '게이트 술어 = live').
           여기서 latch 를 쓰면, 먼저 활성화된 노드가 뒤에 죽어도 게이트가 통과해
           '반쪽 Nav2' 위에서 주행이 시작된다.
-        판정 근거는 항상 '가장 최근에 완료된 조회'이고, 조회는 매 폴링마다 다시 띄운다
-        (한 번에 노드당 최대 1건만 in-flight — 응답이 안 오면 그 자체가 미충족).
+
+        ★★ 2026-07-29 Codex P1 보완 — **첫 ACTIVE 응답만으로는 충족이 아니다.**
+          그전 판정은 "가장 최근에 완료된 조회가 5초 안쪽의 ACTIVE 인가"였는데,
+          첫 응답을 수확한 바로 그 폴링에서 그 조건이 참이 된다(나이 0초). 게이트는
+          충족되면 즉시 종료하므로 다음 폴링이 없고, 유효기간 방어는 영영 실행되지
+          않는다 → "한 번 답했으면 통과"라는 latch 와 같아진다. 실제 위험 입력은
+          '노드가 ACTIVE 를 한 번 답한 직후 executor 가 멎는' 경우로, 서비스 이름은
+          그래프에 남아 있어 아무 신호도 나오지 않는다.
+          → 노드마다 **서로 다른 두 번의 '완료된' ACTIVE 응답**(_CONFIRM_MIN)을 요구한다.
+            노드당 in-flight 는 항상 1건이므로 확인은 폴링당 최대 1씩만 오르고,
+            따라서 2회는 반드시 서로 다른 왕복이다.
+          ⚠ 유효기간(_lc_stale)을 줄이는 것으로는 이 결함이 안 고쳐진다 — 첫 응답의
+            나이는 0초라 아무리 조여도 그 폴링에서 통과한다.
+
+        조회는 매 폴링마다 다시 띄운다(노드당 최대 1건 in-flight). 서비스 소실·응답
+        정지(stale)·non-ACTIVE 응답에서는 확인 상태를 **0 으로 되돌린다.**
         """
         missing = []
-        now = time.monotonic()
+        now = self._now()
         for name, client in self._lc_clients.items():
             # ① 지난 폴링에 띄운 조회가 끝났으면 결과를 갱신한다.
             fut, sent_at = self._lc_pending.get(name, (None, 0.0))
@@ -244,11 +336,19 @@ class ReadinessGate(Node):
                 result = fut.result()
                 state = result.current_state if result is not None else None
                 self._lc_state[name] = (state, now)
+                if state is not None and state.id == _STATE_ACTIVE:
+                    seen = self._lc_confirm.get(name, 0)
+                    if seen < _CONFIRM_MIN:
+                        self._lc_confirm[name] = seen + 1
+                else:
+                    # ACTIVE 가 아닌 응답이 하나라도 오면 지금까지의 확인은 무효다.
+                    self._lc_confirm[name] = 0
                 fut = None
             elif fut is not None and now - sent_at > self._lc_stale:
                 # ★ 응답이 안 오는 조회를 그냥 두면, 과거 결과가 영원히 '최신'인 척한다
                 #   (= 뒷문으로 들어온 latch). 버리고 다시 묻는다.
                 self._lc_pending.pop(name, None)
+                self._lc_confirm[name] = 0
                 try:
                     client.remove_pending_request(fut)
                 except (AttributeError, KeyError, ValueError):
@@ -258,6 +358,7 @@ class ReadinessGate(Node):
             # ② 서비스가 사라졌으면(노드 사망) 과거 결과를 즉시 버린다.
             if not client.service_is_ready():
                 self._lc_state.pop(name, None)
+                self._lc_confirm[name] = 0
                 missing.append(f'{name}(get_state 서비스 없음)')
                 continue
 
@@ -270,14 +371,20 @@ class ReadinessGate(Node):
                 missing.append(f'{name}(상태 조회 중)')
             elif now - obtained_at > self._lc_stale:
                 # ④ 결과에 유효기간을 둔다 — 노드가 살아 있는 척 멈춰도 통과 못 하게.
+                self._lc_confirm[name] = 0
                 missing.append(f'{name}(상태 응답 {now - obtained_at:.0f}s 지연)')
             elif state.id != _STATE_ACTIVE:
                 missing.append(f'{name}({state.label})')
+            elif self._lc_confirm.get(name, 0) < _CONFIRM_MIN:
+                # ⑤ ACTIVE 를 한 번 봤을 뿐 — 다음 조회의 응답이 실제로 완료돼야 통과.
+                missing.append(
+                    f'{name}(ACTIVE 확인 {self._lc_confirm.get(name, 0)}/{_CONFIRM_MIN})')
         return missing
 
     # ── 액션 ────────────────────────────────────────────────────────────
     def _actions_ok(self):
-        """액션 서버가 그래프에 올라왔는지 — 서비스 3종의 존재로 판정한다.
+        """
+        액션 서버가 그래프에 올라왔는지 — 서비스 3종의 존재로 판정한다.
 
         액션 하나는 내부적으로 서비스 3개(send_goal·cancel_goal·get_result) +
         토픽 2개(feedback·status)로 구현된다. rcl 의 가용성 판정도 같은 구성요소를
@@ -318,7 +425,8 @@ class ReadinessGate(Node):
 
 
 def _clean(values):
-    """빈 문자열 자리표시자를 걷어낸다.
+    """
+    빈 문자열 자리표시자를 걷어낸다.
 
     rclpy 는 빈 리스트만으로 파라미터 타입을 정할 수 없어 기본값을 [''] 로 둬야 한다.
     (`declare_parameter('x', [])` 는 타입 추론 실패로 에러)
