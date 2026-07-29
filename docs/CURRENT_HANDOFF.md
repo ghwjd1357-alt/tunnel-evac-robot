@@ -73,6 +73,20 @@ depth 실패를 어떻게 신호하는가 — 빈 배열 vs 명시 플래그). �
 - `docs/PROJECT_CONTEXT.md §4.1`(계약 세부 반영) · `docs/CURRENT_HANDOFF.md` · `docs/MASTER_PLAN.md`(§1 6단 ✅)
 - `~/Desktop/개발현황/` 다음 절
 
+⚠ **범위 이탈 명시 (07-29 — `e03064a` 선례와 같은 처리)**: 문서 동기화 점검에서 드리프트 3건을
+발견해 위 허용 파일 밖인 `docs/TEST_GATES.md` · `docs/FREEZE_MANIFEST.md` · `AGENTS.md` ·
+`CLAUDE.md` 를 **의도적으로 건드렸다.** 은폐하지 않고 사유를 남긴다.
+
+- **사유(왜 미루지 않았나)**: ①이 180s 예산의 **근거**를 옛 sleep 누적 수치로 남겨, 다음 세션이
+  "9s 로 수렴하니 예산을 조여도 된다"고 판단할 수 있는 **실행 위험**이다. 해당 문단 최종 수정 =
+  `0eb285c`(sleep 누적 시절)이고 벽시계 전환은 그 뒤 `d70bbaf` 였다 — 근거만 갱신에서 누락됐다.
+- **정정 3건**: ① `docs/TEST_GATES.md §2` 관측 분포를 벽시계 실측으로 갱신 + 옛 9s 계열 재사용 금지
+  명기 · ② 진입점 라우터(`CLAUDE.md` · `AGENTS.md`)에 `docs/FREEZE_MANIFEST.md` ·
+  `docs/REAL_ROBOT_VALUES.md` 등재(동결 증거가 상시 읽기 경로에 없었다) · ③ `docs/FREEZE_MANIFEST.md §9`
+  에 §8.1~§8.3 앞방향 포인터 추가(§9 만 읽으면 예약 6·7 이 열린 것으로 오독됨).
+- **불변 유지**: **런타임 코드·설정·지도 무변경**, 판정 기준 변경 없음(180s 결론 유지),
+  동결 기준점·태그 재개방 없음. `doc_check.sh` 는 ①을 구조적으로 못 잡는다(숫자·존재·중복만 검사).
+
 ## 금지 범위
 
 - **동결된 런타임 변경 금지** — `src/mission_manager/` 상태머신 로직 · `src/tunnel_sim/` · 설정 yaml ·

@@ -7,7 +7,7 @@
 
 1. **`AGENTS.md`** — 공통 규칙·사고 프로토콜·세션 파괴급 함정 5종·운영 규칙. **먼저 읽는다.**
 2. **`docs/CURRENT_HANDOFF.md`** — 이번 한 묶음의 범위·완료조건·게이트. **작업 시작 전 반드시 읽는다.**
-3. 작업에 필요한 절만: `docs/PROJECT_CONTEXT.md`(구조·계약·문서 맵) / `docs/MASTER_PLAN.md`(순서·사다리·유효 결정 색인) / `docs/TEST_GATES.md`(테스트·런치 실행법) / `docs/PITFALLS.md`(영역별 함정 — 해당 영역 작업 전 그 절).
+3. 작업에 필요한 절만: `docs/PROJECT_CONTEXT.md`(구조·계약·문서 맵) / `docs/MASTER_PLAN.md`(순서·사다리·유효 결정 색인) / `docs/TEST_GATES.md`(테스트·런치 실행법) / `docs/PITFALLS.md`(영역별 함정 — 해당 영역 작업 전 그 절) / `docs/FREEZE_MANIFEST.md`(동결 증거·해시·조건부 위험 — **platform-core 를 건드리기 전**) / `docs/REAL_ROBOT_VALUES.md`(구동부 실측값·실차 반영 지점 — 실차 작업 시).
 
 정본 우선순위·충돌 규칙은 `AGENTS.md §2`. 링크는 항상 `파일명 §번호`로 정확히 따라간다.
 Desktop 날짜별 현황(`~/Desktop/개발현황/`)은 역사·근거 — 필요 절만 선택해 읽는다.

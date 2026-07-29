@@ -46,10 +46,18 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 
 ★ **mission_e2e SEARCH_BACK 예산 = 180s** (`T_SEARCHBACK`, T자·쌍굴 공통 — 07-24 e2e-harness-fix
 재산정, **옛 90s 대체**). 근거는 아래 둘을 함께 남긴다(둘 중 하나만으론 '숫자만 올린 기준 완화'다):
-- **관측 도달 분포**: 표준환경 신규 7회(T자 3·쌍굴 4) 전부 **9s** 로 수렴. 역사 표본은 **9s ~ ≈90s**
-  (daemon flake·Nav2 플래닝 지연 환경 — `FREEZE_MANIFEST.md §8`). GATHER 도달은 T자 9s·쌍굴 45~48s
-  (역사 48/126/48). 변동성은 지형이 아니라 인프라 상태에 좌우돼 강제 재현이 어렵고, 역사 outlier 가
-  최악을 실증한다.
+- **관측 도달 분포** (★ 07-29 갱신 — **측정 방식이 다른 수치를 섞어 쓰지 않는다**):
+  - **현행 기준 = 벽시계 실측.** 최종 회차(`FREEZE_MANIFEST.md §8.3`): T자 GATHER **15s** ·
+    SEARCH_BACK **14s** · ESCAPED **22s** / 쌍굴 GATHER **76s** · SEARCH_BACK **14s** · ESCAPED **164s**.
+    직전 재검증 구간(`FREEZE_MANIFEST.md §8.1`): SEARCH_BACK **13~15s** · GATHER **71~143s** ·
+    ESCAPED **28~167s** — 전부 예산 내.
+  - ⚠ **옛 수치 재사용 금지**: 예산 재산정 당시 적었던 "표준환경 신규 7회 전부 **9s** 수렴 /
+    GATHER T자 9s·쌍굴 45~48s"는 **sleep 누적 측정값**이다 (`FREEZE_MANIFEST.md §8.1` 원문:
+    "옛 sleep 누적보다 정직하게 큼"). 벽시계보다 작게 나오므로 **이 9s 계열 숫자를 근거로
+    예산을 다시 조이지 말 것.**
+  - **역사 표본**(옛 하네스 · daemon flake · Nav2 플래닝 지연 환경): SEARCH_BACK **9s ~ ≈90s**,
+    GATHER 48/126/48 (`FREEZE_MANIFEST.md §8`). 변동성은 지형이 아니라 인프라 상태에 좌우돼
+    강제 재현이 어렵고, 이 역사 outlier 가 최악을 실증한다 — **180s 의 2배 마진이 여기에 걸려 있다.**
 - **상한이 보호하는 것**: "미션은 건강한데 팔로워 간격 벌어짐(≥(2.5−1.2)/0.12 ≈ 11s) + `lost_sec` 3s
   디바운스 + 재플래닝·goal 재전송 지연 + detection flicker 로 놓침 확정이 늦어지는 최악". 관측 최악
   ≈90s(옛 예산 경계에서 스쳐 실패)의 **2배 마진**. 이 상한을 넘으면 '건강한 지연'이 아니라 놓침이
