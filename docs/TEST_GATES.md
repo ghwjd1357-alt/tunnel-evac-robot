@@ -8,7 +8,7 @@
 ```bash
 python3 -m pytest src/mission_manager/test/ -q          # ~0.6s
 bash tools/test_harness_guards.sh                        # ~105초 — E2E 하네스 유한 상한 단위(§14~§16 P1)
-bash tools/test_gate_regression.sh                       # ~2분 — readiness_gate 조건 기동 12케이스(Gazebo 불필요)
+bash tools/test_gate_regression.sh                       # ~3분 — readiness_gate 조건 기동 14케이스(Gazebo 불필요)
 colcon test --packages-select mission_manager tunnel_sim tunnel_bringup
 colcon test-result --verbose                             # ⚠ 종료코드 말고 이걸로 판정
 bash tools/regression_negative.sh                        # ~6분
@@ -24,8 +24,9 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**07-30 갱신** — `tunnel_bringup` colcon 편입 반영): pytest **159 passed** / colcon **181 tests, 0 fail, 3 skip** / E2E 4종 PASS **+ 쌍굴 PASS**.
-★ 07-30 증분 = `tunnel_bringup` **+16** (게이트 판정 단위 13 + lint 3, 그중 copyright 1건 skip).
+기준선 (**07-30 2차 갱신** — Codex 2차 P1 보완 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / E2E 4종 PASS **+ 쌍굴 PASS**.
+★ 07-30 증분 = `tunnel_bringup` **+23** (게이트 판정 단위 **20** + lint 3, 그중 copyright 1건 skip).
+  1차 보완이 181(단위 13), 2차 보완이 **188**(단위 20 — lifecycle 세대 3 + TF 갱신 4 추가).
 pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/` 에 있어 `colcon test` 로만 돈다
 (doc_check 의 pytest 대조 대상은 `src/mission_manager/test/` 하나다).
 ⚠ **동결 태그 `platform-core-freeze-260724` @ `212885a` 자체의 수치는 pytest 159 / colcon
@@ -43,7 +44,8 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
 | test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) — Gazebo 불필요 | 10 케이스 전부 ✓ (§14~§16 P1) |
-| **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 3 + 음성 9). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3) | 12 케이스 전부 ✓ (~126초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (10케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
+| **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (12케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
+| ↳ **검출력 경계 (정직하게)** | 이 셸 층은 **2차 P1(소실 경계 in-flight 조회 폐기)을 검출하지 못한다** — 실측: 보완을 되돌려도 12/12 PASS. 소실 순간의 늦은 응답은 서비스 파괴와 함께 DDS 에서 소멸해 실물 층에서 만들 수 없다. 검출은 `src/tunnel_bringup/test/` 단위층 3케이스가 한다 | 층 분담을 흐리지 말 것 — 셸이 PASS 라고 세대 결함이 없는 것이 아니다 |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
 | regression_3goals | 주행 정확도 회귀 | 3종 SUCCEEDED, 최종 오차 **≤0.3m** |

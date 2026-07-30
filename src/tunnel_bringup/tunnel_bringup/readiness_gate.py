@@ -27,11 +27,19 @@ readiness_gate — "앞 단계가 진짜 살아났는가"를 확인하고 종료
   require_lifecycle_active  : lifecycle 노드가 ACTIVE(3) 인가 (Nav2 활성화 확인)
   require_actions           : 액션 서버가 그래프에 올라왔나 (goal 을 받을 수 있나)
 
-[★ 공통 규칙 — "한 번 관측 = 통과" 금지 (_CONFIRM_MIN)]
-  토픽·lifecycle 은 **서로 다른 폴링에서 2회** 관측돼야 충족이다. 게이트는 조건이 차는
-  순간 죽으므로, 첫 관측으로 통과시키면 그 뒤의 방어(신선도·유효기간)가 실행될 기회
-  자체가 없다 — 술어가 조용히 latch 로 퇴화한다. 대가는 통과가 폴링 1회만큼 늦는 것뿐.
-  예외는 래치 토픽 하나다(설계상 1회 발행 — 2회를 요구하면 영원히 통과 못 한다).
+[★ 공통 규칙 ① — "한 번 관측 = 통과" 금지 (_CONFIRM_MIN)]
+  토픽·lifecycle·TF(tf_fresh>0) 는 **서로 다른 폴링에서 2회** 관측돼야 충족이다.
+  게이트는 조건이 차는 순간 죽으므로, 첫 관측으로 통과시키면 그 뒤의 방어(신선도·
+  유효기간)가 실행될 기회 자체가 없다 — 술어가 조용히 latch 로 퇴화한다.
+  대가는 통과가 폴링 1회만큼 늦는 것뿐.
+  예외는 **설계상 1회만 발행되는 것** 둘이다: 래치 토픽(/map)과 정적 TF(tf_fresh=0).
+  이들에 2회를 요구하면 영원히 통과하지 못한다.
+
+[★ 공통 규칙 ② — 증거는 '세대'에 속한다]
+  연결이 끊긴 것을 관측하면(get_state 서비스 소실 · TF lookup 실패 · 토픽 신선도 초과)
+  **그 경계 이전의 증거를 전부 버린다** — 이미 센 카운터뿐 아니라 **아직 응답이 안 온
+  진행 중 조회까지.** 남겨 두면 지난 세대의 늦은 응답이 새 세대의 확인으로 수확되어
+  ①의 '2회' 가 실질 1회로 되돌아간다 (2026-07-30 Codex 2차 P1 이 정확히 이것이었다).
 
 [이 게이트가 확인하지 '않는' 것 — 정직하게 적어 둔다]
   · 값의 품질(오도메트리 정확도·IMU 축 부호·covariance 의미)은 못 본다.
@@ -121,7 +129,7 @@ class ReadinessGate(Node):
 
     def init_conditions(self, label, topics, latched, tf, lifecycle, actions,
                         topic_fresh, tf_fresh, timeout, poll, stamp_skew_max,
-                        now_fn=time.monotonic):
+                        now_fn=time.monotonic, ros_now_fn=None):
         """
         판정에 쓰는 상태를 전부 세팅한다 — ROS 자원은 하나도 만들지 않는다.
 
@@ -132,6 +140,11 @@ class ReadinessGate(Node):
           '가짜 clock 주입 + 순수 로직' 방식과 같은 결).
         now_fn 도 같은 이유로 주입식이다. 실동작은 monotonic 벽시계 그대로이고,
         시험에서만 가짜 시계를 꽂아 '5초 유효기간' 경계를 결정적으로 넘긴다.
+
+        ★ 시계가 **두 개**인 것에 주의: now_fn 은 monotonic(도착시각·유효기간용),
+          ros_now_fn 은 ROS 시계(TF stamp 와 비교하는 용도)다. 섞으면 안 된다 —
+          stamp 는 ROS 시계로 찍혀 오므로 monotonic 과 빼면 의미 없는 수가 나온다.
+          기본값 None 이면 실제 노드 시계를 쓴다(= 실동작). 시험에서만 주입한다.
         """
         self.label = label
         self.req_topics = list(topics)
@@ -149,6 +162,7 @@ class ReadinessGate(Node):
         self.poll = poll
         self.stamp_skew_max = stamp_skew_max
         self._now = now_fn
+        self._ros_now = ros_now_fn or self._node_clock_sec
 
         # ── 토픽 신선도 추적 ────────────────────────────────────────────
         # 도착 시각은 ROS 시계가 아니라 monotonic 벽시계로 잰다.
@@ -159,7 +173,10 @@ class ReadinessGate(Node):
         self._rx_confirm = {}        # topic -> 서로 다른 폴링에서 받은 횟수 (_CONFIRM_MIN 까지)
         self._rx_seen = {}           # topic -> 직전 폴링에서 본 도착시각 (새 메시지 판별용)
 
+        # ── TF 갱신 추적 ────────────────────────────────────────────────
         self._tf_buffer = None
+        self._tf_confirm = {}        # "부모:자식" -> 서로 다른 stamp 를 본 횟수
+        self._tf_seen = {}           # "부모:자식" -> 직전 폴링에서 본 stamp
 
         # ── lifecycle ───────────────────────────────────────────────────
         self._lc_clients = {}
@@ -172,6 +189,10 @@ class ReadinessGate(Node):
 
         self._t0 = self._now()
         self._last_report = 0.0
+
+    def _node_clock_sec(self):
+        """ROS 시계의 '지금'을 초 단위 float 로 (실동작용 기본 ros_now_fn)."""
+        return self.get_clock().now().nanoseconds * 1e-9
 
     # ── 토픽 ────────────────────────────────────────────────────────────
     def _ensure_subscriptions(self):
@@ -279,7 +300,22 @@ class ReadinessGate(Node):
 
     # ── TF ──────────────────────────────────────────────────────────────
     def _tf_ok(self):
+        """
+        요구된 TF 가 연결됐는가 — tf_fresh > 0 이면 **지금도 갱신되고 있는가**까지.
+
+        ★★ 2026-07-30 확대분 (lifecycle·토픽과 같은 결함 계열).
+          신선도만 보면 뚫린다: `map:odom` 을 한 번 발행하고 slam_toolbox 가 멎어도,
+          tf_fresh(3초) 안에 판정되는 **첫 폴링**에서 통과한다. 게이트는 통과하는
+          순간 죽으므로 '3초 뒤 다시 본다'가 없다 → real_bringup 2단계 게이트가
+          굳은 위치추정 위에서 Nav2 를 띄운다.
+          → 서로 다른 폴링에서 **stamp 가 바뀐 것을 _CONFIRM_MIN 회** 봐야 충족.
+          ⚠ tf_fresh 를 줄이는 것으로는 안 고쳐진다 — 첫 폴링의 나이는 0 에 가깝다.
+
+        ⚠ tf_fresh == 0(정적 TF)은 예외다. URDF 고정 joint 는 설계상 한 번만
+          발행되므로 갱신을 요구하면 영원히 통과 못 한다 — 래치 토픽과 같은 자리다.
+        """
         missing = []
+        now = self._ros_now()
         for pair in self.req_tf:
             if ':' not in pair:
                 missing.append(f'{pair}(형식 오류 — "부모:자식")')
@@ -288,18 +324,51 @@ class ReadinessGate(Node):
             try:
                 tr = self._tf_buffer.lookup_transform(parent, child, rclpy.time.Time())
             except tf2_ros.TransformException as exc:
+                # 끊긴 순간 지금까지의 갱신 확인을 버린다(돌아왔다고 바로 통과 금지).
+                self._tf_confirm[pair] = 0
                 missing.append(f'{parent}->{child}({type(exc).__name__})')
                 continue
-            # tf_fresh_sec > 0 이면 '연결됐다'가 아니라 '지금도 갱신되고 있다'까지 본다.
-            # 정적 TF(URDF 고정 joint)는 한 번만 발행되므로 반드시 0 으로 둘 것.
-            if self.tf_fresh > 0.0:
-                stamp = tr.header.stamp.sec + tr.header.stamp.nanosec * 1e-9
-                age = self.get_clock().now().nanoseconds * 1e-9 - stamp
-                if age > self.tf_fresh:
-                    missing.append(f'{parent}->{child}({age:.1f}s 전이 마지막 갱신)')
+            if self.tf_fresh <= 0.0:
+                continue                       # 정적 TF — '연결됐다'까지가 조건
+            stamp = tr.header.stamp.sec + tr.header.stamp.nanosec * 1e-9
+            age = now - stamp
+            if age > self.tf_fresh:
+                self._tf_confirm[pair] = 0
+                missing.append(f'{parent}->{child}({age:.1f}s 전이 마지막 갱신)')
+                continue
+            if stamp != self._tf_seen.get(pair):
+                # 직전 폴링 이후 새로 발행됐다 = 갱신 관측 1회 추가.
+                self._tf_seen[pair] = stamp
+                seen = self._tf_confirm.get(pair, 0)
+                if seen < _CONFIRM_MIN:
+                    self._tf_confirm[pair] = seen + 1
+            seen = self._tf_confirm.get(pair, 0)
+            if seen < _CONFIRM_MIN:
+                missing.append(f'{parent}->{child}(갱신 확인 {seen}/{_CONFIRM_MIN})')
         return missing
 
     # ── lifecycle ───────────────────────────────────────────────────────
+    def _drop_lc_pending(self, name, client):
+        """
+        이 노드의 진행 중 조회를 '지난 세대의 증거'로 보고 버린다.
+
+        ★★ 2026-07-30 Codex 2차 P1 보완의 핵심. 버리는 곳이 두 군데(응답 정지 /
+          서비스 소실)인데 한쪽만 고쳐져 있었던 것이 그 결함의 직접 원인이라,
+          **버리는 코드를 여기 하나로 모은다.** 새 초기화 지점이 생기면 이 함수를
+          부르는 것이 규칙이다.
+
+        왜 pop 이 본질인가: `_lc_pending` 에서 빼는 순간 그 future 는 다시 읽히지
+        않는다(= 늦은 응답이 확인 수를 올릴 수 없다). `remove_pending_request` 는
+        클라이언트 내부에 남는 요청 슬롯 정리용이며, 실패해도 판정은 안전하다.
+        """
+        fut, _sent_at = self._lc_pending.pop(name, (None, 0.0))
+        if fut is None:
+            return
+        try:
+            client.remove_pending_request(fut)
+        except (AttributeError, KeyError, ValueError):
+            pass
+
     def _lifecycle_ok(self):
         """
         요구된 lifecycle 노드가 **지금** ACTIVE 인지 본다.
@@ -347,16 +416,22 @@ class ReadinessGate(Node):
             elif fut is not None and now - sent_at > self._lc_stale:
                 # ★ 응답이 안 오는 조회를 그냥 두면, 과거 결과가 영원히 '최신'인 척한다
                 #   (= 뒷문으로 들어온 latch). 버리고 다시 묻는다.
-                self._lc_pending.pop(name, None)
+                self._drop_lc_pending(name, client)
                 self._lc_confirm[name] = 0
-                try:
-                    client.remove_pending_request(fut)
-                except (AttributeError, KeyError, ValueError):
-                    pass
                 fut = None
 
-            # ② 서비스가 사라졌으면(노드 사망) 과거 결과를 즉시 버린다.
+            # ② 서비스가 사라졌으면(노드 사망) 지난 세대의 증거를 **전부** 버린다.
+            #   ★★ 2026-07-30 Codex 2차 P1: 여기서 카운터(_lc_confirm)만 0 으로 되돌리고
+            #     진행 중 조회(_lc_pending)를 남겨 두면, 단절 전에 보낸 그 조회가 복구 뒤
+            #     늦게 ACTIVE 로 완료돼 ①에서 **새 세대의 확인 1회**로 수확된다. 복구된
+            #     서버가 딱 한 번만 답해도 1+1=2 가 되어 게이트가 통과한다 → _CONFIRM_MIN
+            #     이 실질 1회로 퇴화. 서비스 소실은 **이전 서버의 liveness 증거를 무효화하는
+            #     경계**이므로, 그 경계를 넘는 증거는 완료 여부와 무관하게 폐기한다.
+            #   ⚠ 알려진 한계: DDS 가 알아채기 전에(<1폴링) 서버가 재시작하면 소실이
+            #     관측되지 않아 두 세대를 구분할 수 없다. GetState 응답에 세대 식별자가
+            #     없어 이 계층에서는 못 닫는다 (CURRENT_HANDOFF '남은 검증 상한').
             if not client.service_is_ready():
+                self._drop_lc_pending(name, client)
                 self._lc_state.pop(name, None)
                 self._lc_confirm[name] = 0
                 missing.append(f'{name}(get_state 서비스 없음)')

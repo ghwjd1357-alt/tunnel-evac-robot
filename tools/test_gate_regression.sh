@@ -14,9 +14,14 @@
 #   2층 = 이 파일 → 그 판정이 **실제 rclpy·DDS·ros2 launch 위에서도 같은지** 본다.
 #         1층만 있으면 "가짜가 실물을 잘못 흉내 냈을 가능성"이 남는다.
 #
-# ★ 재현 대상 (2026-07-29 Codex 검토 P1): lifecycle 서버가 ACTIVE 를 **정확히 한 번**
+# ★ 재현 대상 ① (2026-07-29 Codex 1차 P1): lifecycle 서버가 ACTIVE 를 **정확히 한 번**
 #   답한 뒤 멎어도 게이트가 통과했다 → 반쪽 Nav2 위에서 미션이 기동. 케이스 6 이 그 입력이다.
 #   ⚠ "처음부터 응답 없는" 서버(케이스 7)로는 이 결함을 못 잡는다 — 그 경로는 원래 실패한다.
+# ★ 재현 대상 ② (2026-07-30 Codex 2차 P1): get_state 서비스가 잠깐 사라졌다 돌아오면
+#   단절 전에 보낸 조회가 폐기되지 않아, 그 늦은 ACTIVE 1회 + 복구 후 ACTIVE 1회로
+#   통과했다. 케이스 13 이 그 입력이고 14 가 대조군(복구되면 정상 통과)이다.
+#   ⚠ 케이스 13·14 는 소실이 **관측됐는지**를 먼저 단언한다 — 관측 안 되면 그 케이스는
+#     아무것도 시험하지 않은 것이므로 PASS 가 아니라 인프라 실패로 갈라 낸다.
 #
 # ⚠ 동시 실행 금지: 정리 단계가 nav2·slam·ekf 프로세스를 전역으로 죽인다(AGENTS.md §4).
 #   Gazebo 가 떠 있으면 아예 시작하지 않는다.
@@ -212,6 +217,47 @@ run_mis nowp     "map_file:=$LOGDIR/fakemap" mission:=true
 [ "$mis_ok" = 1 ] \
   && ok "없는 지도 · 확장자 붙인 지도 · waypoints 없는 mission — 전부 process started 0" \
   || ng "노드가 떴다:$mis_detail"
+
+# ── 13·14: 서비스 소실→복구 세대 경계 (★ Codex 2차 P1 의 경계 가드) ────────
+#   ※ 번호는 '추가된 순서'다. 11·12(런치 양성 체인)는 물리적으로 이 뒤에서 돈다 —
+#     기존 기록(0729_현황.md)의 케이스 번호를 보존하려고 재번호를 하지 않았다.
+#   ※ 런치가 필요 없으므로 GATE_SKIP_LAUNCH=1 에서도 돈다.
+#   ★ 정직하게: 이 두 케이스는 2차 P1 의 **검출기가 아니다.** '단절 전에 보낸 조회의 늦은
+#     응답'은 서비스를 파괴하는 순간 DDS 에서 함께 소멸하므로 실물 층에서 만들 수 없다.
+#     검출은 1층 pytest(test_n5_*, test_service_loss_removes_pending_request)가 하고,
+#     여기서는 **실물 DDS 위에서도 소실→복구 경계의 관측 가능한 결과가 같은지**를 지킨다.
+echo "== 13: N5 경계 — 서비스가 소실됐다 복구된 뒤 ACTIVE 1회만 답하면 1"
+fake lifecycle --node /planner_server:active,active,hang --drop-at 1 --drop-sec 6.0
+sleep 3
+rc=$(gate gen_break 30.0 -p "require_lifecycle_active:=['/planner_server']")
+# ★ 사전조건 단언 2종: 입력이 실제로 걸렸는가(가짜 로그) + 게이트가 실제로 관측했는가
+#   (게이트 로그). 하나라도 없으면 이 케이스는 아무것도 시험하지 않은 것이므로
+#   PASS 가 아니라 인프라 실패로 갈라 낸다 (조용히 무의미해지는 길 봉쇄).
+#   ⚠ 게이트는 미충족 사유를 5초 주기로만 찍는다 → drop-sec 은 5 이상이어야 한다.
+dropped=$(grep -c "get_state 파괴" "$LOGDIR"/fake_*.log 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')
+lost=$(grep -c "get_state 서비스 없음" "$LOGDIR/gate_gen_break.log" || true)
+if [ "$dropped" = 0 ] || [ "$lost" = 0 ]; then
+  ng "입력 미성립 (파괴=$dropped · 게이트 관측=$lost) — 케이스가 성립하지 않았다 [인프라 실패]"
+else
+  [ "$rc" = 1 ] \
+    && ok "소실 관측 ${lost}건 → 복구 후 ACTIVE 1회로는 통과 못 함" \
+    || ng "rc=$rc — 소실 경계를 넘어 확인이 누적됐다"
+fi
+stop_fakes
+
+echo "== 14: R3 역회귀 — 소실됐다 복구해 새 ACTIVE 2회를 답하면 0"
+fake lifecycle --node /planner_server:active --drop-at 1 --drop-sec 6.0
+sleep 3
+rc=$(gate gen_recover 35.0 -p "require_lifecycle_active:=['/planner_server']")
+lost=$(grep -c "get_state 서비스 없음" "$LOGDIR/gate_gen_recover.log" || true)
+if [ "$lost" = 0 ]; then
+  ng "소실이 관측되지 않음 — 대조군이 성립하지 않았다 [인프라 실패]"
+else
+  { [ "$rc" = 0 ] && grep -q "준비 완료" "$LOGDIR/gate_gen_recover.log"; } \
+    && ok "소실 관측 ${lost}건 뒤 복구되면 정상 통과 ('한 번 끊기면 영영 못 뜬다'가 아니다)" \
+    || ng "rc=$rc — 복구 후에도 통과 못 함 (보완이 과잉 차단)"
+fi
+stop_fakes
 
 if [ "${GATE_SKIP_LAUNCH:-0}" = 1 ]; then
   echo "(11·12 런치 양성 체인 생략 — GATE_SKIP_LAUNCH=1)"

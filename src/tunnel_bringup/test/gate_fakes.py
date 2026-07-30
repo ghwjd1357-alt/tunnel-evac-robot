@@ -20,6 +20,14 @@ gate_fakes.py — `readiness_gate` 회귀용 '가짜 조건' 발생기 (로봇·
                  hang     = **응답하지 않음** (서비스 이름은 그래프에 그대로 남는다)
                ★ 'active,hang' 이 2026-07-29 Codex P1 의 재현 입력이다 —
                  "한 번 ACTIVE 를 답한 직후 executor 가 멎은 노드".
+               ★★ --drop-at N --drop-sec S = 서비스 **소실→복구** (2026-07-30 2차 P1).
+                 'active,active,hang' + --drop-at 1 이면 "단절 전 1회 → 소실 → 복구 →
+                 ACTIVE 1회 → 멎음". 게이트가 소실 경계에서 지난 세대 증거를 버리지
+                 않으면 이 입력에서 통과해 버린다.
+                 ⚠ 이 층에서 **재현할 수 없는 것**: '단절 전에 보낸 요청의 늦은 응답이
+                   복구 뒤 실제로 도착하는' 순간. 서비스를 파괴하면 그 요청은 DDS 상에서
+                   소멸한다. 그 순간은 1층(pytest, FakeFuture)이 증명하고, 여기서는
+                   **관측 가능한 결과**(소실→복구→ACTIVE 1회 ⇒ rc 1)를 증명한다.
   action     : 액션 서버를 그래프에 올려 둔다 (goal 은 전부 거절 — 존재만 흉내).
 
 [QoS 를 일부러 BEST_EFFORT 로 발행하는 이유]
@@ -149,19 +157,63 @@ class FakeSensors(Node):
 
 
 class FakeLifecycle(Node):
-    """`<노드>/get_state` 를 대본대로 응답한다 (대본이 떨어지면 마지막 항목 반복)."""
+    """
+    `<노드>/get_state` 를 대본대로 응답한다 (대본이 떨어지면 마지막 항목 반복).
 
-    def __init__(self, specs):
+    ★ --drop-at / --drop-sec = **서비스 소실→복구** 흉내 (2026-07-30 Codex 2차 P1).
+      모든 노드가 drop_at 회 답한 뒤 get_state 서비스를 **파괴**하고, drop_sec 초 뒤
+      다시 만든다. 대본 순번은 이어진다 — 즉 `active,active,hang` + drop_at=1 이면
+      "단절 전 1회 ACTIVE → 소실 → 복구 → ACTIVE 1회 → 이후 멎음" 이 된다.
+      ⚠ drop_sec 은 **5초 이상** 줄 것. 게이트는 미충족 사유를 5초 주기로만 찍으므로,
+        더 짧으면 소실이 로그에 안 남아 하네스가 "정말 관측됐는가"를 확인할 수 없다
+        (확인 못 하는 케이스는 조용히 아무것도 시험하지 않는 케이스가 된다).
+      ⚠ 이 층에서 **재현되지 않는 것**: 소실 순간에 날아가 있던 조회. 대본상 직전 응답이
+        이미 수확된 뒤 서비스가 파괴되므로 in-flight 조회가 없고, 설령 있어도 파괴와 함께
+        DDS 에서 소멸해 '늦은 응답'이 도착하지 않는다. 즉 이 두 케이스는 P1 **검출기가
+        아니라 경계 가드**다 — 검출은 1층(pytest, FakeFuture)이 한다.
+    """
+
+    def __init__(self, specs, drop_at=0, drop_sec=0.0):
         super().__init__('gate_fake_lifecycle')
         self._group = ReentrantCallbackGroup()
         self._counts = {}
         self._stop = threading.Event()
+        self._scripts = dict(specs)
+        self._srv_handles = {}
         for name, script in specs:
-            srv = name if name.endswith('/get_state') else f'{name}/get_state'
-            self.create_service(
-                GetState, srv,
-                self._make_cb(name, script), callback_group=self._group)
-            self.get_logger().info(f'가짜 lifecycle {srv} — 대본 {script}')
+            self._create_service_for(name)
+            self.get_logger().info(f'가짜 lifecycle {name}/get_state — 대본 {script}')
+
+        self._drop_at = drop_at
+        self._drop_sec = drop_sec
+        self._dropped = False
+        self._restore_at = None
+        if drop_at > 0:
+            self.create_timer(0.1, self._drop_tick, callback_group=self._group)
+
+    def _create_service_for(self, name):
+        """노드 하나의 get_state 서비스를 만든다(복구 때도 이 경로로 재생성)."""
+        srv = name if name.endswith('/get_state') else f'{name}/get_state'
+        self._srv_handles[name] = self.create_service(
+            GetState, srv,
+            self._make_cb(name, self._scripts[name]), callback_group=self._group)
+
+    def _drop_tick(self):
+        """모든 노드가 drop_at 회 답하면 서비스를 파괴하고, drop_sec 뒤 되살린다."""
+        now = time.monotonic()
+        if not self._dropped:
+            if all(self._counts.get(n, 0) >= self._drop_at for n in self._scripts):
+                for name, srv in self._srv_handles.items():
+                    self.destroy_service(srv)
+                    self.get_logger().warn(f'{name}: get_state 파괴 — 서비스 소실 흉내')
+                self._srv_handles = {}
+                self._dropped = True
+                self._restore_at = now + self._drop_sec
+        elif self._restore_at is not None and now >= self._restore_at:
+            for name in self._scripts:
+                self._create_service_for(name)
+                self.get_logger().info(f'{name}: get_state 재생성 — 서비스 복구')
+            self._restore_at = None
 
     def _make_cb(self, name, script):
         """노드 하나의 응답 콜백을 만든다."""
@@ -229,6 +281,10 @@ def build_parser():
     lifecycle = sub.add_parser('lifecycle', help='<노드>/get_state 서비스')
     lifecycle.add_argument('--node', action='append', required=True,
                            help='이름[:대본] (예: /planner_server:active,hang)')
+    lifecycle.add_argument('--drop-at', type=int, default=0,
+                           help='N회 답한 뒤 get_state 서비스를 파괴한다 (0=안 함)')
+    lifecycle.add_argument('--drop-sec', type=float, default=2.0,
+                           help='파괴 후 몇 초 뒤 재생성할지 (게이트 유효기간 5s 보다 짧게)')
 
     action = sub.add_parser('action', help='액션 서버 존재만 흉내')
     action.add_argument('--name', default='/navigate_to_pose')
@@ -243,7 +299,8 @@ def main(argv=None):
     if args.mode == 'sensors':
         node = FakeSensors(args.messages, args.with_filtered, args.delay)
     elif args.mode == 'lifecycle':
-        node = FakeLifecycle([parse_spec(spec) for spec in args.node])
+        node = FakeLifecycle([parse_spec(spec) for spec in args.node],
+                             args.drop_at, args.drop_sec)
     else:
         node = FakeAction(args.name)
     executor.add_node(node)
