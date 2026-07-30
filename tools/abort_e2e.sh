@@ -97,19 +97,22 @@ if ! python3 -c "exit(0 if $drift <= 0.10 else 1)"; then
   #   '코드 결함(취소 경로)' 인지 '잔류 명령/시뮬 특성' 인지를 FAIL 메시지에 담는다.
   #   (구판은 이 구분에 07-24 동결 게이트에서 수동 규명이 필요했다 — 0723_현황.md §11.3)
   echo "  ⚠ 실정지 단언 실패 — cleanup 전에 /cmd_vel 잔류 수집 (원인 자동 분류)"
-  collect_cmdvel "$LOGDIR/cmdvel_stopfail.log"
-  stopfail_n=$(cmdvel_nonzero "$LOGDIR/cmdvel_stopfail.log")
-  echo "  잔류 판독: '${stopfail_n}' 건 (빈값=판독 실패, 덤프: $LOGDIR/cmdvel_stopfail.log)"
+  stopfail_n=$(measure_cmdvel_residual "$LOGDIR/cmdvel_stopfail.log")
+  echo "  잔류 판독 '${stopfail_n}' 건 (빈값=판독 실패, 덤프: $LOGDIR/cmdvel_stopfail.log)"
   fail "abort 후에도 이동 계속 (${drift}m > 0.10m) — 취소가 실주행을 못 멈춤 | 원인 분류: $(classify_stop_failure "$stopfail_n")"
 fi
 echo "  ✓ 정지 확인"
 
 echo "== ⑧ /cmd_vel 잠잠 확인 (2초 수집 — 0 이 아닌 속도 명령이 없어야)"
-# 수집·판독은 ⑦ 실패 경로와 **같은 함수**를 쓴다 (lib_e2e.sh) — 한쪽만 고쳐지는 드리프트 봉쇄.
-collect_cmdvel "$LOGDIR/cmdvel.log"
-nonzero=$(cmdvel_nonzero "$LOGDIR/cmdvel.log")
-[ "$nonzero" = "0" ] || fail "abort 후에도 /cmd_vel 에 속도 명령 ${nonzero}건 (빈값=판독 실패)"
-echo "  ✓ /cmd_vel 잠잠"
+# 수집·판독·분류는 ⑦ 실패 경로와 **같은 계약**을 쓴다 (lib_e2e.sh) — 한쪽만 고쳐지는 드리프트 봉쇄.
+# ★ 07-31 §7.2 P1: 구판은 판독 실패('')를 "속도 명령 건" 이라는 빈 문구로 흘렸고, 더 나쁘게는
+#   빈 덤프가 '0건'으로 판독돼 **그대로 PASS** 였다. 이제 '0건'은 완전한 유한 Twist 를
+#   최소 1개 본 경우에만 나온다 — 그 외는 전부 여기서 FAIL 하며 분류 문구를 함께 남긴다.
+nonzero=$(measure_cmdvel_residual "$LOGDIR/cmdvel.log")
+if [ "$nonzero" != "0" ]; then
+  fail "abort 후 /cmd_vel 판정 실패 (덤프: $LOGDIR/cmdvel.log) — $(classify_stop_failure "$nonzero")"
+fi
+echo "  ✓ /cmd_vel 잠잠 (관측 근거 확보: 발행자 생존 확인 + 완전 표본 또는 관측된 침묵)"
 
 echo "== ⑨ 미션 로그의 취소 감시 확인 (cancel 응답 확인 콜백이 실제로 돌았나)"
 # ★ S2-5 (Codex §8.3): PASS 문구는 실제로 확인된 것만 말한다 — '접수 안 됨' 분기로

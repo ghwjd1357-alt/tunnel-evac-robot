@@ -240,8 +240,9 @@ angular:
 EOF
 n_quiet=$(cmdvel_nonzero "$FAKEBIN/cmdvel_quiet.log")
 msg_quiet=$(classify_stop_failure "$n_quiet")
-l_collect=$(grep -n 'collect_cmdvel "\$LOGDIR/cmdvel_stopfail.log"' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
-l_fail=$(grep -n 'abort 후에도 이동 계속' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
+# ⚠ 배선 단언은 `-F`(고정 문자열)로만 — 아래 케이스 15 주석의 07-31 실측 참조.
+l_collect=$(grep -nF 'measure_cmdvel_residual "$LOGDIR/cmdvel_stopfail.log"' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
+l_fail=$(grep -nF 'abort 후에도 이동 계속' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
 if [ "$n_quiet" = 0 ] && echo "$msg_quiet" | grep -q "잔류 명령" \
    && [ "$msg_quiet" != "$msg_res" ] \
    && [ -n "$l_collect" ] && [ -n "$l_fail" ] && [ "$l_collect" -lt "$l_fail" ]; then
@@ -264,6 +265,88 @@ out_ok=$(FAKE_GZ_OUT="-11.87 -0.06 0.05 0 0 3.14" gz_model_xy tunnel_robot)
 { [ -z "$out_hang" ] && [ "$el" -le 13 ] && [ "$out_ok" = "-11.87 -0.06" ]; } \
   && ok "TERM 무시 gz → 빈 결과·벽시계 ${el}s ≤ 10s(+여유) · 정상 조회 '$out_ok' 보존" \
   || ng "out_hang='$out_hang' el=${el}s out_ok='$out_ok' — 무한 행 미봉쇄 또는 정상 조회 역회귀"
+
+# ── 케이스 14: cmdvel 판독기 fail-closed — 빈·경고문·필드누락·NaN/Inf 는 전부 '판독 실패' ──
+#   07-31 §7.2 P1 부정 회귀 (Codex). 구판은 정규식에 걸린 값이 하나도 없어도 sum([])==0 을
+#   찍어 **전부 '잔류 0건'** 으로 둔갑시켰고, ⑧ 에서는 그대로 PASS 였다(구현자 재현 확정).
+#   ★ 케이스 11·12 는 완전한 zero/nonzero Twist 두 종만 봤다 — 세 번째 갈래를 아예 안 넣었다.
+echo "== 14: cmdvel 판독기 fail-closed — 빈·경고문·필드누락·NaN·Inf 전부 '판독 실패'"
+printf ''                                                                   > "$FAKEBIN/cv_empty.log"
+printf 'WARNING: topic [/cmd_vel] does not appear to be published yet\n'     > "$FAKEBIN/cv_warn.log"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n---\n'                                  > "$FAKEBIN/cv_short.log"
+printf 'linear:\n  x: nan\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_nan.log"
+printf 'linear:\n  x: inf\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_inf.log"
+printf 'linear:\n  x: abc\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_text.log"
+fc_ok=1; fc_note=""
+for cv in cv_empty cv_warn cv_short cv_nan cv_inf cv_text; do
+  n=$(cmdvel_nonzero "$FAKEBIN/$cv.log")
+  m=$(classify_stop_failure "$n")
+  { [ -z "$n" ] && echo "$m" | grep -q "분류 불가"; } || { fc_ok=0; fc_note="$fc_note [$cv→'$n']"; }
+done
+n_missing=$(cmdvel_nonzero "$FAKEBIN/does_not_exist.log")     # 수집 자체가 없던 경우
+[ -z "$n_missing" ] || { fc_ok=0; fc_note="$fc_note [없는파일→'$n_missing']"; }
+# ★ 침묵은 '관측 근거'가 있을 때만 인정된다 — 발행자 0/조회실패면 근거 없는 빈 덤프다.
+n_sil0=$(cmdvel_nonzero "$FAKEBIN/cv_empty.log" 0)
+n_silx=$(cmdvel_nonzero "$FAKEBIN/cv_empty.log" "")
+{ [ -z "$n_sil0" ] && [ -z "$n_silx" ]; } || { fc_ok=0; fc_note="$fc_note [발행자0→'$n_sil0' 조회실패→'$n_silx']"; }
+# ★ 근거가 있어도 '손상'은 손상이다 — 발행자 1 이어도 NaN 덤프는 판독 실패여야 한다.
+n_nanpub=$(cmdvel_nonzero "$FAKEBIN/cv_nan.log" 1)
+n_shortpub=$(cmdvel_nonzero "$FAKEBIN/cv_short.log" 1)
+{ [ -z "$n_nanpub" ] && [ -z "$n_shortpub" ]; } \
+  || { fc_ok=0; fc_note="$fc_note [발행자1+NaN→'$n_nanpub' 발행자1+누락→'$n_shortpub']"; }
+# ★ 수집 rc 가 정상이어도 덤프가 비면 판독 실패여야 한다 — 판정 주체는 판독기다.
+collect_cmdvel "$FAKEBIN/cv_collected.log" 1; coll_rc=$?
+n_coll=$(cmdvel_nonzero "$FAKEBIN/cv_collected.log")
+[ "$coll_rc" = 0 ] && [ -z "$n_coll" ] || { fc_ok=0; fc_note="$fc_note [수집rc=$coll_rc→'$n_coll']"; }
+[ "$fc_ok" = 1 ] \
+  && ok "6종 손상 입력 + 없는 파일 + 빈 수집 전부 '판독 실패'→'분류 불가' (0건으로 둔갑 없음)" \
+  || ng "판독기가 손상 입력을 0건으로 판독:$fc_note — §7.2 P1 회귀"
+
+# ── 케이스 15: cmdvel 판독기 역회귀 — 정상 입력은 그대로 + 꼬리 잘림 허용 + ⑧ 배선 ──
+#   조이다가 정상 판독을 죽이면 그것대로 게이트가 거짓 FAIL 을 낸다. 그리고 시간상자
+#   수집이라 **마지막 메시지가 잘리는 것은 정상 형상**이다 — 그걸 손상으로 보면 안 된다.
+echo "== 15: cmdvel 판독기 역회귀 — 정상 0건/nonzero 보존 + 잘린 꼬리 허용 + ⑧ 배선"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\nlinear:\n  x: 0.0\n' \
+  > "$FAKEBIN/cv_zero_tail.log"
+printf 'linear:\n  x: 0.26\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: -0.35\n---\nangular:\n  x: 0.0\n' \
+  > "$FAKEBIN/cv_res_tail.log"
+n_zero=$(cmdvel_nonzero "$FAKEBIN/cv_zero_tail.log")
+n_res2=$(cmdvel_nonzero "$FAKEBIN/cv_res_tail.log")
+# ★★ 07-31 실측 역회귀 — 이 저장소의 실제 '잠잠'은 zero Twist 가 아니라 **완전 침묵**이다
+#    (abort 뒤 nav2 가 발행을 멈춘다 — 실덤프 0바이트를 직접 확인했다). 발행자가 살아 있는데
+#    아무것도 안 왔으면 그것이 정상 PASS 다. 이걸 '판독 실패'로 두면 abort_e2e 가 영구 거짓 FAIL.
+n_sil_ok=$(cmdvel_nonzero "$FAKEBIN/cv_empty.log" 1)
+# ⑧ 배선: 판독 실패('')가 PASS 로 새지 않도록 '!= 0' 비교 + 같은 분류 함수를 쓰는가
+# ⚠ 반드시 `-F`(고정 문자열). 07-31 실측: `grep -E` 의 `.*` 는 한글·em대시가 섞인 줄을
+#   **못 넘어가 조용히 0 을 낸다** (`-F` 는 1, `-E` 는 0, LC_ALL 무관). 배선 단언에 정규식을
+#   쓰면 검사가 '배선이 없어서'가 아니라 '패턴이 안 맞아서' 판정된다 — 이 저장소의 코드는
+#   주석·메시지가 한글이라 이 함정을 상시 밟는다.
+l_cmp=$(grep -cF '"$nonzero" != "0"' "$HERE/abort_e2e.sh" || true)
+l_cls=$(grep -cF 'classify_stop_failure "$nonzero"' "$HERE/abort_e2e.sh" || true)
+# ⑦·⑧ 이 **같은 단일 계약**(measure_cmdvel_residual)을 쓰는가 — 각자 조합하면 드리프트가 난다
+l_uni=$(grep -cF 'measure_cmdvel_residual "$LOGDIR/' "$HERE/abort_e2e.sh" || true)
+if [ "$n_zero" = 0 ] && [ "$n_res2" = 2 ] && [ "$n_sil_ok" = 0 ] \
+   && [ "$l_cmp" = 1 ] && [ "$l_cls" = 1 ] && [ "$l_uni" = 2 ]; then
+  ok "완전 zero=0건 · 잔류=2건 (둘 다 꼬리 잘림) · 관측된 침묵=0건 · ⑦⑧ 단일 계약 2/2 + '!=0' 비교"
+else
+  ng "n_zero='$n_zero' n_res='$n_res2' 침묵='$n_sil_ok' ⑧비교=$l_cmp ⑧분류=$l_cls 단일계약=$l_uni — 역회귀 또는 배선 이상"
+fi
+
+# ── 케이스 16: gz_model_xy 정상화 계약 — 비숫자·NaN/Inf·필드부족은 '좌표 없음' ──
+#   07-31 §7.3 P1 부정 회귀 (Codex). 구판은 첫 두 토큰을 검증 없이 흘려보내
+#   `model -m`·`nan nan`·`inf inf` 가 인프라 분기를 우회해 **실정지 실패로 오분류**됐다.
+#   ⚠ 음수·소수는 정상 world 좌표다(스폰 -12,0) — 거부하면 그것대로 역회귀다.
+echo "== 16: gz_model_xy — 비숫자·NaN·Inf·필드부족은 '좌표 없음', 정상 음수 좌표는 보존"
+gz_ok=1; gz_note=""
+for bad in "model -m" "nan nan" "inf inf" "-inf 0.0" "5.0" ""; do
+  o=$(FAKE_GZ_OUT="$bad" gz_model_xy tunnel_robot)
+  [ -z "$o" ] || { gz_ok=0; gz_note="$gz_note ['$bad'→'$o']"; }
+done
+o_neg=$(FAKE_GZ_OUT="-11.87 -0.06 0.05 0 0 3.14" gz_model_xy tunnel_robot)
+o_pos=$(FAKE_GZ_OUT="1.40779 0.108277 0.05" gz_model_xy tunnel_robot)
+{ [ "$gz_ok" = 1 ] && [ "$o_neg" = "-11.87 -0.06" ] && [ "$o_pos" = "1.40779 0.108277" ]; } \
+  && ok "손상 6종 전부 좌표 없음 · 정상 음수 '$o_neg' · 정상 양수 '$o_pos' 보존" \
+  || ng "gz_note=$gz_note o_neg='$o_neg' o_pos='$o_pos' — §7.3 P1 회귀 또는 정상 좌표 역회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="

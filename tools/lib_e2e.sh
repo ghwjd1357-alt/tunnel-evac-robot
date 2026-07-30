@@ -211,8 +211,31 @@ send_goal() {  # $1=x $2=y $3=yaw(rad) $4=제한시간(초)
 # ⚠ 빈 출력 = '못 읽음(인프라)'. 이 함수는 그것을 0 이나 임의값으로 메우지 않는다 —
 #   '못 읽음'과 '값이 틀림(코드 결함)'을 뒤섞지 않는 것이 이 저장소의 판정 규칙이다.
 #   빈 출력을 어떻게 다룰지는 호출자가 명시적으로 분류한다.
-gz_model_xy() {  # $1=모델명 → "x y" 또는 '' (조회 실패)
-  hard_timeout 8 gz model -m "$1" -p 2>/dev/null | tail -1 | awk '{print $1, $2}'
+# ★ 07-31 §7.3 P1 (Codex): 구판은 마지막 줄의 첫 두 토큰을 **검증 없이** 흘려보냈다.
+#   그래서 `model -m`(비숫자)·`nan nan`·`inf inf` 가 "빈 문자열이 아니다"라는 이유로
+#   인프라 분기를 우회해, ⑦ 에서 **실정지 실패로 오분류**되고 /cmd_vel 원인 분류까지
+#   틀린 전제 위에서 돌았다 (구현자 재현 확정).
+#   계약: **정확히 두 개의 유한 실수만** 통과시킨다. timeout·빈값·필드 부족·비숫자·
+#   NaN/Inf 는 전부 같은 '좌표 없음'(빈 출력)으로 수렴한다 — 호출자는 그 하나만 소비한다.
+#   ⚠ 음수·소수는 이 프로젝트의 **정상 world 좌표**다 (스폰 -12,0). 거부하면 안 된다.
+gz_model_xy() {  # $1=모델명 → "x y"(유한 실수 2개) 또는 '' (조회 실패·형식 불량)
+  hard_timeout 8 gz model -m "$1" -p 2>/dev/null | python3 -c '
+import math, sys
+last = ""
+for line in sys.stdin:
+    if line.strip():
+        last = line
+f = last.split()
+if len(f) < 2:
+    sys.exit(1)                      # 빈 출력·필드 부족 = 좌표 없음
+try:
+    x, y = float(f[0]), float(f[1])
+except ValueError:
+    sys.exit(1)                      # 비숫자 = 좌표 없음
+if not (math.isfinite(x) and math.isfinite(y)):
+    sys.exit(1)                      # NaN/Inf = 좌표 없음
+print(x, y)
+'
 }
 
 # --- /cmd_vel 잔류 판독 + 실정지 실패 원인 분류 (07-30 예약 4) -----------------
@@ -228,20 +251,97 @@ gz_model_xy() {  # $1=모델명 → "x y" 또는 '' (조회 실패)
 
 # 지정한 시간 동안 /cmd_vel 을 덤프한다 (수집 실패해도 호출자를 죽이지 않는다).
 # ★ hard_timeout: 일반 timeout 은 TERM 무시 CLI 를 못 죽인다(07-24 §16 P1)— 여기도 같은 표면.
-collect_cmdvel() {  # $1=출력 파일 $2=수집 시간(초, 기본 2)
-  hard_timeout "${2:-2}" ros2 topic echo /cmd_vel > "$1" 2>/dev/null || true
+# ★ 07-31 §7.2 P1 (Codex): 구판은 `|| true` 로 수집 상태를 지웠다. 그런데 이 수집은
+#   **시간상자**라 정상 종료가 곧 124(TERM)/137(KILL)이다 — rc 를 그대로 실패로 읽으면
+#   정상까지 실패가 된다. 그래서 '정상 종료 집합'을 명시하고 그 밖만 실패로 남긴다.
+#   ⚠ 판정의 주체는 어디까지나 아래 판독기다. 이 rc 는 호출자가 로그에 남길 **표식**이다.
+collect_cmdvel() {  # $1=출력 파일 $2=수집 시간(초, 기본 2) → rc 0=수집 정상 / 1=수집 실패
+  local rc
+  hard_timeout "${2:-2}" ros2 topic echo /cmd_vel > "$1" 2>/dev/null
+  rc=$?
+  case "$rc" in 0|124|137) return 0 ;; *) return 1 ;; esac
+}
+
+# --- /cmd_vel 발행자 수 — '침묵'을 '관측된 침묵'으로 승격시키는 근거 -----------
+# ★ 07-31 실측(가장 중요한 발견): 이 시스템에서 abort 뒤의 '잠잠'은 zero Twist 가 아니라
+#   **완전한 침묵**이다 — 실제 덤프가 **0바이트**였다(nav2 가 취소 후 발행 자체를 멈춘다).
+#   그래서 "빈 덤프 = 무조건 판독 실패"로 두면 **정상 경로가 영구 거짓 FAIL** 이 된다
+#   (검토자가 같이 요구한 역회귀 '정상 abort_e2e 의 정지·잠잠 PASS 보존'과 충돌).
+#   → 침묵을 인정하되 **공짜로는 안 준다**: 그 순간 /cmd_vel 에 발행자가 실제로 있었는지
+#     확인해, '살아있는 토픽이 조용했다'와 '아무것도 안 듣고 있었다'를 가른다.
+#   ⚠ ros2 topic 계열은 daemon 에 의존한다(§5 ③ flake 표면) → read_param_float 와 같은
+#     복구 절차(daemon 재시작 1회)를 붙이고, 그래도 못 읽으면 **fail-closed**(빈 결과)다.
+cmdvel_publisher_count() {  # → 발행자 수(정수) 또는 '' (조회 실패)
+  local out
+  out=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null \
+        | grep -oE 'Publisher count: [0-9]+' | grep -oE '[0-9]+' | head -1)
+  if [ -z "$out" ]; then
+    hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
+    hard_timeout 5 ros2 daemon start >/dev/null 2>&1
+    out=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null \
+          | grep -oE 'Publisher count: [0-9]+' | grep -oE '[0-9]+' | head -1)
+  fi
+  printf '%s' "$out"
+}
+
+# --- ⑦·⑧ 공용 단일 계약: 수집 → 관측 근거 확보 → 판독 --------------------------
+# 한 곳에서만 조합한다 — ⑦ 와 ⑧ 이 각자 조합하면 한쪽만 고쳐지는 드리프트가 생긴다.
+measure_cmdvel_residual() {  # $1=덤프 파일 $2=수집 시간(초, 기본 2) → 개수 또는 '' (판독 실패)
+  local pub
+  pub=$(cmdvel_publisher_count)          # 판정 시점의 그래프 생존 근거
+  if ! collect_cmdvel "$1" "${2:-2}"; then printf ''; return; fi
+  cmdvel_nonzero "$1" "$pub"
 }
 
 # 덤프에서 '0 이 아닌 속도 성분' 개수를 센다. linear/angular 의 x·y·z 전 성분 —
-# 제자리 회전(angular.z)도 '움직임'이다. ★ 읽기 실패는 0(=잠잠)으로 뭉개지 않는다:
-#   빈 문자열을 돌려 호출자가 '잠잠'과 '못 읽음'을 구분하게 한다(조용한 통과 금지).
-cmdvel_nonzero() {  # $1=`ros2 topic echo /cmd_vel` 덤프 파일 → 개수 또는 '' (판독 실패)
-  python3 - "$1" <<'EOF' 2>/dev/null
-import re, sys
-txt = open(sys.argv[1]).read()
-vals = [abs(float(v)) for v in re.findall(r'^\s+[xyz]: (-?[\d.eE+-]+)', txt, re.M)]
-print(sum(1 for v in vals if v > 0.01))
-EOF
+# 제자리 회전(angular.z)도 '움직임'이다.
+# ★ 07-31 §7.2 P1 (Codex): 구판은 정규식에 걸린 값이 **하나도 없어도** `sum([])==0` 을
+#   찍었다. 그래서 빈 파일·경고문만 있는 덤프·필드 누락·NaN/Inf 가 전부 **'잔류 0건'**
+#   으로 둔갑했고(구현자 재현 확정), ⑧ 에서는 그대로 **PASS** 가 됐다 — 내가 막겠다고
+#   선언한 바로 그 '조용한 통과'다.
+#   계약(fail-closed): **완전한 Twist 샘플(6성분 전부 유한)을 최소 1개 확인한 뒤에만**
+#   정수를 반환한다. 그 밖은 전부 빈 문자열 = '판독 실패'.
+#   ⚠ 꼬리 샘플이 잘린 것은 정상이다 — 시간상자 수집이라 마지막 메시지는 대개 잘린다.
+#     그래서 '6성분 미만'은 손상이 아니라 무시 대상이고, '비숫자·비유한'만 손상이다.
+#   ★ 07-31 실측 반영: **아무 메시지도 안 온 완전 침묵**은 이 시스템의 정상 상태다
+#     (abort 뒤 발행 자체가 멎는다 — 덤프 0바이트). 그래서 침묵은 '관측 근거'($2 =
+#     발행자 수 ≥ 1)가 함께 올 때만 0건으로 인정한다. 근거 없이 비어 있으면 판독 실패다.
+#     "내용은 왔는데 온전한 표본이 0개"인 경우는 근거와 무관하게 손상 = 판독 실패.
+cmdvel_nonzero() {  # $1=덤프 파일 $2=발행자 수(선택) → 개수 또는 '' (판독 실패)
+  python3 -c '
+import math, re, sys
+try:
+    txt = open(sys.argv[1]).read()
+except OSError:
+    sys.exit(1)                      # 파일 없음 = 판독 실패
+pub = sys.argv[2] if len(sys.argv) > 2 else ""
+complete = nonzero = seen_lines = 0
+for rec in txt.split("---"):
+    vals = re.findall(r"^\s+[xyz]:\s*(\S+)\s*$", rec, re.M)
+    if not vals:
+        continue
+    seen_lines += len(vals)
+    nums = []
+    for v in vals:
+        try:
+            f = float(v)
+        except ValueError:
+            sys.exit(1)              # 비숫자 성분 = 손상 → 판독 실패
+        if not math.isfinite(f):
+            sys.exit(1)              # NaN/Inf = 손상 → 판독 실패
+        nums.append(abs(f))
+    if len(nums) == 6:               # linear x·y·z + angular x·y·z 전부 유한
+        complete += 1
+        nonzero += sum(1 for v in nums if v > 0.01)
+    # 6 미만 = 시간상자에 잘린 꼬리 샘플 → 세지 않는다 (정상 형상)
+if complete:
+    print(nonzero); sys.exit(0)
+if seen_lines:
+    sys.exit(1)                      # 내용은 왔는데 온전한 표본 0개 = 손상
+if pub.isdigit() and int(pub) >= 1:
+    print(0); sys.exit(0)            # ★ 살아있는 토픽이 조용했다 = 관측된 침묵
+sys.exit(1)                          # 근거 없는 빈 덤프 = 판독 실패
+' "$1" "${2-}" 2>/dev/null
 }
 
 # 실정지 단언(⑦)이 깨졌을 때 잔류 개수로 원인을 가른다.
@@ -253,7 +353,7 @@ EOF
 classify_stop_failure() {  # $1=cmdvel_nonzero 결과 → 사람이 읽는 원인 분류 한 줄
   case "$1" in
     ''|*[!0-9]*)
-      printf '%s' "분류 불가 — /cmd_vel 판독 실패(수집 자체가 안 됨). 로그의 cmdvel 덤프 확인" ;;
+      printf '%s' "분류 불가 — /cmd_vel 판독 실패(수집 실패·빈 덤프·경고문뿐·필드 누락·비숫자·NaN/Inf 중 하나). 정지/미정지 어느 쪽도 주장하지 않는다. 로그의 cmdvel 덤프 확인" ;;
     0)
       printf '%s' "잔류 명령/시뮬 특성 — 새 속도 명령은 끊겼는데(잔류 0건) 로봇이 계속 움직임. diff_drive 가 마지막 속도를 유지(예약 5), 실차는 cmd_vel watchdog 소관" ;;
     *)
