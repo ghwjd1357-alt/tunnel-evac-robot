@@ -25,8 +25,10 @@ EXTRA_ARGS=("$@")
 LOGDIR=$(mktemp -d /tmp/abort_e2e.XXXX)
 echo "로그: $LOGDIR"
 
-robot_xy() {  # ground truth (believed 아님 — gz 실위치)
-  gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}'
+robot_xy() {  # ground truth (believed 아님 — gz 실위치). 빈 출력 = 조회 실패(인프라).
+  # ★ 07-30: 구판은 `gz model` 을 무방비로 불러 gz CLI 가 매달리면 ④·⑦ 이 상한 없이
+  #   영구 정지했다(같은 호출이 mission_e2e ⑪ 에서 11분 행으로 실측). 상한은 lib 로 단일화.
+  gz_model_xy tunnel_robot
 }
 
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
@@ -50,6 +52,14 @@ echo "== ④ 주행 확인 대기 — 스폰(-12,0)에서 0.5m 이상 이동해�
 deadline_start   # ★ G4: 실경과시간 상한(timeout 미산입 봉쇄) — lib_e2e.sh
 while true; do
   read -r rx ry < <(robot_xy)
+  if [ -z "${rx:-}" ] || [ -z "${ry:-}" ]; then
+    # ★ 못 읽음은 '안 움직였다'가 아니다 (§5 ③ 인프라 vs 코드 결함 불혼동).
+    #   같은 deadline 안에서만 재시도하고, 예산이 다하면 '판정 불가'로 끝낸다.
+    echo "  (⚠ ground truth 조회 무응답 — gz model 상한 초과, 재시도)"
+    sleep 3
+    deadline_exceeded 120 && fail "ground truth(gz model) 무응답으로 주행 시작 판정 불가 — 인프라 결함(§5 ③), 주행/정지 어느 쪽도 주장하지 않음"
+    continue
+  fi
   moved=$(python3 -c "import math; print(math.hypot($rx+12.0, $ry-0.0))")
   if python3 -c "exit(0 if $moved > 0.5 else 1)"; then
     echo "  ✓ 주행 중 (이동 ${moved}m, world ($rx, $ry))"; break
@@ -73,23 +83,32 @@ sleep 5
 read -r x1 y1 < <(robot_xy)
 sleep 5
 read -r x2 y2 < <(robot_xy)
+# ★ 좌표를 못 읽었으면 drift 계산이 쓰레기가 된다 — 그대로 두면 '실정지 실패'로 오분류돼
+#   ⑦ 아래 원인 분류까지 헛돈다. 판정 전에 '못 읽음(인프라)'을 먼저 갈라낸다.
+if [ -z "${x1:-}" ] || [ -z "${y1:-}" ] || [ -z "${x2:-}" ] || [ -z "${y2:-}" ]; then
+  fail "정지 판정용 ground truth 조회 실패 (gz model 무응답, 상한 8s) — 인프라 결함(§5 ③). ⚠ '실정지 실패'가 아니다: 정지/미정지 어느 쪽도 주장하지 않는다"
+fi
 drift=$(python3 -c "import math; print(round(math.hypot($x2-$x1, $y2-$y1), 3))")
 echo "  5초간 이동량: ${drift}m (($x1,$y1) → ($x2,$y2))"
-python3 -c "exit(0 if $drift <= 0.10 else 1)" \
-  || fail "abort 후에도 이동 계속 (${drift}m > 0.10m) — 취소가 실주행을 못 멈춤"
+if ! python3 -c "exit(0 if $drift <= 0.10 else 1)"; then
+  # ★ 예약 4 (07-30): 여기서 fail() 을 바로 부르면 **즉시 cleanup + exit** 이라
+  #   ⑧(/cmd_vel 수집)이 영영 실행되지 않고 노드까지 죽어 증거가 사라진다 —
+  #   정작 그 증거가 필요한 순간에. 그래서 **cleanup 전에** 먼저 수집·분류해
+  #   '코드 결함(취소 경로)' 인지 '잔류 명령/시뮬 특성' 인지를 FAIL 메시지에 담는다.
+  #   (구판은 이 구분에 07-24 동결 게이트에서 수동 규명이 필요했다 — 0723_현황.md §11.3)
+  echo "  ⚠ 실정지 단언 실패 — cleanup 전에 /cmd_vel 잔류 수집 (원인 자동 분류)"
+  collect_cmdvel "$LOGDIR/cmdvel_stopfail.log"
+  stopfail_n=$(cmdvel_nonzero "$LOGDIR/cmdvel_stopfail.log")
+  echo "  잔류 판독: '${stopfail_n}' 건 (빈값=판독 실패, 덤프: $LOGDIR/cmdvel_stopfail.log)"
+  fail "abort 후에도 이동 계속 (${drift}m > 0.10m) — 취소가 실주행을 못 멈춤 | 원인 분류: $(classify_stop_failure "$stopfail_n")"
+fi
 echo "  ✓ 정지 확인"
 
 echo "== ⑧ /cmd_vel 잠잠 확인 (2초 수집 — 0 이 아닌 속도 명령이 없어야)"
-timeout 2 ros2 topic echo /cmd_vel > "$LOGDIR/cmdvel.log" 2>/dev/null || true
-nonzero=$(python3 - "$LOGDIR/cmdvel.log" <<'EOF'
-import re, sys
-txt = open(sys.argv[1]).read()
-# linear/angular 의 x·y·z 전 성분 — 제자리 회전(angular.z)도 '움직임'이다
-vals = [abs(float(v)) for v in re.findall(r'^\s+[xyz]: (-?[\d.eE+-]+)', txt, re.M)]
-print(sum(1 for v in vals if v > 0.01))
-EOF
-)
-[ "$nonzero" = "0" ] || fail "abort 후에도 /cmd_vel 에 속도 명령 ${nonzero}건"
+# 수집·판독은 ⑦ 실패 경로와 **같은 함수**를 쓴다 (lib_e2e.sh) — 한쪽만 고쳐지는 드리프트 봉쇄.
+collect_cmdvel "$LOGDIR/cmdvel.log"
+nonzero=$(cmdvel_nonzero "$LOGDIR/cmdvel.log")
+[ "$nonzero" = "0" ] || fail "abort 후에도 /cmd_vel 에 속도 명령 ${nonzero}건 (빈값=판독 실패)"
 echo "  ✓ /cmd_vel 잠잠"
 
 echo "== ⑨ 미션 로그의 취소 감시 확인 (cancel 응답 확인 콜백이 실제로 돌았나)"

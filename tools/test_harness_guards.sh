@@ -10,7 +10,11 @@
 #   ③ 모든 timeout 이 SIGTERM 만 보내, CLI 가 TERM 을 무시(trap '' TERM)하면 안 죽음.        (§15)
 #   ④ wait_state 의 daemon kick 이 고정 timeout 5 라, 남은 예산과 무관하게 벽시계 초과.       (§15)
 #   ⑤ mission_e2e alarm·stop·follow topic pub 3곳이 일반 timeout 으로 남아 TERM 무시 시 무한 행. (§16)
-#   이 테스트가 그 다섯 부정 회귀를 영구히 박제한다. Gazebo·실 ROS 없이 **fake ros2 실행파일 +
+#   ⑥ (07-30 예약 4) abort_e2e ⑦ 실정지 단언이 깨지면 fail() 이 즉시 cleanup+exit 해
+#      /cmd_vel 증거가 사라져 '코드 결함 vs 잔류 명령'을 사람이 손으로 갈라야 했다.
+#      → 케이스 11·12 가 (a) 분류가 두 경우를 실제로 가르는지 (b) 수집이 fail 보다
+#        먼저 배선돼 있는지를 함께 박제한다.
+#   이 테스트가 그 부정 회귀들을 영구히 박제한다. Gazebo·실 ROS 없이 **fake ros2 실행파일 +
 #   state 스텁 + 벽시계 측정**만으로 돈다 (≈105초 — TERM-무시 케이스가 실제 hard-kill 유예까지
 #   벽시계로 소모하므로 case 6=34s·7=13s·8=30s·9≈9s 가 실시간). 검토자도 같은 하네스로 재확인한다.
 #
@@ -46,6 +50,17 @@ fi
 exit 0
 EOF
 chmod +x "$FAKEBIN/ros2"
+
+# --- fake gz: ground truth 조회 CLI 스텁 (07-30 예약 4 확대분) ------------------
+#   FAKE_GZ_OUT  : `gz model -p` 가 낼 마지막 줄 (빈값 = 못 읽음)
+#   FAKE_GZ_TRAP : 1 이면 SIGTERM 무시(trap '' TERM) + 300초 블록 — 실측된 무한 행 재현
+cat > "$FAKEBIN/gz" << 'EOF'
+#!/usr/bin/env bash
+[ "${FAKE_GZ_TRAP:-0}" = 1 ] && { trap '' TERM; sleep 300; }
+printf '%s\n' "${FAKE_GZ_OUT:-}"
+exit 0
+EOF
+chmod +x "$FAKEBIN/gz"
 export PATH="$FAKEBIN:$PATH"
 
 # lib 소싱 (함수 정의 + trap). 실제 프로세스가 없어 cleanup·trap 은 무해한 no-op.
@@ -183,6 +198,72 @@ el=$((SECONDS-t0))
 { [ "$topic_normal_ok" = 1 ] && [ "$el" -le 2 ]; } \
   && ok "정상 topic pub 3종 즉시 반환(${el}s)" \
   || ng "topic_normal_ok=$topic_normal_ok el=${el}s — 정상 발행 역회귀"
+
+# ── 케이스 11: 실정지 실패 분류 — /cmd_vel 잔류 '있음' → 코드 결함(취소 경로) ──
+#   07-30 예약 4 부정 회귀 ①. 분류 코드를 넣었다는 것과 그 분류가 두 경우를 **가른다**는
+#   것은 다른 명제다 — 그래서 가짜 cmdvel 덤프 2종으로 실제 분기를 확인한다.
+#   여기선 linear.x=0.26 + angular.z=-0.35 (제자리 회전도 '움직임') = 잔류 2건.
+echo "== 11: 실정지 실패 분류 — /cmd_vel 잔류 있음 → '코드 결함(취소 경로)'"
+cat > "$FAKEBIN/cmdvel_residual.log" << 'EOF'
+linear:
+  x: 0.26
+  y: 0.0
+  z: 0.0
+angular:
+  x: 0.0
+  y: 0.0
+  z: -0.35
+---
+EOF
+n_res=$(cmdvel_nonzero "$FAKEBIN/cmdvel_residual.log")
+msg_res=$(classify_stop_failure "$n_res")
+{ [ "$n_res" = 2 ] && echo "$msg_res" | grep -q "코드 결함" && echo "$msg_res" | grep -q "2건"; } \
+  && ok "잔류 2건 판독 → '$msg_res'" \
+  || ng "n_res='$n_res' msg='$msg_res' — 잔류 있음이 코드 결함으로 분류되지 않음"
+
+# ── 케이스 12: 실정지 실패 분류 — /cmd_vel '잠잠' → 잔류 명령/시뮬 특성 + 두 분류 상이 ──
+#   07-30 예약 4 부정 회귀 ②. 세 가지를 한꺼번에 요구한다:
+#   (a) 전 성분 0 은 0건으로 읽힌다  (b) 그때의 분류 문장이 케이스 11 과 **실제로 다르다**
+#   (c) abort_e2e ⑦ 이 수집을 fail() **보다 먼저** 부른다 — 배선이 뒤집히면(수집이 fail 뒤로
+#       가면) 함수는 멀쩡한데 증거는 여전히 사라진다. 그 회귀를 줄 번호 순서로 박제한다.
+echo "== 12: 실정지 실패 분류 — /cmd_vel 잠잠 → '잔류 명령/시뮬' + 두 분류가 서로 다름 + 배선 순서"
+cat > "$FAKEBIN/cmdvel_quiet.log" << 'EOF'
+linear:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+angular:
+  x: 0.0
+  y: 0.0
+  z: 0.0
+---
+EOF
+n_quiet=$(cmdvel_nonzero "$FAKEBIN/cmdvel_quiet.log")
+msg_quiet=$(classify_stop_failure "$n_quiet")
+l_collect=$(grep -n 'collect_cmdvel "\$LOGDIR/cmdvel_stopfail.log"' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
+l_fail=$(grep -n 'abort 후에도 이동 계속' "$HERE/abort_e2e.sh" | head -1 | cut -d: -f1)
+if [ "$n_quiet" = 0 ] && echo "$msg_quiet" | grep -q "잔류 명령" \
+   && [ "$msg_quiet" != "$msg_res" ] \
+   && [ -n "$l_collect" ] && [ -n "$l_fail" ] && [ "$l_collect" -lt "$l_fail" ]; then
+  ok "잔류 0건 → '$msg_quiet' (11과 상이) · abort_e2e 수집(L$l_collect) < fail(L$l_fail)"
+else
+  ng "n_quiet='$n_quiet' msg='$msg_quiet' 상이=$([ "$msg_quiet" != "$msg_res" ] && echo y || echo n) collect=L${l_collect:-없음} fail=L${l_fail:-없음} — 분류 미분기 또는 수집이 fail 뒤(증거 소실 회귀)"
+fi
+
+# ── 케이스 13: gz_model_xy — SIGTERM 무시 gz 도 유한 상한 + 정상 조회는 그대로(역회귀) ──
+#   07-30 실측 부정 회귀. `gz model -p` 는 무방비면 **무한 행**한다 — 이번 세션
+#   mission_e2e ⑪ 에서 약 11분 매달렸고 외부 kill 로만 풀렸다(고아는 20분+ 생존).
+#   abort_e2e ④·⑦ 이 같은 호출을 쓰므로 같은 방식으로 영구 정지할 수 있었다.
+#   실제 hard 상한 = 8 + E2E_KILL_GRACE(2) = 10s. 역회귀 앵커로 정상 조회도 같이 본다 —
+#   상한을 씌우다 멀쩡한 좌표 읽기를 죽이면 그것대로 게이트가 거짓 FAIL 을 낸다.
+echo "== 13: gz_model_xy — TERM 무시 gz 도 hard 상한(≤10s) 내 빈 결과 + 정상 조회 역회귀"
+t0=$SECONDS
+out_hang=$(FAKE_GZ_TRAP=1 gz_model_xy tunnel_robot)
+el=$((SECONDS-t0))
+out_ok=$(FAKE_GZ_OUT="-11.87 -0.06 0.05 0 0 3.14" gz_model_xy tunnel_robot)
+{ [ -z "$out_hang" ] && [ "$el" -le 13 ] && [ "$out_ok" = "-11.87 -0.06" ]; } \
+  && ok "TERM 무시 gz → 빈 결과·벽시계 ${el}s ≤ 10s(+여유) · 정상 조회 '$out_ok' 보존" \
+  || ng "out_hang='$out_hang' el=${el}s out_ok='$out_ok' — 무한 행 미봉쇄 또는 정상 조회 역회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="
