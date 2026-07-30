@@ -295,52 +295,78 @@ measure_cmdvel_residual() {  # $1=덤프 파일 $2=수집 시간(초, 기본 2) 
 
 # 덤프에서 '0 이 아닌 속도 성분' 개수를 센다. linear/angular 의 x·y·z 전 성분 —
 # 제자리 회전(angular.z)도 '움직임'이다.
-# ★ 07-31 §7.2 P1 (Codex): 구판은 정규식에 걸린 값이 **하나도 없어도** `sum([])==0` 을
-#   찍었다. 그래서 빈 파일·경고문만 있는 덤프·필드 누락·NaN/Inf 가 전부 **'잔류 0건'**
-#   으로 둔갑했고(구현자 재현 확정), ⑧ 에서는 그대로 **PASS** 가 됐다 — 내가 막겠다고
-#   선언한 바로 그 '조용한 통과'다.
-#   계약(fail-closed): **완전한 Twist 샘플(6성분 전부 유한)을 최소 1개 확인한 뒤에만**
-#   정수를 반환한다. 그 밖은 전부 빈 문자열 = '판독 실패'.
-#   ⚠ 꼬리 샘플이 잘린 것은 정상이다 — 시간상자 수집이라 마지막 메시지는 대개 잘린다.
-#     그래서 '6성분 미만'은 손상이 아니라 무시 대상이고, '비숫자·비유한'만 손상이다.
-#   ★ 07-31 실측 반영: **아무 메시지도 안 온 완전 침묵**은 이 시스템의 정상 상태다
-#     (abort 뒤 발행 자체가 멎는다 — 덤프 0바이트). 그래서 침묵은 '관측 근거'($2 =
-#     발행자 수 ≥ 1)가 함께 올 때만 0건으로 인정한다. 근거 없이 비어 있으면 판독 실패다.
-#     "내용은 왔는데 온전한 표본이 0개"인 경우는 근거와 무관하게 손상 = 판독 실패.
+#
+# ★ 07-31 §8 P1 (Codex) — **줄 세기를 버리고 구조 파서로 다시 썼다.**
+#   세 라운드 연속으로 이 함수 하나에서 P1 이 나왔다(§7.2 → §8.2). 그것은 "패치가
+#   모자랐다"가 아니라 **처음부터 구조를 봤어야 했다**는 신호다. 구판이 뚫린 두 지점:
+#   ① `seen_lines == 0`(정규식에 걸린 '값 줄' 수)을 '파일이 비었다'로 읽었다 → 경고문·
+#      쓰레기 텍스트처럼 **내용은 있는데 값 줄이 0개**인 덤프가 '완전 침묵'으로 분류돼
+#      발행자 근거를 얻어 `0건` 으로 승격됐다. 주석엔 "내용은 왔는데 온전한 표본 0개 =
+#      판독 실패"라고 써 놓고 코드는 다르게 굴었다.
+#   ② "6성분"을 **"6줄"** 로 셌다 → `angular.{x,y,y}`(z 누락 + y 중복)·`linear` 안의 6줄·
+#      섹션 밖 6줄이 전부 '완전한 Twist' 로 통과했다.
+#
+#   계약(fail-closed) — 아래 넷을 **전부** 만족해야 정수를 반환한다:
+#   (a) `linear` 와 `angular` **각각**에 `x·y·z` 가 **정확히 한 번씩** 있고 전부 유한한
+#       표본이 최소 1개 있을 것 (개수가 아니라 **키 집합**으로 확인한다)
+#   (b) 손상 신호가 하나도 없을 것 — 섹션 중복 · 섹션 밖 x/y/z · 키 중복 · 비숫자 · NaN/Inf
+#   (c) 불완전 레코드는 **마지막 하나만** 허용 — 시간상자 수집이라 잘림은 원리상 꼬리에만
+#       생긴다. 중간 레코드가 불완전하면 그것은 잘림이 아니라 손상이다
+#   (d) '관측된 침묵'($2 = 발행자 수 ≥ 1 → 0건) 예외는 **파일이 정말로 빈 경우에만**
+#       (`txt.strip() == ""`). 내용이 있으면 발행자가 살아 있어도 구조 검증을 통과해야 한다
+#   ★ (d)가 07-31 실측의 핵심이다: abort 뒤 nav2 가 발행을 멈춰 **실덤프가 0바이트**다.
+#     빈 덤프를 무조건 실패로 두면 abort_e2e 가 영구 거짓 FAIL 이 된다.
 cmdvel_nonzero() {  # $1=덤프 파일 $2=발행자 수(선택) → 개수 또는 '' (판독 실패)
   python3 -c '
 import math, re, sys
 try:
     txt = open(sys.argv[1]).read()
 except OSError:
-    sys.exit(1)                      # 파일 없음 = 판독 실패
+    sys.exit(1)                          # 파일 없음 = 판독 실패
 pub = sys.argv[2] if len(sys.argv) > 2 else ""
-complete = nonzero = seen_lines = 0
-for rec in txt.split("---"):
-    vals = re.findall(r"^\s+[xyz]:\s*(\S+)\s*$", rec, re.M)
-    if not vals:
-        continue
-    seen_lines += len(vals)
-    nums = []
-    for v in vals:
+
+# (d) 침묵 예외는 **진짜 빈 파일**에만. 내용이 있으면 아래 구조 검증을 반드시 통과해야 한다.
+if not txt.strip():
+    if pub.isdigit() and int(pub) >= 1:
+        print(0); sys.exit(0)            # 살아있는 토픽이 조용했다 = 관측된 침묵
+    sys.exit(1)                          # 근거 없는 빈 덤프 = 판독 실패
+
+SECS = ("linear", "angular")
+recs = [r for r in txt.split("---") if r.strip()]
+complete = nonzero = 0
+for i, rec in enumerate(recs):
+    sec, cur = {}, None
+    for line in rec.splitlines():
+        m = re.match(r"^(linear|angular):\s*$", line)
+        if m:
+            cur = m.group(1)
+            if cur in sec:
+                sys.exit(1)              # (b) 섹션 중복 = 손상
+            sec[cur] = {}
+            continue
+        m = re.match(r"^\s+([xyz]):\s*(\S+)\s*$", line)
+        if not m:
+            continue                     # 그 밖의 줄은 무시
+        if cur is None:
+            sys.exit(1)                  # (b) 섹션 밖 x/y/z = 손상
+        k, v = m.group(1), m.group(2)
+        if k in sec[cur]:
+            sys.exit(1)                  # (b) 키 중복 = 손상
         try:
             f = float(v)
         except ValueError:
-            sys.exit(1)              # 비숫자 성분 = 손상 → 판독 실패
+            sys.exit(1)                  # (b) 비숫자 = 손상
         if not math.isfinite(f):
-            sys.exit(1)              # NaN/Inf = 손상 → 판독 실패
-        nums.append(abs(f))
-    if len(nums) == 6:               # linear x·y·z + angular x·y·z 전부 유한
-        complete += 1
-        nonzero += sum(1 for v in nums if v > 0.01)
-    # 6 미만 = 시간상자에 잘린 꼬리 샘플 → 세지 않는다 (정상 형상)
-if complete:
-    print(nonzero); sys.exit(0)
-if seen_lines:
-    sys.exit(1)                      # 내용은 왔는데 온전한 표본 0개 = 손상
-if pub.isdigit() and int(pub) >= 1:
-    print(0); sys.exit(0)            # ★ 살아있는 토픽이 조용했다 = 관측된 침묵
-sys.exit(1)                          # 근거 없는 빈 덤프 = 판독 실패
+            sys.exit(1)                  # (b) NaN/Inf = 손상
+        sec[cur][k] = abs(f)
+    if all(set(sec.get(s, {})) == {"x", "y", "z"} for s in SECS):
+        complete += 1                    # (a) 키 집합으로 확인 — 줄 개수가 아니다
+        nonzero += sum(1 for s in SECS for v in sec[s].values() if v > 0.01)
+    elif i != len(recs) - 1:
+        sys.exit(1)                      # (c) 중간 레코드 불완전 = 잘림이 아니라 손상
+if complete == 0:
+    sys.exit(1)                          # 온전한 표본 0개 = 판독 실패
+print(nonzero)
 ' "$1" "${2-}" 2>/dev/null
 }
 

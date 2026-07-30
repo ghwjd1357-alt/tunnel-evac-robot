@@ -277,30 +277,30 @@ printf 'linear:\n  x: 0.0\n  y: 0.0\n---\n'                                  > "
 printf 'linear:\n  x: nan\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_nan.log"
 printf 'linear:\n  x: inf\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_inf.log"
 printf 'linear:\n  x: abc\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_text.log"
+# ★ 07-31 §8.2 P1 (Codex): 구판 케이스 14 는 경고문을 **발행자 인자 없이** 검사하고,
+#   발행자 1 과 결합한 손상 입력은 두 종류만 봤다 — **두 축(손상 × 발행자 생존)이 만나는
+#   교차 입력**이 통째로 빠져 `경고문 + 발행자 1` 이 '잔류 0건' 으로 승격되는 것을 못 잡았다.
+#   → 아래는 손상 입력 전부를 **발행자 {없음, 0, 1} 세 축과 교차**시킨다.
+printf 'garbage text that is not yaml at all\n'                              > "$FAKEBIN/cv_junk.log"
 fc_ok=1; fc_note=""
-for cv in cv_empty cv_warn cv_short cv_nan cv_inf cv_text; do
-  n=$(cmdvel_nonzero "$FAKEBIN/$cv.log")
-  m=$(classify_stop_failure "$n")
-  { [ -z "$n" ] && echo "$m" | grep -q "분류 불가"; } || { fc_ok=0; fc_note="$fc_note [$cv→'$n']"; }
+for cv in cv_empty cv_warn cv_junk cv_short cv_nan cv_inf cv_text; do
+  for pub in "" 0 1; do
+    [ "$cv" = cv_empty ] && [ "$pub" = 1 ] && continue   # 진짜 빈 덤프 + 발행자 = 정상(케이스 15)
+    n=$(cmdvel_nonzero "$FAKEBIN/$cv.log" $pub)
+    m=$(classify_stop_failure "$n")
+    { [ -z "$n" ] && echo "$m" | grep -q "분류 불가"; } \
+      || { fc_ok=0; fc_note="$fc_note [$cv+pub'$pub'→'$n']"; }
+  done
 done
 n_missing=$(cmdvel_nonzero "$FAKEBIN/does_not_exist.log")     # 수집 자체가 없던 경우
 [ -z "$n_missing" ] || { fc_ok=0; fc_note="$fc_note [없는파일→'$n_missing']"; }
-# ★ 침묵은 '관측 근거'가 있을 때만 인정된다 — 발행자 0/조회실패면 근거 없는 빈 덤프다.
-n_sil0=$(cmdvel_nonzero "$FAKEBIN/cv_empty.log" 0)
-n_silx=$(cmdvel_nonzero "$FAKEBIN/cv_empty.log" "")
-{ [ -z "$n_sil0" ] && [ -z "$n_silx" ]; } || { fc_ok=0; fc_note="$fc_note [발행자0→'$n_sil0' 조회실패→'$n_silx']"; }
-# ★ 근거가 있어도 '손상'은 손상이다 — 발행자 1 이어도 NaN 덤프는 판독 실패여야 한다.
-n_nanpub=$(cmdvel_nonzero "$FAKEBIN/cv_nan.log" 1)
-n_shortpub=$(cmdvel_nonzero "$FAKEBIN/cv_short.log" 1)
-{ [ -z "$n_nanpub" ] && [ -z "$n_shortpub" ]; } \
-  || { fc_ok=0; fc_note="$fc_note [발행자1+NaN→'$n_nanpub' 발행자1+누락→'$n_shortpub']"; }
-# ★ 수집 rc 가 정상이어도 덤프가 비면 판독 실패여야 한다 — 판정 주체는 판독기다.
+# ★ 수집 rc 가 정상이어도 덤프가 비면(발행자 근거 없이) 판독 실패여야 한다 — 판정 주체는 판독기다.
 collect_cmdvel "$FAKEBIN/cv_collected.log" 1; coll_rc=$?
 n_coll=$(cmdvel_nonzero "$FAKEBIN/cv_collected.log")
 [ "$coll_rc" = 0 ] && [ -z "$n_coll" ] || { fc_ok=0; fc_note="$fc_note [수집rc=$coll_rc→'$n_coll']"; }
 [ "$fc_ok" = 1 ] \
-  && ok "6종 손상 입력 + 없는 파일 + 빈 수집 전부 '판독 실패'→'분류 불가' (0건으로 둔갑 없음)" \
-  || ng "판독기가 손상 입력을 0건으로 판독:$fc_note — §7.2 P1 회귀"
+  && ok "손상 7종 × 발행자 3축 교차 + 없는 파일 + 빈 수집 전부 '판독 실패'→'분류 불가'" \
+  || ng "판독기가 손상 입력을 0건으로 승격:$fc_note — §7.2·§8.2 P1 회귀"
 
 # ── 케이스 15: cmdvel 판독기 역회귀 — 정상 입력은 그대로 + 꼬리 잘림 허용 + ⑧ 배선 ──
 #   조이다가 정상 판독을 죽이면 그것대로 게이트가 거짓 FAIL 을 낸다. 그리고 시간상자
@@ -347,6 +347,34 @@ o_pos=$(FAKE_GZ_OUT="1.40779 0.108277 0.05" gz_model_xy tunnel_robot)
 { [ "$gz_ok" = 1 ] && [ "$o_neg" = "-11.87 -0.06" ] && [ "$o_pos" = "1.40779 0.108277" ]; } \
   && ok "손상 6종 전부 좌표 없음 · 정상 음수 '$o_neg' · 정상 양수 '$o_pos' 보존" \
   || ng "gz_note=$gz_note o_neg='$o_neg' o_pos='$o_pos' — §7.3 P1 회귀 또는 정상 좌표 역회귀"
+
+# ── 케이스 17: cmdvel 판독기 **구조** 검증 — "xyz 줄이 6개"만으로 완전 표본이 되지 않는다 ──
+#   07-31 §8.2 P1 부정 회귀 (Codex). 구판은 "6성분"을 **"6줄"** 로 셌다. 그래서
+#   `angular.{x,y,y}`(z 누락 + y 중복)·`linear` 안의 6줄·섹션 밖 6줄이 전부 '완전한 Twist'
+#   로 통과했다(구현자 재현 확정). 계약은 **키 집합**이다 — linear·angular 각각 {x,y,z}.
+#   ⚠ 잘림은 원리상 **꼬리에만** 생긴다 → 중간 레코드가 불완전하면 그것은 손상이다.
+echo "== 17: cmdvel 판독기 구조 검증 — 중복 키·섹션 밖·중간 불완전은 전부 '판독 실패'"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  y: 0.0\n---\n' > "$FAKEBIN/cv_dupkey.log"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n'           > "$FAKEBIN/cv_lin6.log"
+printf '  x: 0.0\n  y: 0.0\n  z: 0.0\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n'                    > "$FAKEBIN/cv_nosec.log"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n---\nlinear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' \
+  > "$FAKEBIN/cv_midbad.log"
+st_ok=1; st_note=""
+for cv in cv_dupkey cv_lin6 cv_nosec cv_midbad; do
+  for pub in "" 1; do            # ★ 발행자가 살아 있어도 손상은 손상이다
+    n=$(cmdvel_nonzero "$FAKEBIN/$cv.log" $pub)
+    m=$(classify_stop_failure "$n")
+    { [ -z "$n" ] && echo "$m" | grep -q "분류 불가"; } \
+      || { st_ok=0; st_note="$st_note [$cv+pub'$pub'→'$n']"; }
+  done
+done
+# 역회귀: 완전한 레코드가 2개 연속인 정상 덤프는 그대로 0건
+printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\nlinear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' \
+  > "$FAKEBIN/cv_two_zero.log"
+n_two=$(cmdvel_nonzero "$FAKEBIN/cv_two_zero.log" 1)
+{ [ "$st_ok" = 1 ] && [ "$n_two" = 0 ]; } \
+  && ok "중복키·linear 6줄·섹션 밖 6줄·중간 불완전 × 발행자 2축 전부 '판독 실패' · 완전 2레코드는 0건 보존" \
+  || ng "st_note=$st_note 완전2레코드='$n_two' — §8.2 P1 회귀(줄 개수로 완전 표본 인정)"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="
