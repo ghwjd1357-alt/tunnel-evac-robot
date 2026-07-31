@@ -33,7 +33,8 @@ robot_xy() {  # ground truth (believed 아님 — gz 실위치). 빈 출력 = �
 
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup
-ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
+hard_timeout 5 ros2 daemon start >/dev/null 2>&1   # ★ 예약 17: daemon 도 상한 안에서
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   "${EXTRA_ARGS[@]}" > "$LOGDIR/launch.log" 2>&1 &
 
@@ -68,7 +69,9 @@ while true; do
 done
 
 echo "== ⑤ ★ abort 발사"
-ros2 topic pub --times 2 -w 1 /mission_cmd std_msgs/msg/String \
+# ★ 예약 17: `-w 1` 은 구독자 매칭까지 **블록**한다 — mission_node 가 죽어 있으면 무한 대기다.
+#   mission_e2e 의 alarm·stop·follow 3곳은 이미 hard_timeout 12 인데 여기만 무방비로 남아 있었다.
+hard_timeout 12 ros2 topic pub --times 2 -w 1 /mission_cmd std_msgs/msg/String \
   "{data: abort}" >/dev/null 2>&1
 
 echo "== ⑥ 상태 = FAULT 확인"

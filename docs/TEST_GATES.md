@@ -7,7 +7,7 @@
 
 ```bash
 python3 -m pytest src/mission_manager/test/ -q          # ~0.6s
-bash tools/test_harness_guards.sh                        # ~125초 — 하네스 유한 상한 + 외부 증거 파서 fail-closed 계약(§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1)
+bash tools/test_harness_guards.sh                        # ~130초 — 하네스 유한 상한 + 외부 증거 파서 fail-closed + 외부 CLI 전수 상한(§14~§16 · 예약 4 · §7~§10 · 예약 17)
 bash tools/test_gate_regression.sh                       # ~3분 — readiness_gate 조건 기동 14케이스(Gazebo 불필요)
 colcon test --packages-select mission_manager tunnel_sim tunnel_bringup
 colcon test-result --verbose                             # ⚠ 종료코드 말고 이걸로 판정
@@ -24,12 +24,14 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**07-30 3차 갱신** — E2E 하네스 신뢰성 묶음 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 17 케이스** / test_gate_regression 14 / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**07-30 3차 갱신** — E2E 하네스 신뢰성 묶음 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 19 케이스** / test_gate_regression 14 / E2E 4종 PASS **+ 쌍굴 PASS**.
 ★ 하네스 증분 = **10 → 13**(07-30: 예약 4 분류 2 + `gz model` 상한 1) → **13 → 16**
   (07-31 Codex §7 P1 보완: cmdvel 판독기 fail-closed 2 + ground truth 정상화 1)
   → **16 → 17** (07-31 Codex §8 P1 보완: cmdvel 판독기 구조 검증 1)
   → **17 유지·케이스 17 계약 교체** (07-31 Codex §9 P1 보완: YAML 자체 파싱 제거 +
-  명시 Twist 타입의 고정 6열 CSV + 타입이 맞는 발행자 근거).
+  명시 Twist 타입의 고정 6열 CSV + 타입이 맞는 발행자 근거)
+  → **17 → 19** (07-31 **예약 17 봉쇄**: 증거 수집 순서(§10.5 P2-①) 1 +
+  게이트 스크립트의 **상한 없는 외부 CLI 호출 전수 검사** 1).
   pytest·colcon 은 **무변동** — 이 묶음의 변경 표면이 `tools/` 뿐이라 그래야 맞다.
 ★ 07-30 증분 = `tunnel_bringup` **+23** (게이트 판정 단위 **20** + lint 3, 그중 copyright 1건 skip).
   1차 보완이 181(단위 13), 2차 보완이 **188**(단위 20 — lifecycle 세대 3 + TF 갱신 4 추가).
@@ -49,7 +51,7 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 | 검증 | 목적 | PASS 기준 |
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
-| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **17 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1) |
+| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **19 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1 · §10 P2 · 예약 17) |
 | ↳ **케이스 11·12 가 요구하는 것** | "분류 코드를 넣었다"와 "그 분류가 두 경우를 **구분한다**"는 다른 명제다. 가짜 `/cmd_vel` 덤프 2종으로 분기를 확인하고, 나아가 `abort_e2e.sh` 안에서 **수집 줄 번호 < `fail()` 줄 번호**까지 단언한다 — 함수가 멀쩡해도 배선이 뒤집히면 증거는 여전히 사라진다 | 두 분류 문자열이 실제로 상이 + 수집이 `fail()` 앞 |
 | **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (12케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
 | ↳ **검출력 경계 (정직하게)** | 이 셸 층은 **2차 P1(소실 경계 in-flight 조회 폐기)을 검출하지 못한다** — 실측: 보완을 되돌려도 12/12 PASS. 소실 순간의 늦은 응답은 서비스 파괴와 함께 DDS 에서 소멸해 실물 층에서 만들 수 없다. 검출은 `src/tunnel_bringup/test/` 단위층 3케이스가 한다 | 층 분담을 흐리지 말 것 — 셸이 PASS 라고 세대 결함이 없는 것이 아니다 |
@@ -62,6 +64,8 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 | ↳ **판독기 fail-closed 계약** (07-31 §7.2 P1) | 07-30 판은 정규식에 걸린 값이 **하나도 없어도 `0건`** 을 찍어 빈·경고문뿐·필드누락·NaN/Inf 덤프가 전부 '잔류 없음'으로 둔갑했고 ⑧ 에서 **그대로 PASS** 였다. 이제 **완전한 Twist 표본(6성분 전부 유한)** 을 최소 1개 확인해야 정수를 반환한다. ⑦·⑧ 은 **단일 계약** `measure_cmdvel_residual` 만 소비한다 | 손상 입력은 전부 '판독 실패'. 시간상자 출력은 한 메시지=CSV 한 줄·unbuffered로 바꿔, 불완전 줄도 정상 꼬리로 추정하지 않는다 |
 | ↳ **고정 CSV 계약** (07-31 §8.2·§9.2 P1) | §8 보완은 줄 개수 대신 키 집합을 봤지만, 미지 `metadata:` 부모 아래 `y/z`를 직전 `angular`의 키로 오귀속했다. YAML 부모·들여쓰기·중복·꼬리를 계속 자체 구현하는 것이 근인이므로 YAML 파서를 폐기했다. 수집 시 타입을 `geometry_msgs/msg/Twist`로 명시하고 Humble `--csv`로 평탄화한 **고정 6열**만 판독한다 | 모든 비어 있지 않은 줄이 정확히 6개 유한 실수여야 함. YAML·경고문·열 부족/초과·중간 빈 줄·임의 꼬리 = 판독 실패. 실제 Humble 출력 `0.12,0,0,0,0,…`와 abort E2E 보존 |
 | ↳ ★ **'관측된 침묵'** (07-31 실측) | 이 시스템에서 abort 뒤의 '잠잠'은 zero Twist 가 아니라 **완전한 침묵**이다 — nav2 가 취소 후 발행 자체를 멈춰 **실덤프가 0바이트**다. "빈 덤프=무조건 판독 실패"로 두면 `abort_e2e` 가 **영구 거짓 FAIL** 이 된다. 그래서 침묵은 **관측 근거**(수집이 시간상자 정상 소진 + 그 시점 `/cmd_vel` 타입이 **Twist** + 발행자 ≥1)가 있을 때만 0건으로 인정한다 | 빈 덤프+Twist 발행자≥1 = **0건(PASS)** / 타입 불일치·발행자 0·조회실패 = **판독 실패** / 내용은 왔는데 완전한 6열 표본 0개 = **판독 실패**. ⚠ `ros2 topic info` 는 daemon 의존 → 복구 1회 후에도 못 읽으면 fail-closed |
+| ↳ ⚠ **검증 상한 — 메시지 손실은 침묵과 구별되지 않는다** (07-31 §10.6 P2-②) | 수집 명령이 `--no-lost-messages`(손실 보고 억제)를 쓴다. 켜지 않으면 손실 보고문이 CSV 를 오염시켜 fail-closed FAIL 이 되므로 켜는 선택 자체는 합리적이지만, **그 대가로 '표본이 불완전했다'는 유일한 신호가 사라진다.** 잔류 명령이 실제로 있었는데 2초 창의 표본이 전부 손실되면 빈 덤프 + Twist 발행자 근거로 **'관측된 침묵' PASS** 가 될 수 있다 | **이 층에서는 닫지 않는다** — 실차 R0 의 cmd_vel watchdog 실측이 같은 위험을 물리적으로 덮는다(`FREEZE_MANIFEST.md §6`). 그때 이 상한을 재평가한다 |
+| ↳ **상한 없는 외부 CLI 전수 봉쇄** (07-31 예약 17) | `gz model` 무상한 호출이 `mission_e2e ⑪` 에서 **11분 행**을 만들었고 사람이 죽여서야 `== PASS` 가 났다 — **개입해서 얻은 PASS 는 판정이 아니다.** 게이트 5파일(`lib_e2e`·`abort_e2e`·`mission_e2e`·`regression_negative`·`regression_3goals`)의 `gz model`·`ros2 daemon/topic/service/param` 호출 **10곳**에 상한을 씌웠다. 판정에 쓰이는 좌표는 '못 읽음=인프라'로 따로 분류한다 | 케이스 19 가 **전수 기계 검사**한다 — 새 무상한 호출이 들어오면 거기서 걸린다. ⚠ `make_map.sh`·`accuracy_bench.sh` 는 **제외**(lib 미사용 + 실행 검증 불가) — `MASTER_PLAN §7` 예약 17 에 등록 |
 | ↳ **ground truth 조회 상한** (07-30) | `gz model -m … -p` 는 무방비면 **무한 행**한다(실측: `mission_e2e ⑪` 11분, 고아 21분). `gz_model_xy` 가 hard 상한 10s 를 씌우고, 못 읽으면 **'인프라 실패'로 따로 분류**해 '실정지 실패'와 섞지 않는다 | 상한 내 종결 + 정상 좌표 조회는 보존(역회귀) |
 | ↳ **ground truth 정상화** (07-31 §7.3 P1) | 07-30 판은 마지막 줄의 첫 두 토큰을 **검증 없이** 흘려보내 `model -m`·`nan nan`·`inf inf` 가 "빈 문자열이 아니다"라는 이유로 인프라 분기를 **우회**했고, ⑦ 에서 실정지 실패로 오분류돼 원인 분류까지 틀린 전제 위에서 돌았다. 이제 **두 개의 유한 실수**만 통과한다 | timeout·빈값·필드부족·비숫자·NaN/Inf 가 전부 같은 '좌표 없음'. ⚠ **음수·소수는 정상 world 좌표**(스폰 -12,0) — 거부하면 역회귀 |
 
@@ -98,10 +102,12 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
   - **§16 P1 추가**: `mission_e2e.sh`의 alarm·stop·follow `topic pub` 3곳도 공통
     `hard_timeout 12`로 통일한다. TERM 무시 fake CLI가 상위 cutoff 없이 각 12s+유예 안에
     종결하고, 정상 fake CLI는 즉시 반환하며, 실제 wiring이 hard-timeout 3/3인지 함께 검사한다.
-  - 이 부정·역회귀는 `tools/test_harness_guards.sh` **17케이스**가 Gazebo 없이 격리 검증한다
+  - 이 부정·역회귀는 `tools/test_harness_guards.sh` **19케이스**가 Gazebo 없이 격리 검증한다
     (case 6=34s·case 7=13s·case 8=30s·case 9=TERM 무시 topic 3종·case 10=정상 topic 3종·
     **case 11·12=실정지 실패 분류 + 수집/`fail()` 배선 순서·case 13=`gz model` hard 상한 10s·
     case 14·15=cmdvel 판독기 fail-closed 계약 + '관측된 침묵' 역회귀·case 16=ground truth 정상화·
+    **case 18=증거 수집이 발행자 조회보다 먼저(§10.5 P2-①)·case 19=게이트 5파일의 상한 없는
+    외부 CLI 호출 전수 검사(예약 17)**·
     case 17=cmdvel **고정 CSV 6열 + Twist 타입 근거** 계약).
     ⚠ 배선 단언은 반드시 `-F`(고정 문자열) — 07-31 실측: `grep -E` 의 `.*` 는 한글·em대시가 섞인
     줄을 **못 넘어 조용히 0** 을 낸다(`-F` 는 1, LC_ALL 무관). 긍정 단언에 쓰면 검사가 조용히 통과한다.
@@ -194,6 +200,6 @@ Codex 가 전량 + 쌍굴 + hash evidence 를 독립 재현했다 (`docs/FREEZE_
    SEARCH_BACK 9~≈90s. 4회 중 2회가 하네스 경계에서 깨졌다 (`FREEZE_MANIFEST.md §8`).
    당시 하네스 결함 2건은 후속 **e2e-harness-fix**에서 수리 완료됐다
    (`FREEZE_MANIFEST.md §8.1`~`§8.3`): 현재 SEARCH_BACK 상한은 180s(벽시계), 유한 대기는
-   hard-kill로 보장하며 격리 회귀 **17케이스**(07-31 갱신)를 유지한다. 동결 태그의 옛 90s 기준 기록은 불변이다.
+   hard-kill로 보장하며 격리 회귀 **19케이스**(07-31 갱신)를 유지한다. 동결 태그의 옛 90s 기준 기록은 불변이다.
 2. **동결 커밋에는 수정을 섞지 않는다** — 게이트 중 결함이 나오면 예약으로 분리한다.
    섞는 순간 "무엇을 얼렸는가"가 흐려진다.

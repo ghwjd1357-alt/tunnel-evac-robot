@@ -366,6 +366,72 @@ csv_wiring=$(grep -cF 'geometry_msgs/msg/Twist --csv --no-lost-messages' "$HERE/
   && ok "YAML 부모공격·CSV 열손상·임의꼬리 × 발행자 2축 실패 · 완전 2레코드=0 · Twist 타입 근거 + CSV 배선" \
   || ng "st_note=$st_note 완전2='$n_two' type_ok='$p_twist' type_bad='$p_wrong' wiring=$csv_wiring — §9.2 P1/고정 CSV 계약 회귀"
 
+# ── 케이스 18: 증거 수집이 발행자 조회보다 **먼저** 온다 (§10.5 P2-① 부정 회귀) ──
+#   구판은 `cmdvel_publisher_count`(daemon 복구 포함 최악 ≈26~34s)를 수집보다 먼저 불렀다.
+#   ⑦ 실정지 단언이 깨진 직후는 잔류 명령이 흐르는 유일한 창인데 거기서 30초를 먼저 쓰면,
+#   그 사이 잔류가 멎어 '코드 결함'이 '잔류 명령'으로 오분류된다.
+#   ★ 배선이 아니라 **동작**으로 잡는다: `topic info` 가 TERM 을 무시하며 블록해도,
+#     덤프에 내용이 있으면 조회를 아예 안 하므로 즉시 끝나야 한다. 구판이면 수십 초 걸린다.
+echo "== 18: 증거 수집이 발행자 조회보다 먼저 — 조회가 블록해도 내용 있는 덤프는 즉시 판정"
+cat > "$FAKEBIN/ros2_probe" << 'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = topic ] && [ "${2:-}" = echo ]; then
+  printf '0.26,0.0,0.0,0.0,0.0,-0.35\n'; exit 0        # 잔류 2건짜리 정상 CSV
+fi
+if [ "${1:-}" = topic ] && [ "${2:-}" = info ]; then
+  trap '' TERM; sleep 300                               # 조회는 TERM 무시하며 블록
+fi
+if [ "${1:-}" = daemon ]; then trap '' TERM; sleep 300; fi
+exit 0
+EOF
+chmod +x "$FAKEBIN/ros2_probe"
+t0=$SECONDS
+n_order=$( PATH="$FAKEBIN:$PATH"
+           cp "$FAKEBIN/ros2" "$FAKEBIN/ros2.bak"; cp "$FAKEBIN/ros2_probe" "$FAKEBIN/ros2"
+           measure_cmdvel_residual "$FAKEBIN/order_probe.log" 1
+           cp "$FAKEBIN/ros2.bak" "$FAKEBIN/ros2" )
+el=$((SECONDS-t0))
+{ [ "$n_order" = 2 ] && [ "$el" -le 8 ]; } \
+  && ok "내용 있는 덤프 → 발행자 조회 없이 ${el}s 만에 잔류 2건 판정 (구판이면 조회 블록에 수십 초)" \
+  || ng "n='$n_order' el=${el}s — 수집보다 조회가 먼저(§10.5 P2-① 회귀) 또는 판독 이상"
+
+# ── 케이스 19: 예약 17 — 게이트 스크립트에 **상한 없는 외부 CLI 호출 0건** (전수 기계 검사) ──
+#   07-30 실측: `gz model` 무상한 호출이 mission_e2e ⑪ 에서 11분 행을 만들었고, 사람이
+#   죽여서야 `== PASS` 가 났다 — **개입해서 얻은 PASS 는 판정이 아니다.**
+#   ★ '전수 점검'을 사람 기억이 아니라 기계가 지키게 한다. 새 무상한 호출이 들어오면 여기서 걸린다.
+#   ⚠ 백그라운드 기동(`… &`)과 주석은 블록하지 않으므로 제외한다.
+echo "== 19: 예약 17 — 게이트 스크립트의 상한 없는 외부 CLI 호출 전수 검사"
+unguarded=$(python3 - "$HERE"/{lib_e2e,abort_e2e,mission_e2e,regression_negative,regression_3goals}.sh <<'PY'
+import os, re, sys
+CMDS = r'(?:gz\s+model|ros2\s+(?:daemon|topic\s+(?:pub|echo|info)|service\s+call|param\s+get))'
+CTX  = re.compile(r'(?:^|\$\(|<\(|\|\s*|;\s*|&&\s*|\|\|\s*)\s*(' + CMDS + r')')
+bad = []
+for path in sys.argv[1:]:
+    raw = open(path).read().splitlines()
+    joined, start, buf = [], 1, ''
+    for i, line in enumerate(raw, 1):          # 줄 이어쓰기(\)를 합쳐야 상한 판정이 맞는다
+        if not buf:
+            start = i
+        buf += line[:-1] + ' ' if line.endswith('\\') else line
+        if not line.endswith('\\'):
+            joined.append((start, buf)); buf = ''
+    if buf:
+        joined.append((start, buf))
+    for ln, s in joined:
+        if re.match(r'\s*#', s):               # 주석 줄
+            continue
+        if s.rstrip().endswith('&'):           # 백그라운드 기동 = 블록 안 함
+            continue
+        for m in CTX.finditer(s):
+            if 'hard_timeout' not in s[:m.start(1)]:
+                bad.append('%s:%d' % (os.path.basename(path), ln))
+print(' '.join(sorted(set(bad))))
+PY
+)
+[ -z "$unguarded" ] \
+  && ok "게이트 5파일에 상한 없는 외부 CLI 호출 0건 (gz model·ros2 daemon/topic/service/param)" \
+  || ng "상한 없는 외부 CLI 호출 잔존: $unguarded — 예약 17 회귀"
+
 echo
 echo "== 결과: PASS $P / FAIL $F =="
 [ "$F" = 0 ]

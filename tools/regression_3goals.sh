@@ -34,7 +34,8 @@ echo "로그: $LOGDIR"
 
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
-ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
+hard_timeout 5 ros2 daemon start >/dev/null 2>&1   # ★ 예약 17: daemon 도 상한 안에서
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
@@ -54,7 +55,11 @@ echo "  ✓ goal3 SUCCEEDED"
 
 echo "== ⑥ ground truth 오차 판정 (goal3 기준)"
 # map = world + (12,0) (스폰 world -12,0 이 map 0,0)
-read -r gx gy < <(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}')
+read -r gx gy < <(gz_model_xy tunnel_robot)   # ★ 예약 17: 상한 + 유한값 검증
+# ⚠ 못 읽음은 '오차 초과'가 아니다 (§5 ③ 인프라 vs 코드 결함 불혼동).
+if [ -z "${gx:-}" ] || [ -z "${gy:-}" ]; then
+  fail "정확도 판정용 ground truth 조회 실패 (gz model 무응답, 상한 8s) — 인프라 결함(§5 ③). ⚠ 오차 초과가 아니다: 정확도를 판정하지 않는다"
+fi
 err=$(python3 -c "import math; print(round(math.hypot(($gx+12)-13.5, $gy-0.0), 3))")
 echo "  실위치 world($gx,$gy) → 목표와 오차 ${err}m"
 pass=$(python3 -c "print('yes' if $err <= 0.3 else 'no')")

@@ -61,7 +61,8 @@ echo "로그: $LOGDIR (모드: $MODE)"
 
 echo "== ① 잔여 프로세스 정리 + 시뮬 기동"
 cleanup
-ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
+hard_timeout 5 ros2 daemon start >/dev/null 2>&1   # ★ 예약 17: daemon 도 상한 안에서
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true \
   "${WORLD_ARGS[@]}" "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
@@ -143,8 +144,13 @@ echo "== ⑩ 같이 탈출 → ESCAPED 대기"
 wait_state ESCAPED "$T_ESCAPED"
 
 echo "== ⑪ 최종 위치 (ground truth)"
-robot=$(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{printf "(%.2f, %.2f)", $1, $2}')
-fol=$(gz model -m fake_follower -p 2>/dev/null | tail -1 | awk '{printf "(%.2f, %.2f)", $1, $2}')
+# ★ 예약 17: 여기가 07-30 에 **11분 무한 행**으로 실측된 지점이다(고아 gz 는 21분 생존).
+#   ⑩까지 전부 통과한 뒤 보고 단계에서 게이트가 멈췄고, 사람이 죽여야 PASS 가 났다 —
+#   개입해서 얻은 PASS 는 판정이 아니다. 상한은 gz_model_xy 로 단일화한다.
+#   ⚠ 이 단계는 **보고 전용**이라 못 읽어도 FAIL 로 만들지 않는다(판정은 ⑩에서 끝났다).
+fmt_xy() { awk '{printf "(%.2f, %.2f)", $1, $2; f=1} END{if(!f) printf "(조회 실패)"}'; }
+robot=$(gz_model_xy tunnel_robot  | fmt_xy)
+fol=$(gz_model_xy fake_follower | fmt_xy)
 echo "  로봇 world $robot / 추종자 world $fol  (탈출구 = world $ESCAPE_WORLD)"
 
 cleanup

@@ -66,7 +66,8 @@ send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨
 
 echo "== ① 잔여 프로세스 정리 + 기동"
 cleanup
-ros2 daemon stop >/dev/null 2>&1; ros2 daemon start >/dev/null 2>&1
+hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
+hard_timeout 5 ros2 daemon start >/dev/null 2>&1   # ★ 예약 17: daemon 도 상한 안에서
 nohup ros2 launch tunnel_sim slam_nav2.launch.py gui:=false localization:=true "${EXTRA_ARGS[@]}" \
   > "$LOGDIR/launch.log" 2>&1 &
 
@@ -93,7 +94,7 @@ cat > "$LOGDIR/box.sdf" <<'SDF'
 </sdf>
 SDF
 # 멱등: 이미 있으면 성공 취급 (§14.3 함정 — already exists 를 실패로 보면 경고 폭주)
-ros2 service call /spawn_entity gazebo_msgs/srv/SpawnEntity \
+hard_timeout 30 ros2 service call /spawn_entity gazebo_msgs/srv/SpawnEntity \
   "{name: neg_block_box, xml: '$(tr -d '\n' < "$LOGDIR/box.sdf")', initial_pose: {position: {x: -6.0, y: 0.0, z: 0.5}}}" \
   > "$LOGDIR/spawn.log" 2>&1 || true
 # ⚠ service call 응답은 Python repr 형식(success=True) — "success: True" 아님 (첫 실행이 검거)
@@ -108,7 +109,11 @@ send_goal_expect_fail 6.0 0.0 240 "blocked"
 
 echo "== ⑦ 정상 goal (3,0) — 실패 3연타 뒤에도 시스템이 살아있는지 (양성 대조군)"
 send_goal 3.0 0.0 0.0 120 || fail "정상 goal 미도달 — 부정 테스트 후 시스템 사망 의심"  # yaw=0 → 옛 orientation{w:1.0} 동일
-read -r gx gy < <(gz model -m tunnel_robot -p 2>/dev/null | tail -1 | awk '{print $1, $2}')
+read -r gx gy < <(gz_model_xy tunnel_robot)   # ★ 예약 17: 상한 + 유한값 검증
+# ⚠ 못 읽음은 '오차 초과'가 아니다 (§5 ③ 인프라 vs 코드 결함 불혼동).
+if [ -z "${gx:-}" ] || [ -z "${gy:-}" ]; then
+  fail "정확도 판정용 ground truth 조회 실패 (gz model 무응답, 상한 8s) — 인프라 결함(§5 ③). ⚠ 오차 초과가 아니다: 정확도를 판정하지 않는다"
+fi
 err=$(python3 -c "import math; print(round(math.hypot(($gx+12)-3.0, $gy-0.0), 3))")
 echo "  ✓ 정상 goal SUCCEEDED, 실위치 오차 ${err}m"
 pass=$(python3 -c "print('yes' if $err <= 0.6 else 'no')")
