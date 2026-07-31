@@ -20,9 +20,10 @@
 → 이제 **명령 단위로 결합**한다. hard_timeout 의 피연산자인 호출만 상한이 있다고 본다.
 
 ── 파서가 하는 일 ──────────────────────────────────────────────────────────
-1) 따옴표 상태를 문자 단위로 추적해 인용 안쪽을 `q` 로 가린다(길이·줄번호 보존).
+1) 따옴표 상태를 문자 단위로 추적해 인용 안쪽을 `q` 로 가린다(출력 문자별 원본 줄번호 보존).
    → `python3 -c '...'` 안의 파이썬 본문이나 `"{pose: ...}"` 가 셸 명령으로 오독되지 않는다.
-2) 인용 밖 주석(`#`)과 줄 이어쓰기(`\` + 개행)를 처리한다.
+2) 인용 밖 주석(`#`)을 물리 개행까지 가리고, 셸·큰따옴표 문맥의 줄 이어쓰기(`\` + 개행)는 Bash처럼
+   **논리 입력에서 제거**한다. 공백 치환하면 `<\`+개행+`&` 같은 한 연산자가 갈라진다.
 3) 인용 밖 구분자(개행 `;` `|` `&` `(` `)` 백틱)로 **단순 명령** 단위로 쪼갠다.
    → `if`/`until`/명령치환 `$(`/프로세스치환 `<(`/파이프/백틱 뒤의 호출도 전부 잡힌다.
 4) 각 단위를 **끝까지** 훑어 `ros2`·`gz` 토큰을 찾고, 그 앞에 `hard_timeout` 이 결합돼
@@ -56,7 +57,7 @@ SEPARATORS = set('\n;|&()`')
 
 
 def _mask(src):
-    """셸 문맥은 남기고 **인용 안쪽만** q 로 가린다(길이·줄번호 보존).
+    """셸 문맥은 남기고 **인용 안쪽만** q 로 가린다(출력 문자별 원본 줄번호 보존).
 
     ★ 07-31 §13.2 P1 (검토): 구판은 큰따옴표 안쪽을 **통째로** 가렸다. 그런데 셸의
       큰따옴표는 명령치환을 막지 않는다 — 그래서 실제로 실행되는 `$( )`·백틱까지 함께
@@ -80,6 +81,14 @@ def _mask(src):
         out.append('q' if masked else c)
         lineno_of.append(line)
 
+    def after_continuations(j):
+        """j부터 연속된 line continuation을 건너뛴 (인덱스, 개행 수)를 돌려준다."""
+        skipped = 0
+        while j + 1 < n and src[j] == '\\' and src[j + 1] == '\n':
+            j += 2
+            skipped += 1
+        return j, skipped
+
     while i < n:
         ch = src[i]
         top = stack[-1] if stack else None
@@ -93,6 +102,15 @@ def _mask(src):
             i += 1
             continue
 
+        # ★ 08-01 §16.2 P1: Bash 는 셸·큰따옴표 문맥의 `\`+개행을 토큰화 **전에 제거**한다.
+        # 공백 두 칸으로 바꾸면 source 의 물리적 거리가 논리행에 남아 `<&`·`>&`·`&>`·`&&`,
+        # 심지어 `ro`+`s2`가 갈라졌다. 여기서는 아무 문자도 emit 하지 않되 `line`만 올려
+        # 뒤쪽 토큰의 원본 줄번호를 보존한다. 작은따옴표 안에서는 두 문자 모두 리터럴이다.
+        if ch == '\\' and i + 1 < n and src[i + 1] == '\n':
+            line += 1
+            i += 2
+            continue
+
         if top == 'dq':                       # 큰따옴표: 명령치환만 살린다
             if ch == '\\' and i + 1 < n:
                 emit(ch, True); emit(src[i + 1], True)
@@ -103,10 +121,13 @@ def _mask(src):
             if ch == '"':
                 stack.pop(); emit(ch, True); i += 1
                 continue
-            if ch == '$' and i + 1 < n and src[i + 1] == '(':
+            j, skipped = after_continuations(i + 1) if ch == '$' else (i + 1, 0)
+            if ch == '$' and j < n and src[j] == '(':
                 stack.append('sub')
-                emit('$'); emit('(')          # 인용 밖과 똑같이 내보내 단위가 쪼개지게 한다
-                i += 2
+                emit('$')
+                line += skipped
+                emit('(')                     # 인용 밖과 똑같이 내보내 단위가 쪼개지게 한다
+                i = j + 1
                 continue
             if ch == '`':
                 stack.append('bq'); emit('`'); i += 1
@@ -118,9 +139,6 @@ def _mask(src):
             continue
 
         # --- 셸 문맥 (최상위 · $( ) · ( ) · 백틱 안) ---
-        if ch == '\\' and i + 1 < n and src[i + 1] == '\n':   # 줄 이어쓰기 = 한 논리행
-            emit(' '); emit(' '); line += 1; i += 2
-            continue
         if ch == '\\' and i + 1 < n:
             emit(ch, True); emit(src[i + 1], True); i += 2
             continue
@@ -138,8 +156,9 @@ def _mask(src):
             stack.pop() if top == 'bq' else stack.append('bq')
             emit('`'); i += 1
             continue
-        if ch == '$' and i + 1 < n and src[i + 1] == '(':
-            stack.append('sub'); emit('$'); emit('('); i += 2
+        j, skipped = after_continuations(i + 1) if ch == '$' else (i + 1, 0)
+        if ch == '$' and j < n and src[j] == '(':
+            stack.append('sub'); emit('$'); line += skipped; emit('('); i = j + 1
             continue
         if ch == '(':
             stack.append('paren'); emit('('); i += 1
@@ -162,6 +181,8 @@ def _amp_role(text, i, n):
     ★ 판정 기준은 '아는 표기 목록'이 아니라 **셸 문법 사실 하나**다:
       **리다이렉션 연산자는 하나의 토큰이라 내부에 공백이 낄 수 없다.**
       그래서 `&` 가 리다이렉션의 일부인지는 **바로 붙어 있는 한 글자**로 결정된다.
+      전제: `_mask()` 가 셸·큰따옴표 문맥의 line continuation을 먼저 제거해, 여기의 `text`는
+      물리 source가 아니라 Bash가 토큰화하는 **논리 입력**이다(08-01 §16.2 P1).
       이 사실을 쓰면 `&` 가 나타나는 자리가 아래 넷으로 **닫힌다**:
 
       | 인접 조건        | 표기                                    | 역할 |
@@ -182,6 +203,9 @@ def _amp_role(text, i, n):
       건너뛰고 있었던 것**이다 — 리다이렉션 연산자에는 공백이 낄 수 없으므로 그 탐색 자체가
       문법에 어긋났고, 판정이 인접성이 아니라 '가까이 있는 글자'에 기대고 있었다.
       → **인접 한 글자만** 본다. 이제 열거가 아니라 위 표의 네 자리를 닫는 규칙이다.
+    ★ 08-01 §16.2 P1 (검토): 그 규칙의 입력이 틀렸다. Bash는 line continuation을 제거하지만
+      `_mask()`는 공백으로 바꿔, 논리적으로 인접한 네 연산자와 `ro`+`s2`를 다시 갈랐다.
+      역할 표를 더 늘리지 않고 `_mask()`가 Bash 논리 입력을 만들도록 책임을 바로잡았다.
 
     ⚠ 배경 실행을 빼는 근거는 오직 **'블록하지 않는다'** 이다. 그래서 `&` 라는 글자를 보고
       빼면 안 된다 — 리다이렉션 안의 `&` 가 붙은 명령은 **foreground 로 블록한다.**

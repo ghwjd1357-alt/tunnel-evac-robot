@@ -430,6 +430,15 @@ el=$((SECONDS-t0))
 #     문법에 어긋났다. → **인접 한 글자만** 보게 해 `&` 의 네 자리를 규칙으로 닫았다.
 #     ⚠ 배경 예외를 통째로 없애는 안은 **채택하지 않았다** — 실측 게이트 5파일 거짓 양성 7건
 #       (전부 `nohup ros2 launch … &`). 예외는 정당하고 틀린 것은 판정 정확도였다.
+#   ★ 08-01 §16.2 P1 (검토) — Bash 는 토큰화 전에 line continuation(백슬래시+개행)을
+#     **제거**하지만, 검사기는 공백 두 칸으로 치환했다. 그래서 source 에서는 떨어져 있어도
+#     논리행에서는 붙는 `<&`·`>&`·`&>`·`&&` 와 `ro`+`s2` 가 다시 사라졌다.
+#     → 직접 표기 목록을 늘리지 않고, `_mask()` 가 Bash 와 같은 논리 입력을 만들게 한다.
+#     아래 별도 픽스처는 양성 11(연산자 4 + 명령치환/wrapper 4 + 명령명 분할 1 +
+#     큰따옴표 안에서 조립된 명령치환 1 + 주석 다음 물리행 1)과 음성 3(실제 background +
+#     guarded 연산자 + 분할된 hard_timeout)을 함께 박제한다.
+#     ⚠ 주석 안의 줄 끝 백슬래시는 continuation이 아니다 — Bash 실실행에서 다음 줄 `ros2`가
+#       RAN을 출력했다. 첫 보완안은 주석까지 이어 가려 새 false-negative를 만들었고 되돌렸다.
 #   ★ 검사기 자체도 검사한다. 검사기의 사각이 그대로 게이트의 사각이 된다 —
 #     양성 19종·음성 10종 픽스처로 **검사기의 부정 회귀**를 박제한다.
 #     ⚠ 음성 7·8·9 가 특히 중요하다: 변수 확장(`"${BASH_SOURCE[0]}"`)까지 열면 게이트
@@ -485,6 +494,45 @@ fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25"
 { [ -z "$unguarded" ] && [ "$fx_lines" = "$fx_want" ]; } \
   && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성25(인용 안 명령치환 3·목록 밖 wrapper 3·리다이렉션 &>/&>>/<& 5 포함)/음성14 정확" \
   || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 $fx_want) — 예약 17 또는 검사기 회귀"
+
+# line continuation은 quoted heredoc 안에서 실제 두 문자(백슬래시+개행)로 보존된다.
+# 기대 줄은 외부 명령 토큰의 **원본 시작 줄**이다 — 논리행 결합 뒤에도 진단 위치를 지킨다.
+echo "== 19b: Bash 논리행 — line continuation 제거 뒤 역할·토큰·주석을 판정한다"
+cat > "$FAKEBIN/fixture_cont.sh" << 'EOF'
+ros2 topic echo /cmd_vel <\
+&0
+gz model -m robot -p >\
+&1
+ros2 topic echo /cmd_vel &\
+>/dev/null
+ros2 topic echo /cmd_vel &\
+& echo ok
+out=$(xargs ros2 topic echo /cmd_vel <\
+&0)
+out=$(xargs ros2 topic echo /cmd_vel &\
+>/dev/null)
+env ros2 topic echo /cmd_vel >\
+&1
+env ros2 topic echo /cmd_vel &\
+& echo ok
+ro\
+s2 topic echo /cmd_vel
+x="$\
+(ros2 topic echo /cmd_vel)"
+# 주석 안의 백슬래시는 리터럴 — 다음 물리행 ros2 는 실행된다 \
+ros2 topic echo /not_executed
+ros2 topic echo /cmd_vel \
+  &
+hard_timeout 5 ros2 topic echo /x <\
+&0
+hard_time\
+out 5 ros2 topic echo /x
+EOF
+cont_lines=$(python3 "$SCAN" "$FAKEBIN/fixture_cont.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
+cont_want="1,3,5,7,9,11,13,15,17,20,22"
+{ bash -n "$FAKEBIN/fixture_cont.sh" && [ "$cont_lines" = "$cont_want" ]; } \
+  && ok "line continuation 양성11/음성3 정확 · 논리행 결합 뒤 원본 시작 줄 보존 · 주석 다음 물리행 활성" \
+  || ng "line continuation 계약 위반: 검출='$cont_lines'(기대 $cont_want) — §16.2 P1 회귀"
 
 # ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
 #   구판은 수집이 끝난 뒤 발행자 '수'를 셌다. 수집 창엔 발행자가 없고 창 직후에만 생긴
