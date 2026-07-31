@@ -423,6 +423,13 @@ el=$((SECONDS-t0))
 #     `ros2 … &>/dev/null` · `gz … &>>log` 가 배경 실행으로 분류돼 단위 전체가 사라졌다 —
 #     리다이렉션 표기 하나로 무상한 CLI 가 검사기에서 증발한 것이다(양성 20·21).
 #     → 역할 판정을 `_amp_role()` 한 곳으로 모았다. 역회귀는 음성 11·12·13.
+#   ★ 08-01 §15.2 P1 (검토) — 그 보완도 `>` 쪽만 봤다. **입력 FD 복제 `<&` 를 빠뜨렸다**
+#     (양성 23·24·25 — `<&0`·`0<&3`·`<&-`. 셋 다 `bash -n` 유효 foreground 다).
+#     같은 자리 **여섯 번째**. 표기를 하나씩 덧대던 것이 근인이고, 더 정확히는 `prev` 탐색이
+#     **공백을 건너뛰고 있었다** — 리다이렉션 연산자에는 공백이 낄 수 없으므로 그 탐색 자체가
+#     문법에 어긋났다. → **인접 한 글자만** 보게 해 `&` 의 네 자리를 규칙으로 닫았다.
+#     ⚠ 배경 예외를 통째로 없애는 안은 **채택하지 않았다** — 실측 게이트 5파일 거짓 양성 7건
+#       (전부 `nohup ros2 launch … &`). 예외는 정당하고 틀린 것은 판정 정확도였다.
 #   ★ 검사기 자체도 검사한다. 검사기의 사각이 그대로 게이트의 사각이 된다 —
 #     양성 19종·음성 10종 픽스처로 **검사기의 부정 회귀**를 박제한다.
 #     ⚠ 음성 7·8·9 가 특히 중요하다: 변수 확장(`"${BASH_SOURCE[0]}"`)까지 열면 게이트
@@ -453,6 +460,9 @@ taskset -c 0 gz model -m robot -p                             # 양성19: 〃 + 
 ros2 topic echo /cmd_vel &>/dev/null                          # 양성20: &> 는 foreground 리다이렉션
 gz model -m robot -p &>>log                                   # 양성21: &>> 〃
 hard_timeout 5 ros2 daemon stop && ros2 topic echo /x         # 양성22: && 뒤는 별도 단위(무상한)
+ros2 topic echo /cmd_vel <&0                                  # 양성23: <& 입력 FD 복제
+gz model -m robot -p 0<&3                                     # 양성24: 〃 + FD 번호 접두
+ros2 topic echo /x <&-                                        # 양성25: 〃 + FD 닫기
 hard_timeout 5 ros2 daemon stop                               # 음성1
 hard_timeout 5 env -i ros2 param get /n p                     # 음성2: guarded wrapper
 until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성3
@@ -468,11 +478,12 @@ hard_timeout "${2:-2}" env PYTHONUNBUFFERED=1 \
 ros2 topic echo /cmd_vel &                                    # 음성11: 진짜 background(블록 안 함)
 hard_timeout 5 ros2 topic echo /x &>/dev/null                 # 음성12: guarded + &>
 hard_timeout 5 ros2 daemon stop > "$1" 2>&1                   # 음성13: 2>&1 의미 유지
+hard_timeout 5 ros2 topic echo /x <&0                         # 음성14: guarded + <&
 EOF
 fx_lines=$(python3 "$SCAN" "$FAKEBIN/fixture.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
-fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
+fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25"
 { [ -z "$unguarded" ] && [ "$fx_lines" = "$fx_want" ]; } \
-  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성22(인용 안 명령치환 3·목록 밖 wrapper 3·&> 리다이렉션 2 포함)/음성13 정확" \
+  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성25(인용 안 명령치환 3·목록 밖 wrapper 3·리다이렉션 &>/&>>/<& 5 포함)/음성14 정확" \
   || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 $fx_want) — 예약 17 또는 검사기 회귀"
 
 # ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
