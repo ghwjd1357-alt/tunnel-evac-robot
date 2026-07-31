@@ -40,6 +40,9 @@
   여기를 열면 게이트 5파일이 즉시 거짓 양성으로 무너진다 — 의도적으로 열지 않았다.
 - 백그라운드(`… &`) 호출은 블록하지 않으므로 제외한다 — 대신 그 프로세스의 수명은
   각 스크립트의 `cleanup` 이 책임진다.
+  ⚠ 제외의 근거는 오직 **'블록하지 않는다'** 이다. 그래서 `&` 라는 글자만 보고 빼면 안 된다 —
+    `&>`·`&>>` 는 리다이렉션이고 그 명령은 **foreground 로 블록한다**(§14.2 P1). 역할 판정은
+    `_amp_role()` 한 곳에서만 한다.
 """
 import os
 import re
@@ -153,6 +156,30 @@ def _mask(src):
     return ''.join(out), lineno_of
 
 
+def _amp_role(text, i, n):
+    """인용 밖 `&` **하나**의 역할을 정한다 — 여기가 §14.2 P1 의 책임 경계다.
+
+    셸에서 `&` 라는 글자는 서로 다른 네 가지다. 섞으면 조용히 뚫린다:
+      · `&`   제어 연산자   → **배경 실행**. 블록하지 않으므로 검사 대상에서 뺀다.
+      · `&&`  목록 연산자   → 구분자이되 배경 실행이 **아니다**.
+      · `&>` `&>>`          → Bash 의 stdout+stderr 리다이렉션. **foreground 실행**이다.
+      · `2>&1` `>&2`        → 리다이렉션의 일부(`>` 뒤에 붙은 `&`).
+
+    ★ 07-31 §14.2 P1 (검토): 구판은 앞의 `>`(`2>&1`)만 예외로 뒀고 **뒤의 `>`** 는 안 봤다.
+      그래서 `ros2 topic echo /x &>/dev/null` 이 배경 실행으로 분류돼 단위 전체가
+      검사에서 빠졌다 — 리다이렉션 표기 하나로 무상한 foreground CLI 가 사라진 것이다.
+      배경 실행 예외는 '블록하지 않는다'가 근거인데, `&>` 는 **블록한다**.
+    """
+    if i + 1 < n and text[i + 1] == '&':
+        return 'andand'
+    if i + 1 < n and text[i + 1] == '>':          # &> · &>> — 앞이 아니라 **뒤**를 본다
+        return 'redir'
+    prev = next((text[j] for j in range(i - 1, -1, -1) if text[j] not in ' \t'), '')
+    if prev == '>':                                # 2>&1 · >&2
+        return 'redir'
+    return 'bg'
+
+
 def _units(text, lineno_of):
     """단순 명령 단위로 쪼갠다 → [(토큰들, 배경실행여부)]. 토큰 = (문자열, 줄번호)."""
     units, buf, i, n = [], [], 0, len(text)
@@ -163,10 +190,10 @@ def _units(text, lineno_of):
             continue
         background = False
         if ch == '&':
-            prev = next((text[j] for j in range(i - 1, -1, -1) if text[j] not in ' \t'), '')
-            if i + 1 < n and text[i + 1] == '&':      # && 는 구분자일 뿐, 배경실행이 아니다
+            role = _amp_role(text, i, n)
+            if role == 'andand':                   # && 는 구분자일 뿐, 배경실행이 아니다
                 i += 1
-            elif prev == '>':                          # 2>&1 의 & 는 구분자가 아니다
+            elif role == 'redir':                  # 리다이렉션의 & = 구분자가 아니다
                 buf.append(i); i += 1
                 continue
             else:

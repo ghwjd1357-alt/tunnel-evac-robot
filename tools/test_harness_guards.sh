@@ -417,6 +417,12 @@ el=$((SECONDS-t0))
 #       (게이트 5파일은 `"$( )"` 를 이미 10곳 넘게 쓴다 — 가정이 아니라 실사용 표기다.)
 #     §13.3 P2 = wrapper **화이트리스트** 자체가 남은 구멍이었다(`setsid`·`nice`·`taskset`…).
 #       → 목록을 지우고 단위 전체를 훑는다. 실측 8개 셸 도구 전량에서 증가 검출 0건.
+#   ★ 07-31 §14.2 P1 (검토) — **`&` 라는 글자 하나에 네 가지 뜻이 섞여 있었다.**
+#     배경 실행을 검사에서 빼는 근거는 오직 '블록하지 않는다'인데, 구판은 앞의 `>`(`2>&1`)만
+#     예외로 두고 **뒤의 `>`** 는 안 봤다. 그래서 Bash 의 foreground 리다이렉션
+#     `ros2 … &>/dev/null` · `gz … &>>log` 가 배경 실행으로 분류돼 단위 전체가 사라졌다 —
+#     리다이렉션 표기 하나로 무상한 CLI 가 검사기에서 증발한 것이다(양성 20·21).
+#     → 역할 판정을 `_amp_role()` 한 곳으로 모았다. 역회귀는 음성 11·12·13.
 #   ★ 검사기 자체도 검사한다. 검사기의 사각이 그대로 게이트의 사각이 된다 —
 #     양성 19종·음성 10종 픽스처로 **검사기의 부정 회귀**를 박제한다.
 #     ⚠ 음성 7·8·9 가 특히 중요하다: 변수 확장(`"${BASH_SOURCE[0]}"`)까지 열면 게이트
@@ -444,6 +450,9 @@ hard_timeout 5 ros2 topic pub /t T "x: $(gz model -m r -p)"   # 양성16: 바깥
 setsid ros2 topic echo /cmd_vel                               # 양성17: 목록 밖 wrapper
 nice -n 5 ros2 daemon stop                                    # 양성18: 〃 + 옵션
 taskset -c 0 gz model -m robot -p                             # 양성19: 〃 + gz
+ros2 topic echo /cmd_vel &>/dev/null                          # 양성20: &> 는 foreground 리다이렉션
+gz model -m robot -p &>>log                                   # 양성21: &>> 〃
+hard_timeout 5 ros2 daemon stop && ros2 topic echo /x         # 양성22: && 뒤는 별도 단위(무상한)
 hard_timeout 5 ros2 daemon stop                               # 음성1
 hard_timeout 5 env -i ros2 param get /n p                     # 음성2: guarded wrapper
 until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성3
@@ -456,11 +465,14 @@ fail "원인: $(classify_stop_failure "$n")"                     # 음성9: 중�
 hard_timeout "${2:-2}" env PYTHONUNBUFFERED=1 \
   ros2 topic echo /cmd_vel geometry_msgs/msg/Twist --csv \
   > "$1" 2>/dev/null                                          # 음성10: 다중행 guarded
+ros2 topic echo /cmd_vel &                                    # 음성11: 진짜 background(블록 안 함)
+hard_timeout 5 ros2 topic echo /x &>/dev/null                 # 음성12: guarded + &>
+hard_timeout 5 ros2 daemon stop > "$1" 2>&1                   # 음성13: 2>&1 의미 유지
 EOF
 fx_lines=$(python3 "$SCAN" "$FAKEBIN/fixture.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
-fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19"
+fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22"
 { [ -z "$unguarded" ] && [ "$fx_lines" = "$fx_want" ]; } \
-  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성19(인용 안 명령치환 3·목록 밖 wrapper 3 포함)/음성10 정확" \
+  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성22(인용 안 명령치환 3·목록 밖 wrapper 3·&> 리다이렉션 2 포함)/음성13 정확" \
   || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 $fx_want) — 예약 17 또는 검사기 회귀"
 
 # ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
@@ -470,10 +482,16 @@ fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19"
 #   ★ 수가 아니라 GID 로 창 양끝을 브래킷한다. '수 1 → 수 1' 은 세대 전환을 통과시키지만
 #     'GID A → GID B' 는 걸린다. 여기서 그 경계를 7종으로 박제한다.
 echo "== 20: 침묵 근거의 관측 창 결합 — 창 밖 발행자는 근거로 쓰지 않는다"
+#   ⚠ 07-31 §14.3: 구판 스텁은 pre/post 를 `retry` **인자**로 갈랐다(`[ "$2" = 0 ]`). 그건
+#     구현의 배선에 결합된 것이라, 두 조회가 모두 retry=1 이 되자 스텁이 통째로 무의미해졌다
+#     (항상 post 를 돌려줌). 계약은 '몇 번째 조회인가'지 '어떤 인자로 불렀나'가 아니다.
+#     → **호출 순서**로 가른다. 서브셸 경계를 넘으므로 카운터는 파일이어야 한다.
 run_bracket() {  # $1=창시작근거 $2=창끝근거 $3=덤프내용 → measure_cmdvel_residual 결과
-  ( BR_PRE="$1"; BR_POST="$2"; BR_DUMP="$3"
+  ( BR_PRE="$1"; BR_POST="$2"; BR_DUMP="$3"; BR_N="$FAKEBIN/br.n"; printf 0 > "$BR_N"
     collect_cmdvel()  { printf '%b' "$BR_DUMP" > "$1"; return 0; }
-    cmdvel_pub_gids() { if [ "${2:-1}" = 0 ]; then printf '%b' "$BR_PRE"; else printf '%b' "$BR_POST"; fi; }
+    cmdvel_pub_gids() {
+      local c; c=$(($(cat "$BR_N" 2>/dev/null || echo 0) + 1)); printf '%s' "$c" > "$BR_N"
+      if [ "$c" = 1 ]; then printf '%b' "$BR_PRE"; else printf '%b' "$BR_POST"; fi; }
     measure_cmdvel_residual "$FAKEBIN/br.log" 1 )
 }
 br_ok=1; br_note=""
@@ -493,6 +511,72 @@ br_expect '2' "역회귀:내용있음"  'NONE'  'NONE' '0.26,0.0,0.0,0.0,0.0,-0.
 [ "$br_ok" = 1 ] \
   && ok "창 밖 발행자·세대 전환·소실·조회 실패 5종 fail-closed · 관측된 침묵/추가/내용 역회귀 3종 보존" \
   || ng "브래킷 계약 위반:$br_note — §11.3 P1-② 회귀"
+
+# ── 케이스 21: 시작 스냅샷은 **승인 대상 창보다 먼저 확정**된다 (§14.3 P1 부정 회귀) ──
+#   구판은 창-시작 조회를 수집과 **동시에** 띄웠다. 그건 두 작업이 같이 돈다는 것뿐이고,
+#   그 조회가 그래프를 실제로 읽은 시점이 창 시작보다 앞이라는 보장이 아니다. 조회가 늦게
+#   읽는 동안 A 가 사라지고 B 가 생기면 pre 도 post 도 B 가 되어 빈 덤프를 `0` 으로 승인했다.
+#   ★ 케이스 20 은 이걸 못 잡는다 — 근거를 함수 시작 즉시 확정된 문자열로 주입하므로
+#     **시간축 자체가 없다**. 그래서 구판도 20/20 PASS 였다. 여기서 그 축을 만든다.
+#   ★ 값이 아니라 **순서**를 잰다. 스텁이 수집·조회의 시작/끝을 트레이스에 남기고,
+#     승인 대상 창(C2)이 시작 스냅샷(G1)이 **끝난 뒤에** 열렸는지를 문자열로 단언한다.
+#     구판 실측 트레이스: `C1< G1< C1> G1> …` — G1 이 C1 과 겹친다(= 결함).
+#     신판 실측 트레이스: `C1< C1> G1< G1> C2< C2> G2< G2>` — 완전 순차.
+#   ⚠ 조회 스텁을 수집보다 **느리게**(0.6s vs 0.3s) 둔다. 겹침이 있으면 반드시 드러나도록.
+echo "== 21: 침묵 창의 시간 경계 — 시작 GID 스냅샷이 확정된 뒤에 승인 대상 창이 열린다"
+TB_TR="$FAKEBIN/tb.trace"; TB_CN="$FAKEBIN/tb.cn"; TB_GN="$FAKEBIN/tb.gn"
+tb_next() {  # 서브셸($(...))을 넘나드므로 카운터는 파일이다
+  local c; c=$(($(cat "$1" 2>/dev/null || echo 0) + 1)); printf '%s' "$c" > "$1"; printf '%s' "$c"
+}
+run_tb() {  # $1=GID계획(|구분·조회순) $2=덤프계획(|구분·수집순) $3=복구흉내(1/0) → "결과|트레이스"
+  : > "$TB_TR"; printf 0 > "$TB_CN"; printf 0 > "$TB_GN"
+  local got
+  got=$( TB_GP="$1"; TB_DP="$2"; TB_RECOVER="${3:-0}"
+    collect_cmdvel() {
+      local k; k=$(tb_next "$TB_CN"); printf 'C%s< ' "$k" >> "$TB_TR"
+      sleep 0.3
+      printf '%b' "$(printf '%s' "$TB_DP" | cut -d'|' -f"$k")" > "$1"
+      printf 'C%s> ' "$k" >> "$TB_TR"; return 0; }
+    cmdvel_pub_gids() {
+      local k; k=$(tb_next "$TB_GN"); printf 'G%s< ' "$k" >> "$TB_TR"
+      sleep 0.6
+      printf 'G%s> ' "$k" >> "$TB_TR"
+      # daemon 복구(retry=1)를 흉내낸다: 복구가 허용되면 **늦게, 다른 값으로** 성공한다.
+      # 시작 스냅샷이 이걸 받아들이면 승인 창이 잔류 창에서 멀어진다 → 아래 'zz' 케이스가 잡는다.
+      if [ "$k" = 1 ] && [ "${2:-1}" = 1 ] && [ "$TB_RECOVER" = 1 ]; then
+        printf 'zz.99'; return; fi
+      printf '%b' "$(printf '%s' "$TB_GP" | cut -d'|' -f"$k")"; }
+    measure_cmdvel_residual "$FAKEBIN/tb.log" 0.3 )
+  printf '%s|%s' "$got" "$(cat "$TB_TR")"
+}
+TB_FULL='C1< C1> G1< G1> C2< C2> G2< G2>'   # 침묵 경로: 수집 → 스냅샷 확정 → 검증 창 → 창끝
+TB_EARLY='C1< C1> G1< G1>'                  # 시작 근거가 없으면 검증 창을 열 이유도 없다
+TB_NOGID='C1< C1>'                          # 내용 있으면 조회 자체를 하지 않는다(케이스 18)
+tb_ok=1; tb_note=""
+tb_expect() {  # $1=기대결과 $2=기대트레이스 $3=라벨 $4=GID계획 $5=덤프계획 $6=복구흉내
+  local want_r="$1" want_t="$2" label="$3" out got_r got_t
+  out=$(run_tb "$4" "$5" "${6:-0}"); got_r="${out%%|*}"; got_t="${out#*|}"; got_t="${got_t% }"
+  { [ "$got_r" = "$want_r" ] && [ "$got_t" = "$want_t" ]; } \
+    || { tb_ok=0; tb_note="$tb_note [$label→'$got_r'/'$got_t'(기대'$want_r'/'$want_t')]"; }
+}
+CSV='0.26,0.0,0.0,0.0,0.0,-0.35\n'
+tb_expect ''  "$TB_FULL"  "검증창중 세대전환"   'aa.01|bb.02'           '|'
+tb_expect ''  "$TB_FULL"  "검증창중 소실"       'aa.01|NONE'            '|'
+tb_expect ''  "$TB_FULL"  "창끝 조회실패"       'aa.01|'                '|'
+tb_expect ''  "$TB_EARLY" "시작 발행자0"        'NONE|aa.01'            '|'
+tb_expect ''  "$TB_EARLY" "시작 조회실패"       '|aa.01'                '|'
+# ★ 구현자 실측(실제 DDS)이 잡은 **보완 1차안의 회귀**: 시작 스냅샷에 daemon 복구를 허용하면
+#   조회가 최대 26s 늦게, 그 사이 새로 생긴 발행자로 성공한다. 논리는 닫히지만 승인 창이
+#   잔류 수집 창에서 30초 떨어져 나가 abort **직후**의 침묵을 더 이상 묻지 않게 된다.
+#   → 시작 스냅샷은 복구 없이 '지금'을 묻고 못 읽으면 fail-closed 다. 배선이 아니라 동작으로 잡는다.
+tb_expect ''  "$TB_EARLY" "시작조회 실패→복구로 늦게 성공 금지" '|zz.99' '|' 1
+tb_expect '0' "$TB_FULL"  "역회귀:관측된 침묵"  'aa.01|aa.01'           '|'
+tb_expect '0' "$TB_FULL"  "역회귀:발행자 추가"  'aa.01|aa.01\nbb.02'    '|'
+tb_expect '2' "$TB_NOGID" "역회귀:내용→조회0회" 'NONE|NONE'             "$CSV|"
+tb_expect '2' "$TB_FULL"  "검증창에서 잔류 등장" 'aa.01|aa.01'          "|$CSV"
+[ "$tb_ok" = 1 ] \
+  && ok "승인 대상 창이 시작 스냅샷 확정 뒤에 열림(순차 트레이스 10종) · 근거 없으면 창 미개방 · 시작 스냅샷 복구 금지 · 내용은 조회 0회" \
+  || ng "시간 경계 위반:$tb_note — §14.3 P1 회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="
