@@ -41,7 +41,11 @@ echo "로그: $LOGDIR"
 send_goal_expect_fail() {  # $1=x $2=y $3=제한시간(초) $4=라벨
   local out attempt
   for attempt in 1 2; do
-    out=$(timeout "$3" ros2 action send_goal /navigate_to_pose \
+    # ★ 07-31 §11.2 P1-① (검토): 여기만 일반 `timeout` 이었다. ROS CLI 가 TERM 을 무시하면
+    #   일반 timeout 은 못 죽인다(PITFALLS §1) — 부정 goal 은 '응답 유실 시 CLI 영구 대기'가
+    #   이미 실측된 경로(:48~50)라 정확히 그 병리에 노출돼 있었다. 게이트가 무한 행하면
+    #   사람이 죽여야 하고, **개입해서 얻은 결과는 판정이 아니다.**
+    out=$(hard_timeout "$3" ros2 action send_goal /navigate_to_pose \
       nav2_msgs/action/NavigateToPose \
       "{pose: {header: {frame_id: map}, pose: {position: {x: $1, y: $2}, orientation: {w: 1.0}}}}" 2>&1)
     echo "$out" > "$LOGDIR/$4.log"

@@ -267,34 +267,83 @@ collect_cmdvel() {  # $1=출력 파일 $2=수집 시간(초, 기본 2) → rc 0=
   case "$rc" in 0|124|137) return 0 ;; *) return 1 ;; esac
 }
 
-# --- /cmd_vel 발행자 수 — '침묵'을 '관측된 침묵'으로 승격시키는 근거 -----------
+# --- /cmd_vel 발행자 **엔드포인트 GID 집합** — 침묵을 '관측된 침묵'으로 올리는 근거 ------
 # ★ 07-31 실측(가장 중요한 발견): 이 시스템에서 abort 뒤의 '잠잠'은 zero Twist 가 아니라
 #   **완전한 침묵**이다 — 실제 덤프가 **0바이트**였다(nav2 가 취소 후 발행 자체를 멈춘다).
 #   그래서 "빈 덤프 = 무조건 판독 실패"로 두면 **정상 경로가 영구 거짓 FAIL** 이 된다
 #   (검토자가 같이 요구한 역회귀 '정상 abort_e2e 의 정지·잠잠 PASS 보존'과 충돌).
 #   → 침묵을 인정하되 **공짜로는 안 준다**: 그 순간 /cmd_vel 에 발행자가 실제로 있었는지
 #     확인해, '살아있는 토픽이 조용했다'와 '아무것도 안 듣고 있었다'를 가른다.
+#
+# ★ 07-31 §11.3 P1-② (검토) — **발행자 '수'로는 관측 창을 묶지 못한다.**
+#   구판은 수집이 끝난 뒤 발행자 수를 셌다. 그런데 수집 창에는 발행자가 없고 창 **직후에만**
+#   생긴 경우(Nav2 재기동·발행자 세대 전환·DDS discovery 지연)에도 그 수를 근거로 빈 덤프를
+#   `0건`으로 승인했다 — 들을 대상이 아예 없었는데 '정상 침묵'이 되는 거짓 PASS 다.
+#   독립 재현(검토자·구현자 모두): `수집 중 발행자 0 · 수집 직후 1 → 결과 0`.
+#   → 수 대신 **GID**(엔드포인트 인스턴스마다 유일한 DDS GUID)를 본다. 같은 GID 가 창
+#     양끝에 있으면 그 사이 죽었다 다시 태어난 것이 아니다 — 재생성은 새 GID 를 받는다.
+#     '수 1 → 수 1' 은 세대 전환을 통과시키지만 'GID A → GID B' 는 걸린다.
 #   ⚠ ros2 topic 계열은 daemon 에 의존한다(§5 ③ flake 표면) → read_param_float 와 같은
 #     복구 절차(daemon 재시작 1회)를 붙이고, 그래도 못 읽으면 **fail-closed**(빈 결과)다.
-cmdvel_publisher_count() {  # → 발행자 수(정수) 또는 '' (조회 실패)
-  local raw out
-  raw=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null)
-  if printf '%s\n' "$raw" | grep -qxF 'Type: geometry_msgs/msg/Twist'; then
-    out=$(printf '%s\n' "$raw" | sed -n 's/^Publisher count: \([0-9][0-9]*\)$/\1/p' | head -1)
-  else
-    out=""
-  fi
-  if [ -z "$out" ]; then
+_cmdvel_gids_from() {  # $1=`ros2 topic info -v` 원문 → GID 줄들 / 'NONE'(발행자 0) / ''(실패)
+  printf '%s\n' "$1" | python3 -c '
+import sys
+lines = sys.stdin.read().splitlines()
+# 최상단 Type 이 Twist 라는 근거가 없으면 조회 실패로 본다(fail-closed).
+if not any(l.strip() == "Type: geometry_msgs/msg/Twist" for l in lines):
+    sys.exit(1)
+gids, cur = [], None
+for l in lines:
+    s = l.strip()
+    if s.startswith("Node name:"):       # 엔드포인트 블록 시작
+        cur = {}
+        continue
+    if cur is None:
+        continue
+    for key in ("Topic type:", "Endpoint type:", "GID:"):
+        if s.startswith(key):
+            cur[key] = s[len(key):].strip()
+    if cur.get("Endpoint type:") == "PUBLISHER" and "GID:" in cur:
+        if cur.get("Topic type:") != "geometry_msgs/msg/Twist":
+            sys.exit(1)                  # 같은 토픽에 다른 타입 발행자 = 근거로 쓰지 않는다
+        gids.append(cur["GID:"])
+        cur = None
+print("\n".join(sorted(gids)) if gids else "NONE")
+' 2>/dev/null
+}
+
+cmdvel_pub_gids() {  # $1=상한(초, 기본 8) $2=daemon 복구 재시도(1/0, 기본 1)
+                     # → GID 한 줄씩 / 'NONE'(조회 성공·발행자 0) / '' (조회 실패)
+  local budget="${1:-8}" retry="${2:-1}" raw out
+  raw=$(hard_timeout "$budget" ros2 topic info -v /cmd_vel 2>/dev/null)
+  out=$(_cmdvel_gids_from "$raw")
+  # ⚠ 재시도는 '창 밖' 조회에서만 쓴다. 창 안 조회(retry=0)는 창을 넘기면 근거가 아니다.
+  if [ -z "$out" ] && [ "$retry" = 1 ]; then
     hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
     hard_timeout 5 ros2 daemon start >/dev/null 2>&1
-    raw=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null)
-    if printf '%s\n' "$raw" | grep -qxF 'Type: geometry_msgs/msg/Twist'; then
-      out=$(printf '%s\n' "$raw" | sed -n 's/^Publisher count: \([0-9][0-9]*\)$/\1/p' | head -1)
-    else
-      out=""
-    fi
+    raw=$(hard_timeout "$budget" ros2 topic info -v /cmd_vel 2>/dev/null)
+    out=$(_cmdvel_gids_from "$raw")
   fi
   printf '%s' "$out"
+}
+
+# 창 양끝 근거가 **같은 발행 세대**인지 판정한다.
+# 승인 조건: 창 시작에 발행자가 있었고(비어있지 않음), 그 GID 가 **전부** 창 끝에도 살아 있다.
+#   - 창 시작 0 → 들을 대상이 없었다        → 근거 없음
+#   - 창 끝 0   → 창 도중 사라졌다          → 근거 없음
+#   - A → B     → 세대 전환(죽고 새로 생김) → 근거 없음
+#   - 창 끝에 **새로 생긴** 발행자는 근거로 재사용하지 않는다(부분집합만 본다).
+_cmdvel_gid_survivors() {  # $1=창 시작 근거 $2=창 끝 근거 → 생존 발행자 수 또는 '' (근거 없음)
+  python3 -c '
+import sys
+pre, post = sys.argv[1], sys.argv[2]
+if not pre or not post or pre == "NONE" or post == "NONE":
+    sys.exit(1)
+a, b = set(pre.split()), set(post.split())
+if not a or not a <= b:
+    sys.exit(1)
+print(len(a))
+' "$1" "$2" 2>/dev/null
 }
 
 # --- ⑦·⑧ 공용 단일 계약: 수집 → 관측 근거 확보 → 판독 --------------------------
@@ -305,18 +354,37 @@ cmdvel_publisher_count() {  # → 발행자 수(정수) 또는 '' (조회 실패
 #   '코드 결함(취소 경로)' 이 '잔류 명령/시뮬 특성' 으로 오분류될 수 있었다.
 #   → **증거를 먼저 확보하고 근거는 뒤에 붙인다.** 근거(발행자 생존)는 덤프가 비었을 때만
 #     필요하므로 그때만 조회한다 — 내용이 있으면 구조만으로 판정되기 때문이다.
-#   ★ 의미 변화 논증: 이제 '수집 시점'이 아니라 '수집 직후'의 발행자를 본다. 이것은 침묵
-#     근거로 **더 강하다** — 발행자가 창 도중에 죽었다면 선-조회는 근거를 잘못 내주지만
-#     후-조회는 정확히 거부한다. 발행자가 창 직후에 살아 있는데 창 도중에 없었을 가능성은
-#     사실상 없다(발행자는 즉시 생기지 않는다).
+#
+# ★ 07-31 §11.3 P1-② (검토) — 구판의 '후-조회가 더 강하다'는 논증은 **틀렸다.**
+#   선-조회는 '창 도중 죽은 발행자'를 근거로 잘못 내주고, 후-조회는 '창 직후에야 생긴
+#   발행자'를 근거로 잘못 내준다. 어느 한쪽 시점만으로는 창을 묶을 수 없다 — 방향만 다른
+#   같은 크기의 구멍이었다. 재현으로 확인했다(§11.3 · 구현자 독립 재현 동일).
+#   → **창 양끝을 브래킷한다.** 단, P2-① 의 목적(증거 수집을 지연시키지 않는다)은 지킨다:
+#     ① 창-시작 근거 조회를 수집과 **동시에** 띄우고 상한을 창 길이로 묶는다
+#        (창 안에 못 끝나면 그건 창의 근거가 아니다 → 실패로 남긴다. 실측 조회 0.17~0.18s
+#         vs 창 2s = 11배 여유).
+#     ② 덤프에 **내용이 있으면** 근거가 필요 없으므로 조회를 기다리지 않고 즉시 판정한다.
+#     ③ 비었을 때만 창-끝 근거를 조회해 두 근거가 같은 발행 세대인지 본다.
 measure_cmdvel_residual() {  # $1=덤프 파일 $2=수집 시간(초, 기본 2) → 개수 또는 '' (판독 실패)
-  if ! collect_cmdvel "$1" "${2:-2}"; then printf ''; return; fi
-  # 파서와 **같은 기준**으로 비었는지 본다(공백만 있는 파일도 '빔'). 판정 의미는 불변.
-  if [ -n "$(tr -d '[:space:]' < "$1" 2>/dev/null)" ]; then
-    cmdvel_nonzero "$1"                  # 내용이 있으면 근거 없이 구조로만 판정
-  else
-    cmdvel_nonzero "$1" "$(cmdvel_publisher_count)"   # 빈 덤프일 때만 침묵 근거 조회
+  local dump="$1" dur="${2:-2}" pref pid pre post
+  pref=$(mktemp 2>/dev/null) || { printf ''; return; }
+  # ① 창-시작 근거: 수집과 동시에 시작한다. 리다이렉션이 비동기 명령 자체에 붙으므로
+  #    이 자식은 호출자의 stdout(명령치환 파이프)을 물지 않는다 — $() 가 매달리지 않는다.
+  cmdvel_pub_gids "$dur" 0 > "$pref" 2>/dev/null &
+  pid=$!
+  if ! collect_cmdvel "$dump" "$dur"; then
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -f "$pref"; printf ''; return
   fi
+  # 파서와 **같은 기준**으로 비었는지 본다(공백만 있는 파일도 '빔'). 판정 의미는 불변.
+  if [ -n "$(tr -d '[:space:]' < "$dump" 2>/dev/null)" ]; then
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -f "$pref"
+    cmdvel_nonzero "$dump"               # ② 내용이 있으면 근거 없이 구조로만·지연 없이 판정
+    return
+  fi
+  wait "$pid" 2>/dev/null
+  pre=$(cat "$pref" 2>/dev/null); rm -f "$pref"
+  post=$(cmdvel_pub_gids 8 1)            # ③ 창-끝 근거(여기서만 daemon 복구 재시도 허용)
+  cmdvel_nonzero "$dump" "$(_cmdvel_gid_survivors "$pre" "$post")"
 }
 
 # 덤프에서 '0 이 아닌 속도 성분' 개수를 센다. CSV 열 순서는 Twist 타입이 고정한다:

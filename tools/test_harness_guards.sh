@@ -357,9 +357,12 @@ done
 printf '0.0,0.0,0.0,0.0,0.0,0.0\n0.0,0.0,0.0,0.0,0.0,0.0\n' \
   > "$FAKEBIN/cv_two_zero.log"
 n_two=$(cmdvel_nonzero "$FAKEBIN/cv_two_zero.log" 1)
-# 침묵 근거는 발행자 수뿐 아니라 토픽 타입까지 Twist여야 한다.
-p_twist=$(FAKE_TOPIC_INFO='Type: geometry_msgs/msg/Twist\nPublisher count: 1\n' cmdvel_publisher_count)
-p_wrong=$(FAKE_TOPIC_INFO='Type: std_msgs/msg/String\nPublisher count: 1\n' cmdvel_publisher_count)
+# 침묵 근거는 발행자 존재뿐 아니라 토픽 타입까지 Twist여야 한다.
+TI_OK='Type: geometry_msgs/msg/Twist\n\nNode name: nav\nTopic type: geometry_msgs/msg/Twist\nEndpoint type: PUBLISHER\nGID: aa.01\n'
+TI_BAD='Type: std_msgs/msg/String\n\nNode name: nav\nTopic type: std_msgs/msg/String\nEndpoint type: PUBLISHER\nGID: aa.01\n'
+p_twist=$(FAKE_TOPIC_INFO="$TI_OK"  cmdvel_pub_gids 2 0)
+p_wrong=$(FAKE_TOPIC_INFO="$TI_BAD" cmdvel_pub_gids 2 0)
+[ "$p_twist" = "aa.01" ] && p_twist=1      # 근거가 GID 가 됐다(§11.3 P1-②) — 판정 의미는 동일
 csv_wiring=$(grep -cF 'geometry_msgs/msg/Twist --csv --no-lost-messages' "$HERE/lib_e2e.sh" || true)
 { [ "$st_ok" = 1 ] && [ "$n_two" = 0 ] && [ "$p_twist" = 1 ] && [ -z "$p_wrong" ] \
    && [ "$csv_wiring" = 1 ]; } \
@@ -395,42 +398,68 @@ el=$((SECONDS-t0))
   && ok "내용 있는 덤프 → 발행자 조회 없이 ${el}s 만에 잔류 2건 판정 (구판이면 조회 블록에 수십 초)" \
   || ng "n='$n_order' el=${el}s — 수집보다 조회가 먼저(§10.5 P2-① 회귀) 또는 판독 이상"
 
-# ── 케이스 19: 예약 17 — 게이트 스크립트에 **상한 없는 외부 CLI 호출 0건** (전수 기계 검사) ──
+# ── 케이스 19: 예약 17 — 게이트 5파일에 **상한 없는 외부 CLI 호출 0건** (전수 기계 검사) ──
 #   07-30 실측: `gz model` 무상한 호출이 mission_e2e ⑪ 에서 11분 행을 만들었고, 사람이
 #   죽여서야 `== PASS` 가 났다 — **개입해서 얻은 PASS 는 판정이 아니다.**
-#   ★ '전수 점검'을 사람 기억이 아니라 기계가 지키게 한다. 새 무상한 호출이 들어오면 여기서 걸린다.
-#   ⚠ 백그라운드 기동(`… &`)과 주석은 블록하지 않으므로 제외한다.
-echo "== 19: 예약 17 — 게이트 스크립트의 상한 없는 외부 CLI 호출 전수 검사"
-unguarded=$(python3 - "$HERE"/{lib_e2e,abort_e2e,mission_e2e,regression_negative,regression_3goals}.sh <<'PY'
-import os, re, sys
-CMDS = r'(?:gz\s+model|ros2\s+(?:daemon|topic\s+(?:pub|echo|info)|service\s+call|param\s+get))'
-CTX  = re.compile(r'(?:^|\$\(|<\(|\|\s*|;\s*|&&\s*|\|\|\s*)\s*(' + CMDS + r')')
-bad = []
-for path in sys.argv[1:]:
-    raw = open(path).read().splitlines()
-    joined, start, buf = [], 1, ''
-    for i, line in enumerate(raw, 1):          # 줄 이어쓰기(\)를 합쳐야 상한 판정이 맞는다
-        if not buf:
-            start = i
-        buf += line[:-1] + ' ' if line.endswith('\\') else line
-        if not line.endswith('\\'):
-            joined.append((start, buf)); buf = ''
-    if buf:
-        joined.append((start, buf))
-    for ln, s in joined:
-        if re.match(r'\s*#', s):               # 주석 줄
-            continue
-        if s.rstrip().endswith('&'):           # 백그라운드 기동 = 블록 안 함
-            continue
-        for m in CTX.finditer(s):
-            if 'hard_timeout' not in s[:m.start(1)]:
-                bad.append('%s:%d' % (os.path.basename(path), ln))
-print(' '.join(sorted(set(bad))))
-PY
-)
-[ -z "$unguarded" ] \
-  && ok "게이트 5파일에 상한 없는 외부 CLI 호출 0건 (gz model·ros2 daemon/topic/service/param)" \
-  || ng "상한 없는 외부 CLI 호출 잔존: $unguarded — 예약 17 회귀"
+#   ★ '전수 점검'을 사람 기억이 아니라 기계가 지키게 한다.
+#
+#   ★ 07-31 §11.2 P1-① (검토) — 구판 검사기는 **하위 명령 화이트리스트**
+#     (daemon|topic|service|param|gz model)였다. 그래서 실제로 남아 있던
+#     `regression_negative.sh:44` 의 `timeout "$3" ros2 action send_goal` 을 못 보고
+#     19/19 PASS 했다 — **거짓 녹색**. `ros2 lifecycle`·`ros2 action info` 도 같은 사각이었다.
+#     → 검사기를 `scan_unbounded_cli.py` 로 분리하고 '모든 foreground ros2·gz' 로 뒤집었다.
+#   ★ 검사기 자체도 검사한다. 검사기가 정규식이면 정규식의 사각이 그대로 게이트의 사각이
+#     된다 — 알려진 양성 5종·음성 5종 픽스처로 **검사기의 부정 회귀**를 박제한다.
+echo "== 19: 예약 17 — 상한 없는 외부 CLI 전수 검사 + 검사기 자체의 부정 회귀"
+SCAN="$HERE/scan_unbounded_cli.py"
+unguarded=$(python3 "$SCAN" "$HERE"/{lib_e2e,abort_e2e,mission_e2e,regression_negative,regression_3goals}.sh)
+cat > "$FAKEBIN/fixture.sh" << 'EOF'
+timeout "$3" ros2 action send_goal /navigate_to_pose x        # 양성1: 일반 timeout
+if gz model -m robot -p; then :; fi                           # 양성2: if 뒤
+out=$(xargs ros2 topic echo /cmd_vel)                         # 양성3: xargs + 명령치환
+v=`gz model -m robot`                                         # 양성4: 백틱
+cat f | ros2 param get /a b                                   # 양성5: 파이프 뒤
+hard_timeout 5 ros2 daemon stop                               # 음성1
+until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성2
+nohup ros2 launch pkg a.launch.py > /dev/null 2>&1 &          # 음성3: 백그라운드
+python3 -c 'print("timeout 3 ros2 topic echo /x")'            # 음성4: 인용 안쪽
+#  timeout 9 ros2 topic echo /x                                 음성5: 주석
+EOF
+fx_lines=$(python3 "$SCAN" "$FAKEBIN/fixture.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
+{ [ -z "$unguarded" ] && [ "$fx_lines" = "1,2,3,4,5" ]; } \
+  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성5(줄 $fx_lines)/음성5 정확" \
+  || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 1,2,3,4,5) — 예약 17 또는 검사기 회귀"
+
+# ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
+#   구판은 수집이 끝난 뒤 발행자 '수'를 셌다. 수집 창엔 발행자가 없고 창 직후에만 생긴
+#   경우(Nav2 재기동·세대 전환·DDS discovery 지연)에도 빈 덤프를 `0건`으로 승인했다 —
+#   들을 대상이 없었는데 '정상 침묵'이 되는 거짓 PASS. 검토자·구현자가 각각 재현했다.
+#   ★ 수가 아니라 GID 로 창 양끝을 브래킷한다. '수 1 → 수 1' 은 세대 전환을 통과시키지만
+#     'GID A → GID B' 는 걸린다. 여기서 그 경계를 7종으로 박제한다.
+echo "== 20: 침묵 근거의 관측 창 결합 — 창 밖 발행자는 근거로 쓰지 않는다"
+run_bracket() {  # $1=창시작근거 $2=창끝근거 $3=덤프내용 → measure_cmdvel_residual 결과
+  ( BR_PRE="$1"; BR_POST="$2"; BR_DUMP="$3"
+    collect_cmdvel()  { printf '%b' "$BR_DUMP" > "$1"; return 0; }
+    cmdvel_pub_gids() { if [ "${2:-1}" = 0 ]; then printf '%b' "$BR_PRE"; else printf '%b' "$BR_POST"; fi; }
+    measure_cmdvel_residual "$FAKEBIN/br.log" 1 )
+}
+br_ok=1; br_note=""
+br_expect() {  # $1=기대 $2=라벨 $3..=run_bracket 인자
+  local want="$1" label="$2"; shift 2
+  local got; got=$(run_bracket "$@")
+  [ "$got" = "$want" ] || { br_ok=0; br_note="$br_note [$label→'$got'(기대'$want')]"; }
+}
+br_expect ''  "창중0·창후1"   'NONE'  'aa.01'          ''      # 창엔 없고 직후에만 생김
+br_expect ''  "세대전환"      'aa.01' 'bb.02'          ''      # 죽고 새로 태어남
+br_expect ''  "창중소실"      'aa.01' 'NONE'           ''      # 창 도중 사라짐
+br_expect ''  "창시작조회실패" ''      'aa.01'          ''      # 근거 자체를 못 읽음
+br_expect ''  "창끝조회실패"   'aa.01' ''               ''      # 〃
+br_expect '0' "역회귀:진짜침묵" 'aa.01' 'aa.01'         ''      # 창 양끝 같은 발행자 = 관측된 침묵
+br_expect '0' "역회귀:발행자추가" 'aa.01' 'aa.01\nbb.02' ''     # 새 발행자 추가는 무해(부분집합)
+br_expect '2' "역회귀:내용있음"  'NONE'  'NONE' '0.26,0.0,0.0,0.0,0.0,-0.35\n'  # 근거 불필요
+[ "$br_ok" = 1 ] \
+  && ok "창 밖 발행자·세대 전환·소실·조회 실패 5종 fail-closed · 관측된 침묵/추가/내용 역회귀 3종 보존" \
+  || ng "브래킷 계약 위반:$br_note — §11.3 P1-② 회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="
