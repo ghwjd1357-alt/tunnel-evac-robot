@@ -66,7 +66,7 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 | 검증 | 목적 | PASS 기준 |
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
-| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **21 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1 · §10 P2 · 예약 17 · §11 P1 · §14 P1) |
+| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **22 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1 · §10 P2 · 예약 17 · §11 P1 · §14 P1 · **§16 P1**) |
 | ↳ **케이스 11·12 가 요구하는 것** | "분류 코드를 넣었다"와 "그 분류가 두 경우를 **구분한다**"는 다른 명제다. 가짜 `/cmd_vel` 덤프 2종으로 분기를 확인하고, 나아가 `abort_e2e.sh` 안에서 **수집 줄 번호 < `fail()` 줄 번호**까지 단언한다 — 함수가 멀쩡해도 배선이 뒤집히면 증거는 여전히 사라진다 | 두 분류 문자열이 실제로 상이 + 수집이 `fail()` 앞 |
 | **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (12케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
 | ↳ **검출력 경계 (정직하게)** | 이 셸 층은 **2차 P1(소실 경계 in-flight 조회 폐기)을 검출하지 못한다** — 실측: 보완을 되돌려도 12/12 PASS. 소실 순간의 늦은 응답은 서비스 파괴와 함께 DDS 에서 소멸해 실물 층에서 만들 수 없다. 검출은 `src/tunnel_bringup/test/` 단위층 3케이스가 한다 | 층 분담을 흐리지 말 것 — 셸이 PASS 라고 세대 결함이 없는 것이 아니다 |

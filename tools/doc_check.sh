@@ -113,6 +113,58 @@ else
     skip "colcon 기준선 — colcon 없음 또는 build/ 없음"
 fi
 
+# ── 2b. 셸 게이트 기준선: harness · gate_regression ──────────────────────
+# ★ 08-01 §17.4 P2-②: pytest·colcon 만 실제와 대조하고 **셸 게이트 2종은 무방비**였다.
+#   그래서 `TEST_GATES.md` 안에서 harness 수치가 §1=22 / §2=21 로 갈라진 채
+#   `--strict` 가 전 항목 OK 를 냈다. 기준선이 실제보다 작으면 케이스가 사라져도 조용히 통과한다.
+#   ⚠ `AGENTS.md §3-10`(같은 종류 전수) 적용 결과, 지적된 harness 외에 **gate_regression 도
+#     같은 구멍**임이 전수 조사에서 드러나 함께 닫는다.
+#
+# 세는 법: 각 케이스는 성공 시 `ok "…"` 를 **정확히 한 번** 부른다(`ng` 는 실패 분기가
+#   여러 개일 수 있어 케이스 수와 무관). 실측 대조: harness ok=22=실제, gate_regr ok=14=실제.
+#   실행(≈130초·≈163초)을 doc_check 에 넣지 않고 정적으로 세어 1초 안에 끝낸다.
+check_shell_gate() {   # $1=스크립트 $2=라벨 $3..=문서 수치들(전부 같아야 한다)
+    local script="$1" label="$2"; shift 2
+    local actual; actual=$(grep -cP '(^|\s)ok "' "$script")
+    local v
+    for v in "$@"; do
+        if [ -z "$v" ]; then
+            bad "$label 기준선 — 문서에서 수치를 못 찾음(표기 변경?)"; return
+        elif [ "$v" != "$actual" ]; then
+            bad "$label 기준선 불일치: 문서 '$v' / 실제 $actual → docs/TEST_GATES.md·CURRENT_HANDOFF 갱신"; return
+        fi
+    done
+    ok "$label 기준선 $actual 개 = 실제 (문서 $# 자리 일치)"
+}
+# ⚠ CURRENT_HANDOFF 는 반드시 **함정 6번(현재 기준선) 줄로 한정**해서 뽑는다 —
+#   '직전 완료' 역사 절에도 `harness guards **16/16**` 같은 **그 시점의 실측**이 남아 있어
+#   무한정 grep 하면 역사를 현재 기준선으로 오독한다(구현 중 실제로 16 을 잡았다).
+BASE_LINE='^6\. \*\*기준선\*\*'
+check_shell_gate tools/test_harness_guards.sh "harness" \
+    "$(grep -oP 'test_harness_guards \K\d+(?= 검사)' docs/TEST_GATES.md | head -1)" \
+    "$(grep -oP '\*\*\K\d+(?= 케이스\*\* 전부)' docs/TEST_GATES.md | head -1)" \
+    "$(grep -oP "$BASE_LINE.*harness guards \*\*\K\d+" docs/CURRENT_HANDOFF.md | head -1)"
+check_shell_gate tools/test_gate_regression.sh "gate_regression" \
+    "$(grep -oP 'test_gate_regression \K\d+' docs/TEST_GATES.md | head -1)" \
+    "$(grep -oP "$BASE_LINE.*gate regression \*\*\K\d+" docs/CURRENT_HANDOFF.md | head -1)"
+
+# ── 2c. CURRENT_HANDOFF '지금 하는 일'의 단일성 ──────────────────────────
+# ★ 08-01 §16.3 P2 → §17.3 P2-①: 상단 '현재 단계'·진행표·본문 '이번 한 묶음 목표'가
+#   서로 다른 묶음(§15 / §12 / §14·fc5b915)을 가리킨 채 세 회차를 지나갔다. "항상 이 한
+#   묶음만 유지"가 이 파일의 계약인데 사람이 손으로 맞추다 갈라졌고, 기계가 안 잡았다.
+#   → 세 자리에서 § 번호를 뽑아 **동일성만** 본다. 문구 형식은 강제하지 않는다.
+#   ⚠ '직전 완료' 역사 절의 옛 § 번호들은 대상이 아니다 — 아래 세 패턴만 본다.
+HS_TOP=$(grep -oP '→ \*\*검토 §\K\d+(?=[^*]*\*\*[^\n]*$)' docs/CURRENT_HANDOFF.md | tail -1)
+HS_TBL=$(grep -oP '\|\s*\*\*진행 중 묶음\*\*\s*\|\s*§\K\d+' docs/CURRENT_HANDOFF.md | head -1)
+HS_BODY=$(grep -oP '^## 이번 한 묶음 목표.*?§\K\d+' docs/CURRENT_HANDOFF.md | head -1)
+if [ -z "$HS_TOP" ] || [ -z "$HS_TBL" ] || [ -z "$HS_BODY" ]; then
+    bad "CURRENT_HANDOFF 현재 묶음 § 를 세 자리(상단·진행표·본문 목표)에서 다 못 찾음: 상단='$HS_TOP' 진행표='$HS_TBL' 본문='$HS_BODY'"
+elif [ "$HS_TOP" = "$HS_TBL" ] && [ "$HS_TBL" = "$HS_BODY" ]; then
+    ok "CURRENT_HANDOFF 현재 묶음 단일 (§$HS_TOP — 상단·진행표·본문 일치)"
+else
+    bad "CURRENT_HANDOFF 가 서로 다른 묶음을 지시: 상단=§$HS_TOP 진행표=§$HS_TBL 본문=§$HS_BODY — '항상 이 한 묶음만 유지' 위반"
+fi
+
 # ── 3. '현재 위치' 단일 출처: MASTER_PLAN 이 현재를 가리키면 안 됨 ────────
 # 07-20 실사고 재발 방지 — 현재 단계는 CURRENT_HANDOFF 한 곳에만 존재해야 한다.
 if grep -q "◀ *현재" docs/MASTER_PLAN.md; then
