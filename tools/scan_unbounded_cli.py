@@ -27,11 +27,17 @@
    → `if`/`until`/명령치환 `$(`/프로세스치환 `<(`/파이프/백틱 뒤의 호출도 전부 잡힌다.
 4) 각 단위의 앞쪽 토큰을 걸어가며 명령 위치의 `ros2`·`gz` 를 찾고, 그 앞에
    `hard_timeout` 이 붙어 있는지만 본다.
+   wrapper(`env`·`xargs`·`time` 등)를 만난 뒤에는 옵션 문법을 추정하지 않고 단위 끝까지
+   보수적으로 훑는다. wrapper 옵션은 종류마다 달라 "첫 미지 토큰=다른 명령"으로 끝내면
+   `xargs -n1 ros2` 같은 실제 호출이 조용히 빠지기 때문이다.
 
 ── 알려진 한계 (숨기지 않는다) ─────────────────────────────────────────────
 - `eval`·변수로 조립한 명령(`$CMD topic echo`)은 정적으로 못 본다.
 - heredoc 본문을 셸로 계속 읽는다. 게이트 5파일엔 heredoc 이 없어 지금은 무해하지만,
   heredoc 이 생기면 그 안의 텍스트가 명령으로 오검출될 수 있다(거짓 양성 = 안전 방향).
+- wrapper 뒤에 나온 unquoted `ros2`·`gz` 토큰은 실제 실행 위치가 모호해도 위반으로 본다.
+  `xargs echo ros2` 같은 형상은 거짓 양성이지만, 게이트에서는 그런 간접 표기를 금지하고
+  `hard_timeout N ...` 아래의 명시 호출만 허용한다(fail-closed).
 - 백그라운드(`… &`) 호출은 블록하지 않으므로 제외한다 — 대신 그 프로세스의 수명은
   각 스크립트의 `cleanup` 이 책임진다.
 """
@@ -145,10 +151,22 @@ def _tokens(text, lineno_of, idxs):
 def _check_unit(toks):
     """이 단순 명령이 상한 없는 외부 CLI 호출이면 (줄번호, 명령) 을 돌려준다."""
     guarded = False
+    wrapped = False
     i = 0
     while i < len(toks):
         tok, ln = toks[i]
-        if tok in KEYWORDS or tok in PREFIX or ASSIGN.match(tok):
+        if tok in KEYWORDS:
+            # `time`만 뒤의 명령을 실행하는 wrapper다. if/until 같은 셸 키워드는
+            # 명령 위치를 열어 줄 뿐이므로 wrapped로 보지 않는다.
+            if tok == 'time':
+                wrapped = True
+            i += 1
+            continue
+        if tok in PREFIX:
+            wrapped = True
+            i += 1
+            continue
+        if ASSIGN.match(tok):
             i += 1
             continue
         if tok == 'hard_timeout':
@@ -166,6 +184,12 @@ def _check_unit(toks):
                 return None
             rest = ' '.join(t for t, _ in toks[i:i + 3])
             return (ln, rest)
+        if wrapped:
+            # ★ §12 P1: wrapper의 옵션/옵션 인자를 "다른 명령"으로 오인해 성공 반환하지
+            # 않는다. wrapper별 문법을 불완전하게 재구현하는 대신 단위 끝까지 보수적으로
+            # 훑어, 뒤의 ros2/gz가 hard_timeout 밖이면 반드시 잡는다.
+            i += 1
+            continue
         return None                                 # 다른 명령 — 뒤의 ros2/gz 는 그 인자다
     return None
 

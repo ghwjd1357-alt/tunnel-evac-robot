@@ -419,16 +419,25 @@ if gz model -m robot -p; then :; fi                           # 양성2: if 뒤
 out=$(xargs ros2 topic echo /cmd_vel)                         # 양성3: xargs + 명령치환
 v=`gz model -m robot`                                         # 양성4: 백틱
 cat f | ros2 param get /a b                                   # 양성5: 파이프 뒤
+xargs -n1 ros2 topic echo /cmd_vel                            # 양성6: wrapper 옵션
+time -p ros2 topic info /cmd_vel                              # 양성7: keyword wrapper 옵션
+command -- ros2 daemon stop                                   # 양성8: -- 구분자
+env -i ros2 param get /n p                                    # 양성9: env 옵션
+nohup -- ros2 topic echo /cmd_vel                             # 양성10: foreground nohup
+exec -a probe ros2 topic info /cmd_vel                        # 양성11: exec 옵션+인자
+sudo -n ros2 daemon stop                                      # 양성12: sudo 옵션
+stdbuf -oL ros2 topic echo /cmd_vel                           # 양성13: stdbuf 옵션
 hard_timeout 5 ros2 daemon stop                               # 음성1
-until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성2
-nohup ros2 launch pkg a.launch.py > /dev/null 2>&1 &          # 음성3: 백그라운드
-python3 -c 'print("timeout 3 ros2 topic echo /x")'            # 음성4: 인용 안쪽
-#  timeout 9 ros2 topic echo /x                                 음성5: 주석
+hard_timeout 5 env -i ros2 param get /n p                     # 음성2: guarded wrapper
+until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성3
+nohup ros2 launch pkg a.launch.py > /dev/null 2>&1 &          # 음성4: 백그라운드
+python3 -c 'print("timeout 3 ros2 topic echo /x")'            # 음성5: 인용 안쪽
+#  timeout 9 ros2 topic echo /x                                 음성6: 주석
 EOF
 fx_lines=$(python3 "$SCAN" "$FAKEBIN/fixture.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
-{ [ -z "$unguarded" ] && [ "$fx_lines" = "1,2,3,4,5" ]; } \
-  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성5(줄 $fx_lines)/음성5 정확" \
-  || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 1,2,3,4,5) — 예약 17 또는 검사기 회귀"
+{ [ -z "$unguarded" ] && [ "$fx_lines" = "1,2,3,4,5,6,7,8,9,10,11,12,13" ]; } \
+  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성13(옵션 wrapper 8종 포함)/음성6 정확" \
+  || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 1~13) — 예약 17 또는 검사기 회귀"
 
 # ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
 #   구판은 수집이 끝난 뒤 발행자 '수'를 셌다. 수집 창엔 발행자가 없고 창 직후에만 생긴
