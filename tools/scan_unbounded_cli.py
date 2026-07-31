@@ -25,19 +25,19 @@
 2) 인용 밖 주석(`#`)과 줄 이어쓰기(`\` + 개행)를 처리한다.
 3) 인용 밖 구분자(개행 `;` `|` `&` `(` `)` 백틱)로 **단순 명령** 단위로 쪼갠다.
    → `if`/`until`/명령치환 `$(`/프로세스치환 `<(`/파이프/백틱 뒤의 호출도 전부 잡힌다.
-4) 각 단위의 앞쪽 토큰을 걸어가며 명령 위치의 `ros2`·`gz` 를 찾고, 그 앞에
-   `hard_timeout` 이 붙어 있는지만 본다.
-   wrapper(`env`·`xargs`·`time` 등)를 만난 뒤에는 옵션 문법을 추정하지 않고 단위 끝까지
-   보수적으로 훑는다. wrapper 옵션은 종류마다 달라 "첫 미지 토큰=다른 명령"으로 끝내면
-   `xargs -n1 ros2` 같은 실제 호출이 조용히 빠지기 때문이다.
+4) 각 단위를 **끝까지** 훑어 `ros2`·`gz` 토큰을 찾고, 그 앞에 `hard_timeout` 이 결합돼
+   있는지만 본다. wrapper 목록도, 옵션 문법 추정도 하지 않는다 — 어느 쪽이든
+   "여기서 끝내도 된다"는 판단이 필요한데, 그 판단이 틀리면 **조용히** 뚫리기 때문이다.
 
 ── 알려진 한계 (숨기지 않는다) ─────────────────────────────────────────────
 - `eval`·변수로 조립한 명령(`$CMD topic echo`)은 정적으로 못 본다.
 - heredoc 본문을 셸로 계속 읽는다. 게이트 5파일엔 heredoc 이 없어 지금은 무해하지만,
   heredoc 이 생기면 그 안의 텍스트가 명령으로 오검출될 수 있다(거짓 양성 = 안전 방향).
-- wrapper 뒤에 나온 unquoted `ros2`·`gz` 토큰은 실제 실행 위치가 모호해도 위반으로 본다.
-  `xargs echo ros2` 같은 형상은 거짓 양성이지만, 게이트에서는 그런 간접 표기를 금지하고
-  `hard_timeout N ...` 아래의 명시 호출만 허용한다(fail-closed).
+- 단위 안에 **인용되지 않은** `ros2`·`gz` 토큰이 있으면 실행 위치가 아니어도 위반으로 본다
+  (`echo ros2`·`grep ros2 file`·`xargs echo ros2`). 거짓 양성이지만 fail-closed 이고,
+  게이트에서는 인용하거나 쓰지 않으면 된다. 실측상 `tools/` 셸 도구 8개 전량에서 0건이다.
+- 큰따옴표 안의 **변수 확장**(`"${BASH_SOURCE[0]}"`·`"$1"`)은 명령치환이 아니므로 가린다.
+  여기를 열면 게이트 5파일이 즉시 거짓 양성으로 무너진다 — 의도적으로 열지 않았다.
 - 백그라운드(`… &`) 호출은 블록하지 않으므로 제외한다 — 대신 그 프로세스의 수명은
   각 스크립트의 `cleanup` 이 책임진다.
 """
@@ -45,62 +45,108 @@ import os
 import re
 import sys
 
-# 명령 앞에 붙어도 '명령이 아직 안 나왔다'로 보는 것들
-KEYWORDS = {
-    'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done',
-    'case', 'esac', 'for', 'select', 'function', 'in', '!', '{', '}', 'time',
-}
-PREFIX = {'nohup', 'env', 'command', 'exec', 'builtin', 'xargs', 'sudo', 'stdbuf'}
-ASSIGN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*=')
+# ⚠ 예전에 있던 KEYWORDS/PREFIX(wrapper 화이트리스트)는 §13.3 P2 로 **삭제**했다.
+#    목록이 있으면 목록 밖 wrapper 로 조용히 뚫린다 — `_check_unit()` 주석 참조.
 DURATION = re.compile(r'^[0-9q$]')          # timeout 의 예산 인자(따옴표는 q 로 가려져 있다)
 EXTERNAL = {'ros2', 'gz'}
 SEPARATORS = set('\n;|&()`')
 
 
 def _mask(src):
-    """인용 안쪽을 q 로 가린 문자열과, 각 문자의 줄번호 배열을 돌려준다."""
+    """셸 문맥은 남기고 **인용 안쪽만** q 로 가린다(길이·줄번호 보존).
+
+    ★ 07-31 §13.2 P1 (검토): 구판은 큰따옴표 안쪽을 **통째로** 가렸다. 그런데 셸의
+      큰따옴표는 명령치환을 막지 않는다 — 그래서 실제로 실행되는 `$( )`·백틱까지 함께
+      지워졌고, `y="$(gz model …)"` 가 검사기에서 **사라졌다**. 따옴표 하나 차이로
+      상한 없는 `gz model` 이 조용히 통과한 것이다(게이트 5파일은 `"$( )"` 를 이미
+      10곳 넘게 쓴다).
+      → 문맥을 **스택**으로 추적한다. 큰따옴표 안이라도 명령치환 안쪽은 셸 문맥으로
+        되돌리고, 닫히면 다시 인용으로 돌아온다.
+      ⚠ 작은따옴표 안은 셸 의미 그대로 **전부** 가린다(치환이 일어나지 않는다).
+      ⚠ `${VAR}` 는 변수 확장이지 명령치환이 **아니다** — 계속 가린다. 이걸 같이 열면
+        `"${BASH_SOURCE[0]}"` 류가 전부 거짓 양성이 되어 게이트가 즉시 무너진다.
+    """
     out, lineno_of = [], []
     line = 1
-    state = None            # None / "'" / '"'
+    # 문맥 스택: 'sq'=작은따옴표 · 'dq'=큰따옴표 · 'sub'=$( ) · 'paren'=( ) · 'bq'=백틱
+    # 스택 top 이 sq/dq 가 아니면 '셸 문맥'(명령이 해석되는 자리)이다.
+    stack = []
     i, n = 0, len(src)
+
+    def emit(c, masked=False):
+        out.append('q' if masked else c)
+        lineno_of.append(line)
+
     while i < n:
         ch = src[i]
-        if state is None:
-            # 줄 이어쓰기: 인용 밖의 \ + 개행은 사라진다(한 논리행으로 이어짐)
-            if ch == '\\' and i + 1 < n and src[i + 1] == '\n':
-                out.append(' '); lineno_of.append(line)
-                out.append(' '); lineno_of.append(line)
-                line += 1; i += 2
-                continue
-            if ch == '\\' and i + 1 < n:
-                out.append('q'); lineno_of.append(line)
-                out.append('q'); lineno_of.append(line)
-                i += 2
-                continue
-            if ch == '#' and (not out or out[-1] in ' \t\n;|&()`'):
-                while i < n and src[i] != '\n':      # 주석은 줄 끝까지 지운다
-                    out.append(' '); lineno_of.append(line); i += 1
-                continue
-            if ch in ("'", '"'):
-                state = ch
-                out.append('q'); lineno_of.append(line); i += 1
-                continue
-            out.append(ch); lineno_of.append(line)
+        top = stack[-1] if stack else None
+
+        if top == 'sq':                       # 작은따옴표: 전부 가린다
+            if ch == "'":
+                stack.pop()
+            emit(ch, True)
             if ch == '\n':
                 line += 1
             i += 1
             continue
-        # 인용 안: 개행까지 포함해 전부 가린다(인용 안 개행은 명령을 끊지 않는다)
-        if state == '"' and ch == '\\' and i + 1 < n:
-            out.append('q'); lineno_of.append(line)
-            out.append('q'); lineno_of.append(line)
-            if src[i + 1] == '\n':
+
+        if top == 'dq':                       # 큰따옴표: 명령치환만 살린다
+            if ch == '\\' and i + 1 < n:
+                emit(ch, True); emit(src[i + 1], True)
+                if src[i + 1] == '\n':
+                    line += 1
+                i += 2
+                continue
+            if ch == '"':
+                stack.pop(); emit(ch, True); i += 1
+                continue
+            if ch == '$' and i + 1 < n and src[i + 1] == '(':
+                stack.append('sub')
+                emit('$'); emit('(')          # 인용 밖과 똑같이 내보내 단위가 쪼개지게 한다
+                i += 2
+                continue
+            if ch == '`':
+                stack.append('bq'); emit('`'); i += 1
+                continue
+            emit(ch, True)
+            if ch == '\n':
                 line += 1
-            i += 2
+            i += 1
             continue
-        if ch == state:
-            state = None
-        out.append('q'); lineno_of.append(line)
+
+        # --- 셸 문맥 (최상위 · $( ) · ( ) · 백틱 안) ---
+        if ch == '\\' and i + 1 < n and src[i + 1] == '\n':   # 줄 이어쓰기 = 한 논리행
+            emit(' '); emit(' '); line += 1; i += 2
+            continue
+        if ch == '\\' and i + 1 < n:
+            emit(ch, True); emit(src[i + 1], True); i += 2
+            continue
+        if ch == '#' and (not out or out[-1] in ' \t\n;|&()`'):
+            while i < n and src[i] != '\n':                    # 주석은 줄 끝까지 지운다
+                emit(' '); i += 1
+            continue
+        if ch == "'":
+            stack.append('sq'); emit(ch, True); i += 1
+            continue
+        if ch == '"':
+            stack.append('dq'); emit(ch, True); i += 1
+            continue
+        if ch == '`':
+            stack.pop() if top == 'bq' else stack.append('bq')
+            emit('`'); i += 1
+            continue
+        if ch == '$' and i + 1 < n and src[i + 1] == '(':
+            stack.append('sub'); emit('$'); emit('('); i += 2
+            continue
+        if ch == '(':
+            stack.append('paren'); emit('('); i += 1
+            continue
+        if ch == ')':
+            if top in ('sub', 'paren'):
+                stack.pop()
+            emit(')'); i += 1
+            continue
+        emit(ch)
         if ch == '\n':
             line += 1
         i += 1
@@ -149,26 +195,24 @@ def _tokens(text, lineno_of, idxs):
 
 
 def _check_unit(toks):
-    """이 단순 명령이 상한 없는 외부 CLI 호출이면 (줄번호, 명령) 을 돌려준다."""
+    """이 단순 명령이 상한 없는 외부 CLI 호출이면 (줄번호, 명령) 을 돌려준다.
+
+    ★ 07-31 §13.3 P2 (검토) — **wrapper 화이트리스트를 없앴다.**
+      §12 보완은 `nohup/env/command/exec/builtin/xargs/sudo/stdbuf` 목록 뒤에서만 단위를
+      끝까지 훑고, 목록 **밖** 명령을 만나면 즉시 성공 반환했다. 그래서
+      `setsid`·`nice -n 5`·`ionice -c2`·`taskset -c 0`·`unbuffer` 뒤의 무상한 `ros2` 가
+      전부 통과했다. §11.2 에서 배운 것이 정확히 *"'아는 것만 보는 목록'은 새 항목이 늘 때
+      조용히 뚫린다"* 인데, 그 목록이 한 층 아래로 옮겨간 채 공개되지 않았다.
+      → 목록을 지우고 **단위 전체를 끝까지 훑는다.** 상한 판정은 `hard_timeout` 결합 하나뿐이다.
+      실측(`tools/` 셸 도구 8개 전량): 이 전환으로 늘어난 검출 **0건** — 오늘 비용은 0 이다.
+      ⚠ 대가: `echo ros2` · `grep ros2 file` 처럼 **실행이 아닌 언급**도 위반이 된다.
+        의도된 fail-closed 다(게이트에서는 인용하거나 쓰지 않는다). 조용히 통과하느니
+        시끄럽게 틀리는 쪽을 고른다.
+    """
     guarded = False
-    wrapped = False
     i = 0
     while i < len(toks):
         tok, ln = toks[i]
-        if tok in KEYWORDS:
-            # `time`만 뒤의 명령을 실행하는 wrapper다. if/until 같은 셸 키워드는
-            # 명령 위치를 열어 줄 뿐이므로 wrapped로 보지 않는다.
-            if tok == 'time':
-                wrapped = True
-            i += 1
-            continue
-        if tok in PREFIX:
-            wrapped = True
-            i += 1
-            continue
-        if ASSIGN.match(tok):
-            i += 1
-            continue
         if tok == 'hard_timeout':
             guarded = True
             i += 2                                  # 다음 토큰 = 예산
@@ -182,15 +226,8 @@ def _check_unit(toks):
         if tok in EXTERNAL:
             if guarded:
                 return None
-            rest = ' '.join(t for t, _ in toks[i:i + 3])
-            return (ln, rest)
-        if wrapped:
-            # ★ §12 P1: wrapper의 옵션/옵션 인자를 "다른 명령"으로 오인해 성공 반환하지
-            # 않는다. wrapper별 문법을 불완전하게 재구현하는 대신 단위 끝까지 보수적으로
-            # 훑어, 뒤의 ros2/gz가 hard_timeout 밖이면 반드시 잡는다.
-            i += 1
-            continue
-        return None                                 # 다른 명령 — 뒤의 ros2/gz 는 그 인자다
+            return (ln, ' '.join(t for t, _ in toks[i:i + 3]))
+        i += 1
     return None
 
 

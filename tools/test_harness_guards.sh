@@ -408,8 +408,19 @@ el=$((SECONDS-t0))
 #     `regression_negative.sh:44` 의 `timeout "$3" ros2 action send_goal` 을 못 보고
 #     19/19 PASS 했다 — **거짓 녹색**. `ros2 lifecycle`·`ros2 action info` 도 같은 사각이었다.
 #     → 검사기를 `scan_unbounded_cli.py` 로 분리하고 '모든 foreground ros2·gz' 로 뒤집었다.
-#   ★ 검사기 자체도 검사한다. 검사기가 정규식이면 정규식의 사각이 그대로 게이트의 사각이
-#     된다 — 알려진 양성 5종·음성 5종 픽스처로 **검사기의 부정 회귀**를 박제한다.
+#   ★ 07-31 §12.2 P1 (검토) — wrapper **옵션** 뒤가 사각이었다(`xargs -n1`·`env -i`·
+#     `command --`·`time -p`). wrapper 문맥에서 첫 미지 토큰을 '다른 명령'으로 보고
+#     성공 반환한 탓. → wrapper 뒤는 단위 끝까지 보수적으로 훑도록 바꿨다.
+#   ★ 07-31 §13 (검토) — 남은 두 사각을 닫았다:
+#     §13.2 P1 = **따옴표 하나면 사라졌다**. `y="$(gz model …)"` 처럼 큰따옴표 안의
+#       명령치환은 마스킹에 통째로 지워져 상한 없는 `gz` 가 조용히 통과했다.
+#       (게이트 5파일은 `"$( )"` 를 이미 10곳 넘게 쓴다 — 가정이 아니라 실사용 표기다.)
+#     §13.3 P2 = wrapper **화이트리스트** 자체가 남은 구멍이었다(`setsid`·`nice`·`taskset`…).
+#       → 목록을 지우고 단위 전체를 훑는다. 실측 8개 셸 도구 전량에서 증가 검출 0건.
+#   ★ 검사기 자체도 검사한다. 검사기의 사각이 그대로 게이트의 사각이 된다 —
+#     양성 19종·음성 10종 픽스처로 **검사기의 부정 회귀**를 박제한다.
+#     ⚠ 음성 7·8·9 가 특히 중요하다: 변수 확장(`"${BASH_SOURCE[0]}"`)까지 열면 게이트
+#       5파일이 즉시 거짓 양성으로 무너진다. '더 많이 잡는 것'이 항상 옳지는 않다.
 echo "== 19: 예약 17 — 상한 없는 외부 CLI 전수 검사 + 검사기 자체의 부정 회귀"
 SCAN="$HERE/scan_unbounded_cli.py"
 unguarded=$(python3 "$SCAN" "$HERE"/{lib_e2e,abort_e2e,mission_e2e,regression_negative,regression_3goals}.sh)
@@ -427,17 +438,30 @@ nohup -- ros2 topic echo /cmd_vel                             # 양성10: foregr
 exec -a probe ros2 topic info /cmd_vel                        # 양성11: exec 옵션+인자
 sudo -n ros2 daemon stop                                      # 양성12: sudo 옵션
 stdbuf -oL ros2 topic echo /cmd_vel                           # 양성13: stdbuf 옵션
+y="$(gz model -m robot -p)"                                   # 양성14: 큰따옴표 안 명령치환
+w="`gz model -m robot`"                                       # 양성15: 큰따옴표 안 백틱
+hard_timeout 5 ros2 topic pub /t T "x: $(gz model -m r -p)"   # 양성16: 바깥 guarded·안쪽 무상한
+setsid ros2 topic echo /cmd_vel                               # 양성17: 목록 밖 wrapper
+nice -n 5 ros2 daemon stop                                    # 양성18: 〃 + 옵션
+taskset -c 0 gz model -m robot -p                             # 양성19: 〃 + gz
 hard_timeout 5 ros2 daemon stop                               # 음성1
 hard_timeout 5 env -i ros2 param get /n p                     # 음성2: guarded wrapper
 until hard_timeout 8 ros2 lifecycle get /n | grep -q x; do :; done   # 음성3
 nohup ros2 launch pkg a.launch.py > /dev/null 2>&1 &          # 음성4: 백그라운드
-python3 -c 'print("timeout 3 ros2 topic echo /x")'            # 음성5: 인용 안쪽
+python3 -c 'print("timeout 3 ros2 topic echo /x")'            # 음성5: 인용 안쪽(작은따옴표)
 #  timeout 9 ros2 topic echo /x                                 음성6: 주석
+source "$(dirname "${BASH_SOURCE[0]}")/lib_e2e.sh"            # 음성7: 변수 확장은 열지 않는다
+[ "$(state)" = "PATROL" ] && echo ok                          # 음성8: 명령치환이나 외부 CLI 아님
+fail "원인: $(classify_stop_failure "$n")"                     # 음성9: 중첩 인용
+hard_timeout "${2:-2}" env PYTHONUNBUFFERED=1 \
+  ros2 topic echo /cmd_vel geometry_msgs/msg/Twist --csv \
+  > "$1" 2>/dev/null                                          # 음성10: 다중행 guarded
 EOF
 fx_lines=$(python3 "$SCAN" "$FAKEBIN/fixture.sh" | cut -d: -f2 | cut -d' ' -f1 | paste -sd, -)
-{ [ -z "$unguarded" ] && [ "$fx_lines" = "1,2,3,4,5,6,7,8,9,10,11,12,13" ]; } \
-  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성13(옵션 wrapper 8종 포함)/음성6 정확" \
-  || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 1~13) — 예약 17 또는 검사기 회귀"
+fx_want="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19"
+{ [ -z "$unguarded" ] && [ "$fx_lines" = "$fx_want" ]; } \
+  && ok "게이트 5파일 상한 없는 외부 CLI 0건 · 검사기 픽스처 양성19(인용 안 명령치환 3·목록 밖 wrapper 3 포함)/음성10 정확" \
+  || ng "잔존='$unguarded' 픽스처검출='$fx_lines'(기대 $fx_want) — 예약 17 또는 검사기 회귀"
 
 # ── 케이스 20: 침묵 근거는 **수집 창**에 묶인다 (§11.3 P1-② 부정 회귀) ──────────
 #   구판은 수집이 끝난 뒤 발행자 '수'를 셌다. 수집 창엔 발행자가 없고 창 직후에만 생긴
