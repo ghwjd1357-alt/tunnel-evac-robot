@@ -257,7 +257,12 @@ print(x, y)
 #   ⚠ 판정의 주체는 어디까지나 아래 판독기다. 이 rc 는 호출자가 로그에 남길 **표식**이다.
 collect_cmdvel() {  # $1=출력 파일 $2=수집 시간(초, 기본 2) → rc 0=수집 정상 / 1=수집 실패
   local rc
-  hard_timeout "${2:-2}" ros2 topic echo /cmd_vel > "$1" 2>/dev/null
+  # ★ 07-31 §9 P1: YAML 텍스트를 다시 구조 파싱하지 않는다. 메시지 타입을 Twist로 고정한 뒤
+  #   ros2가 역직렬화한 6성분을 **한 메시지=CSV 한 줄**로 받는다. PYTHONUNBUFFERED는 timeout이
+  #   여러 줄짜리 YAML 중간을 자르던 정상 꼬리 형상을 없애고 완전한 CSV 줄 단위로 남긴다.
+  hard_timeout "${2:-2}" env PYTHONUNBUFFERED=1 \
+    ros2 topic echo /cmd_vel geometry_msgs/msg/Twist --csv --no-lost-messages \
+    > "$1" 2>/dev/null
   rc=$?
   case "$rc" in 0|124|137) return 0 ;; *) return 1 ;; esac
 }
@@ -272,14 +277,22 @@ collect_cmdvel() {  # $1=출력 파일 $2=수집 시간(초, 기본 2) → rc 0=
 #   ⚠ ros2 topic 계열은 daemon 에 의존한다(§5 ③ flake 표면) → read_param_float 와 같은
 #     복구 절차(daemon 재시작 1회)를 붙이고, 그래도 못 읽으면 **fail-closed**(빈 결과)다.
 cmdvel_publisher_count() {  # → 발행자 수(정수) 또는 '' (조회 실패)
-  local out
-  out=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null \
-        | grep -oE 'Publisher count: [0-9]+' | grep -oE '[0-9]+' | head -1)
+  local raw out
+  raw=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null)
+  if printf '%s\n' "$raw" | grep -qxF 'Type: geometry_msgs/msg/Twist'; then
+    out=$(printf '%s\n' "$raw" | sed -n 's/^Publisher count: \([0-9][0-9]*\)$/\1/p' | head -1)
+  else
+    out=""
+  fi
   if [ -z "$out" ]; then
     hard_timeout 5 ros2 daemon stop  >/dev/null 2>&1
     hard_timeout 5 ros2 daemon start >/dev/null 2>&1
-    out=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null \
-          | grep -oE 'Publisher count: [0-9]+' | grep -oE '[0-9]+' | head -1)
+    raw=$(hard_timeout 8 ros2 topic info /cmd_vel 2>/dev/null)
+    if printf '%s\n' "$raw" | grep -qxF 'Type: geometry_msgs/msg/Twist'; then
+      out=$(printf '%s\n' "$raw" | sed -n 's/^Publisher count: \([0-9][0-9]*\)$/\1/p' | head -1)
+    else
+      out=""
+    fi
   fi
   printf '%s' "$out"
 }
@@ -293,77 +306,59 @@ measure_cmdvel_residual() {  # $1=덤프 파일 $2=수집 시간(초, 기본 2) 
   cmdvel_nonzero "$1" "$pub"
 }
 
-# 덤프에서 '0 이 아닌 속도 성분' 개수를 센다. linear/angular 의 x·y·z 전 성분 —
-# 제자리 회전(angular.z)도 '움직임'이다.
+# 덤프에서 '0 이 아닌 속도 성분' 개수를 센다. CSV 열 순서는 Twist 타입이 고정한다:
+# linear.x, linear.y, linear.z, angular.x, angular.y, angular.z.
+# 제자리 회전(마지막 열)도 '움직임'이다.
 #
-# ★ 07-31 §8 P1 (Codex) — **줄 세기를 버리고 구조 파서로 다시 썼다.**
-#   세 라운드 연속으로 이 함수 하나에서 P1 이 나왔다(§7.2 → §8.2). 그것은 "패치가
-#   모자랐다"가 아니라 **처음부터 구조를 봤어야 했다**는 신호다. 구판이 뚫린 두 지점:
-#   ① `seen_lines == 0`(정규식에 걸린 '값 줄' 수)을 '파일이 비었다'로 읽었다 → 경고문·
-#      쓰레기 텍스트처럼 **내용은 있는데 값 줄이 0개**인 덤프가 '완전 침묵'으로 분류돼
-#      발행자 근거를 얻어 `0건` 으로 승격됐다. 주석엔 "내용은 왔는데 온전한 표본 0개 =
-#      판독 실패"라고 써 놓고 코드는 다르게 굴었다.
-#   ② "6성분"을 **"6줄"** 로 셌다 → `angular.{x,y,y}`(z 누락 + y 중복)·`linear` 안의 6줄·
-#      섹션 밖 6줄이 전부 '완전한 Twist' 로 통과했다.
+# ★ 07-31 §9 P1 (Codex) — **YAML 자체 파서를 폐기했다.**
+#   §8 보완은 키 집합을 봤지만 들여쓰기/부모를 보지 않아, `angular.x` 뒤 별도
+#   `metadata.{y,z}`가 오면 그 y/z를 angular의 누락 키로 오귀속했다. 줄 상태기로 YAML을
+#   복원하는 한 부모·중복·꼬리 문법을 계속 재구현하게 된다.
+#   → 수집 경계에서 메시지 타입을 `geometry_msgs/msg/Twist`로 명시하고 Humble의 `--csv`를
+#     사용한다. ROS가 이미 타입 역직렬화를 끝낸 뒤 내는 **고정 6열**만 판독한다.
 #
-#   계약(fail-closed) — 아래 넷을 **전부** 만족해야 정수를 반환한다:
-#   (a) `linear` 와 `angular` **각각**에 `x·y·z` 가 **정확히 한 번씩** 있고 전부 유한한
-#       표본이 최소 1개 있을 것 (개수가 아니라 **키 집합**으로 확인한다)
-#   (b) 손상 신호가 하나도 없을 것 — 섹션 중복 · 섹션 밖 x/y/z · 키 중복 · 비숫자 · NaN/Inf
-#   (c) 불완전 레코드는 **마지막 하나만** 허용 — 시간상자 수집이라 잘림은 원리상 꼬리에만
-#       생긴다. 중간 레코드가 불완전하면 그것은 잘림이 아니라 손상이다
-#   (d) '관측된 침묵'($2 = 발행자 수 ≥ 1 → 0건) 예외는 **파일이 정말로 빈 경우에만**
-#       (`txt.strip() == ""`). 내용이 있으면 발행자가 살아 있어도 구조 검증을 통과해야 한다
-#   ★ (d)가 07-31 실측의 핵심이다: abort 뒤 nav2 가 발행을 멈춰 **실덤프가 0바이트**다.
-#     빈 덤프를 무조건 실패로 두면 abort_e2e 가 영구 거짓 FAIL 이 된다.
+#   계약(fail-closed):
+#   (a) 비어 있지 않은 모든 줄이 정확히 6열이며, 여섯 값이 전부 유한 실수일 것
+#   (b) 빈 줄·열 부족/초과·비숫자·NaN/Inf·YAML/경고문/임의 꼬리가 하나라도 있으면 실패
+#   (c) 정상 표본을 최소 1개 확인한 뒤에만 정수를 반환
+#   (d) 진짜 빈 덤프는 **Twist 타입 + 발행자 ≥1** 근거가 있을 때만 관측된 침묵(0건)
+#   CSV는 한 메시지가 한 줄이고 PYTHONUNBUFFERED로 수집하므로, 구 YAML의 다중행 꼬리 잘림
+#   예외는 제거한다. 불완전 CSV 한 줄은 정상으로 추정하지 않고 fail-closed 한다.
 cmdvel_nonzero() {  # $1=덤프 파일 $2=발행자 수(선택) → 개수 또는 '' (판독 실패)
   python3 -c '
-import math, re, sys
+import math, sys
 try:
     txt = open(sys.argv[1]).read()
 except OSError:
     sys.exit(1)                          # 파일 없음 = 판독 실패
 pub = sys.argv[2] if len(sys.argv) > 2 else ""
 
-# (d) 침묵 예외는 **진짜 빈 파일**에만. 내용이 있으면 아래 구조 검증을 반드시 통과해야 한다.
+# (d) 침묵 예외는 진짜 빈 파일에만. pub은 호출자가 Twist 타입까지 확인한 발행자 수다.
 if not txt.strip():
     if pub.isdigit() and int(pub) >= 1:
         print(0); sys.exit(0)            # 살아있는 토픽이 조용했다 = 관측된 침묵
     sys.exit(1)                          # 근거 없는 빈 덤프 = 판독 실패
 
-SECS = ("linear", "angular")
-recs = [r for r in txt.split("---") if r.strip()]
-complete = nonzero = 0
-for i, rec in enumerate(recs):
-    sec, cur = {}, None
-    for line in rec.splitlines():
-        m = re.match(r"^(linear|angular):\s*$", line)
-        if m:
-            cur = m.group(1)
-            if cur in sec:
-                sys.exit(1)              # (b) 섹션 중복 = 손상
-            sec[cur] = {}
-            continue
-        m = re.match(r"^\s+([xyz]):\s*(\S+)\s*$", line)
-        if not m:
-            continue                     # 그 밖의 줄은 무시
-        if cur is None:
-            sys.exit(1)                  # (b) 섹션 밖 x/y/z = 손상
-        k, v = m.group(1), m.group(2)
-        if k in sec[cur]:
-            sys.exit(1)                  # (b) 키 중복 = 손상
+nonzero = complete = 0
+for line in txt.splitlines():
+    if not line.strip():
+        sys.exit(1)                       # (b) 중간 빈 줄 = 손상
+    vals = line.split(",")
+    if len(vals) != 6:
+        sys.exit(1)                       # (a,b) 고정 6열 외에는 손상
+    nums = []
+    for v in vals:
+        if not v or v != v.strip():
+            sys.exit(1)                   # ROS CSV가 내지 않는 빈값/공백 = 손상
         try:
             f = float(v)
         except ValueError:
-            sys.exit(1)                  # (b) 비숫자 = 손상
+            sys.exit(1)                   # (b) 비숫자 = 손상
         if not math.isfinite(f):
             sys.exit(1)                  # (b) NaN/Inf = 손상
-        sec[cur][k] = abs(f)
-    if all(set(sec.get(s, {})) == {"x", "y", "z"} for s in SECS):
-        complete += 1                    # (a) 키 집합으로 확인 — 줄 개수가 아니다
-        nonzero += sum(1 for s in SECS for v in sec[s].values() if v > 0.01)
-    elif i != len(recs) - 1:
-        sys.exit(1)                      # (c) 중간 레코드 불완전 = 잘림이 아니라 손상
+        nums.append(abs(f))
+    complete += 1
+    nonzero += sum(1 for v in nums if v > 0.01)
 if complete == 0:
     sys.exit(1)                          # 온전한 표본 0개 = 판독 실패
 print(nonzero)

@@ -32,6 +32,7 @@ trap 'rm -rf "$FAKEBIN"' EXIT
 #   FAKE_DAEMON_BLOCK: 1 이면 `ros2 daemon stop/start` 가 300초 블록 (TERM 응답형 무한 행)
 #   FAKE_DAEMON_TRAP : 1 이면 `daemon` 이 SIGTERM 무시(trap '' TERM) + 300초 블록 (TERM 무시형)
 #   FAKE_TOPIC_TRAP  : 1 이면 `topic pub` 이 SIGTERM 무시(trap '' TERM) + 300초 블록
+#   FAKE_TOPIC_INFO  : `ros2 topic info` 가 낼 문자열 (cmd_vel 타입·발행자 근거 검증)
 cat > "$FAKEBIN/ros2" << 'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = param ] && [ "${2:-}" = get ]; then
@@ -46,6 +47,9 @@ fi
 if [ "${1:-}" = topic ] && [ "${2:-}" = pub ]; then
   [ "${FAKE_TOPIC_TRAP:-0}" = 1 ] && { trap '' TERM; sleep 300; }   # TERM 무시 + 블록
   exit 0
+fi
+if [ "${1:-}" = topic ] && [ "${2:-}" = info ]; then
+  printf '%b' "${FAKE_TOPIC_INFO:-}"; exit 0
 fi
 exit 0
 EOF
@@ -204,17 +208,7 @@ el=$((SECONDS-t0))
 #   것은 다른 명제다 — 그래서 가짜 cmdvel 덤프 2종으로 실제 분기를 확인한다.
 #   여기선 linear.x=0.26 + angular.z=-0.35 (제자리 회전도 '움직임') = 잔류 2건.
 echo "== 11: 실정지 실패 분류 — /cmd_vel 잔류 있음 → '코드 결함(취소 경로)'"
-cat > "$FAKEBIN/cmdvel_residual.log" << 'EOF'
-linear:
-  x: 0.26
-  y: 0.0
-  z: 0.0
-angular:
-  x: 0.0
-  y: 0.0
-  z: -0.35
----
-EOF
+printf '0.26,0.0,0.0,0.0,0.0,-0.35\n' > "$FAKEBIN/cmdvel_residual.log"
 n_res=$(cmdvel_nonzero "$FAKEBIN/cmdvel_residual.log")
 msg_res=$(classify_stop_failure "$n_res")
 { [ "$n_res" = 2 ] && echo "$msg_res" | grep -q "코드 결함" && echo "$msg_res" | grep -q "2건"; } \
@@ -227,17 +221,7 @@ msg_res=$(classify_stop_failure "$n_res")
 #   (c) abort_e2e ⑦ 이 수집을 fail() **보다 먼저** 부른다 — 배선이 뒤집히면(수집이 fail 뒤로
 #       가면) 함수는 멀쩡한데 증거는 여전히 사라진다. 그 회귀를 줄 번호 순서로 박제한다.
 echo "== 12: 실정지 실패 분류 — /cmd_vel 잠잠 → '잔류 명령/시뮬' + 두 분류가 서로 다름 + 배선 순서"
-cat > "$FAKEBIN/cmdvel_quiet.log" << 'EOF'
-linear:
-  x: 0.0
-  y: 0.0
-  z: 0.0
-angular:
-  x: 0.0
-  y: 0.0
-  z: 0.0
----
-EOF
+printf '0.0,0.0,0.0,0.0,0.0,0.0\n' > "$FAKEBIN/cmdvel_quiet.log"
 n_quiet=$(cmdvel_nonzero "$FAKEBIN/cmdvel_quiet.log")
 msg_quiet=$(classify_stop_failure "$n_quiet")
 # ⚠ 배선 단언은 `-F`(고정 문자열)로만 — 아래 케이스 15 주석의 07-31 실측 참조.
@@ -273,10 +257,10 @@ out_ok=$(FAKE_GZ_OUT="-11.87 -0.06 0.05 0 0 3.14" gz_model_xy tunnel_robot)
 echo "== 14: cmdvel 판독기 fail-closed — 빈·경고문·필드누락·NaN·Inf 전부 '판독 실패'"
 printf ''                                                                   > "$FAKEBIN/cv_empty.log"
 printf 'WARNING: topic [/cmd_vel] does not appear to be published yet\n'     > "$FAKEBIN/cv_warn.log"
-printf 'linear:\n  x: 0.0\n  y: 0.0\n---\n'                                  > "$FAKEBIN/cv_short.log"
-printf 'linear:\n  x: nan\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_nan.log"
-printf 'linear:\n  x: inf\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_inf.log"
-printf 'linear:\n  x: abc\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' > "$FAKEBIN/cv_text.log"
+printf '0.0,0.0\n'                                                        > "$FAKEBIN/cv_short.log"
+printf 'nan,0.0,0.0,0.0,0.0,0.0\n'                                      > "$FAKEBIN/cv_nan.log"
+printf 'inf,0.0,0.0,0.0,0.0,0.0\n'                                      > "$FAKEBIN/cv_inf.log"
+printf 'abc,0.0,0.0,0.0,0.0,0.0\n'                                      > "$FAKEBIN/cv_text.log"
 # ★ 07-31 §8.2 P1 (Codex): 구판 케이스 14 는 경고문을 **발행자 인자 없이** 검사하고,
 #   발행자 1 과 결합한 손상 입력은 두 종류만 봤다 — **두 축(손상 × 발행자 생존)이 만나는
 #   교차 입력**이 통째로 빠져 `경고문 + 발행자 1` 이 '잔류 0건' 으로 승격되는 것을 못 잡았다.
@@ -302,16 +286,16 @@ n_coll=$(cmdvel_nonzero "$FAKEBIN/cv_collected.log")
   && ok "손상 7종 × 발행자 3축 교차 + 없는 파일 + 빈 수집 전부 '판독 실패'→'분류 불가'" \
   || ng "판독기가 손상 입력을 0건으로 승격:$fc_note — §7.2·§8.2 P1 회귀"
 
-# ── 케이스 15: cmdvel 판독기 역회귀 — 정상 입력은 그대로 + 꼬리 잘림 허용 + ⑧ 배선 ──
+# ── 케이스 15: cmdvel 판독기 역회귀 — 정상 CSV 입력 + 관측된 침묵 + ⑧ 배선 ──
 #   조이다가 정상 판독을 죽이면 그것대로 게이트가 거짓 FAIL 을 낸다. 그리고 시간상자
-#   수집이라 **마지막 메시지가 잘리는 것은 정상 형상**이다 — 그걸 손상으로 보면 안 된다.
-echo "== 15: cmdvel 판독기 역회귀 — 정상 0건/nonzero 보존 + 잘린 꼬리 허용 + ⑧ 배선"
-printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\nlinear:\n  x: 0.0\n' \
-  > "$FAKEBIN/cv_zero_tail.log"
-printf 'linear:\n  x: 0.26\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: -0.35\n---\nangular:\n  x: 0.0\n' \
-  > "$FAKEBIN/cv_res_tail.log"
-n_zero=$(cmdvel_nonzero "$FAKEBIN/cv_zero_tail.log")
-n_res2=$(cmdvel_nonzero "$FAKEBIN/cv_res_tail.log")
+#   출력이 YAML 여러 줄에서 **Twist 1개=CSV 1줄**로 바뀐다. PYTHONUNBUFFERED=1과 결합해
+#   정상 시간상자 종료는 완전한 줄들만 남기며, 불완전 줄은 정상 꼬리로 승격하지 않고 실패한다.
+echo "== 15: cmdvel 판독기 역회귀 — 정상 CSV 0건/nonzero + 관측된 침묵 + ⑧ 배선"
+printf '0.0,0.0,0.0,0.0,0.0,0.0\n0.0,0.0,0.0,0.0,0.0,0.0\n' \
+  > "$FAKEBIN/cv_zero.log"
+printf '0.26,0.0,0.0,0.0,0.0,-0.35\n' > "$FAKEBIN/cv_res.log"
+n_zero=$(cmdvel_nonzero "$FAKEBIN/cv_zero.log")
+n_res2=$(cmdvel_nonzero "$FAKEBIN/cv_res.log")
 # ★★ 07-31 실측 역회귀 — 이 저장소의 실제 '잠잠'은 zero Twist 가 아니라 **완전 침묵**이다
 #    (abort 뒤 nav2 가 발행을 멈춘다 — 실덤프 0바이트를 직접 확인했다). 발행자가 살아 있는데
 #    아무것도 안 왔으면 그것이 정상 PASS 다. 이걸 '판독 실패'로 두면 abort_e2e 가 영구 거짓 FAIL.
@@ -327,7 +311,7 @@ l_cls=$(grep -cF 'classify_stop_failure "$nonzero"' "$HERE/abort_e2e.sh" || true
 l_uni=$(grep -cF 'measure_cmdvel_residual "$LOGDIR/' "$HERE/abort_e2e.sh" || true)
 if [ "$n_zero" = 0 ] && [ "$n_res2" = 2 ] && [ "$n_sil_ok" = 0 ] \
    && [ "$l_cmp" = 1 ] && [ "$l_cls" = 1 ] && [ "$l_uni" = 2 ]; then
-  ok "완전 zero=0건 · 잔류=2건 (둘 다 꼬리 잘림) · 관측된 침묵=0건 · ⑦⑧ 단일 계약 2/2 + '!=0' 비교"
+  ok "완전 CSV zero=0건 · 잔류=2건 · 관측된 침묵=0건 · ⑦⑧ 단일 계약 2/2 + '!=0' 비교"
 else
   ng "n_zero='$n_zero' n_res='$n_res2' 침묵='$n_sil_ok' ⑧비교=$l_cmp ⑧분류=$l_cls 단일계약=$l_uni — 역회귀 또는 배선 이상"
 fi
@@ -348,19 +332,20 @@ o_pos=$(FAKE_GZ_OUT="1.40779 0.108277 0.05" gz_model_xy tunnel_robot)
   && ok "손상 6종 전부 좌표 없음 · 정상 음수 '$o_neg' · 정상 양수 '$o_pos' 보존" \
   || ng "gz_note=$gz_note o_neg='$o_neg' o_pos='$o_pos' — §7.3 P1 회귀 또는 정상 좌표 역회귀"
 
-# ── 케이스 17: cmdvel 판독기 **구조** 검증 — "xyz 줄이 6개"만으로 완전 표본이 되지 않는다 ──
-#   07-31 §8.2 P1 부정 회귀 (Codex). 구판은 "6성분"을 **"6줄"** 로 셌다. 그래서
-#   `angular.{x,y,y}`(z 누락 + y 중복)·`linear` 안의 6줄·섹션 밖 6줄이 전부 '완전한 Twist'
-#   로 통과했다(구현자 재현 확정). 계약은 **키 집합**이다 — linear·angular 각각 {x,y,z}.
-#   ⚠ 잘림은 원리상 **꼬리에만** 생긴다 → 중간 레코드가 불완전하면 그것은 손상이다.
-echo "== 17: cmdvel 판독기 구조 검증 — 중복 키·섹션 밖·중간 불완전은 전부 '판독 실패'"
-printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  y: 0.0\n---\n' > "$FAKEBIN/cv_dupkey.log"
-printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n'           > "$FAKEBIN/cv_lin6.log"
-printf '  x: 0.0\n  y: 0.0\n  z: 0.0\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n'                    > "$FAKEBIN/cv_nosec.log"
-printf 'linear:\n  x: 0.0\n  y: 0.0\n---\nlinear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' \
-  > "$FAKEBIN/cv_midbad.log"
+# ── 케이스 17: cmdvel **고정 CSV 계약** — YAML 자체 파싱 제거 + 타입 근거 ──
+#   07-31 §9.2 P1: 미지 `metadata:` 부모 아래 y/z가 직전 angular의 누락 키를 채웠다.
+#   근인은 YAML 구조를 줄 상태기로 다시 구현한 것. 수리는 ros2가 Twist를 역직렬화한 뒤 내는
+#   고정 6열 CSV만 소비해 부모·들여쓰기·중복 키라는 입력 공간 자체를 제거한다.
+echo "== 17: cmdvel 고정 CSV 계약 — 6열·유한값·Twist 타입 근거 외에는 전부 '판독 실패'"
+printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\nmetadata:\n  y: 0.0\n  z: 0.0\n---\n' \
+  > "$FAKEBIN/cv_foreign_parent.log"
+printf '0.0,0.0,0.0,0.0,0.0\n'                         > "$FAKEBIN/cv_five.log"
+printf '0.0,0.0,0.0,0.0,0.0,0.0,0.0\n'                 > "$FAKEBIN/cv_seven.log"
+printf '0.0,0.0,0.0,0.0,0.0,0.0\nWARNING: damaged tail\n' > "$FAKEBIN/cv_bad_tail.log"
+printf '0.0,0.0,0.0,0.0,0.0,0.0\n\n0.0,0.0,0.0,0.0,0.0,0.0\n' \
+  > "$FAKEBIN/cv_blank_mid.log"
 st_ok=1; st_note=""
-for cv in cv_dupkey cv_lin6 cv_nosec cv_midbad; do
+for cv in cv_foreign_parent cv_five cv_seven cv_bad_tail cv_blank_mid; do
   for pub in "" 1; do            # ★ 발행자가 살아 있어도 손상은 손상이다
     n=$(cmdvel_nonzero "$FAKEBIN/$cv.log" $pub)
     m=$(classify_stop_failure "$n")
@@ -368,13 +353,18 @@ for cv in cv_dupkey cv_lin6 cv_nosec cv_midbad; do
       || { st_ok=0; st_note="$st_note [$cv+pub'$pub'→'$n']"; }
   done
 done
-# 역회귀: 완전한 레코드가 2개 연속인 정상 덤프는 그대로 0건
-printf 'linear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\nlinear:\n  x: 0.0\n  y: 0.0\n  z: 0.0\nangular:\n  x: 0.0\n  y: 0.0\n  z: 0.0\n---\n' \
+# 역회귀: 완전한 CSV 레코드 2개는 그대로 0건
+printf '0.0,0.0,0.0,0.0,0.0,0.0\n0.0,0.0,0.0,0.0,0.0,0.0\n' \
   > "$FAKEBIN/cv_two_zero.log"
 n_two=$(cmdvel_nonzero "$FAKEBIN/cv_two_zero.log" 1)
-{ [ "$st_ok" = 1 ] && [ "$n_two" = 0 ]; } \
-  && ok "중복키·linear 6줄·섹션 밖 6줄·중간 불완전 × 발행자 2축 전부 '판독 실패' · 완전 2레코드는 0건 보존" \
-  || ng "st_note=$st_note 완전2레코드='$n_two' — §8.2 P1 회귀(줄 개수로 완전 표본 인정)"
+# 침묵 근거는 발행자 수뿐 아니라 토픽 타입까지 Twist여야 한다.
+p_twist=$(FAKE_TOPIC_INFO='Type: geometry_msgs/msg/Twist\nPublisher count: 1\n' cmdvel_publisher_count)
+p_wrong=$(FAKE_TOPIC_INFO='Type: std_msgs/msg/String\nPublisher count: 1\n' cmdvel_publisher_count)
+csv_wiring=$(grep -cF 'geometry_msgs/msg/Twist --csv --no-lost-messages' "$HERE/lib_e2e.sh" || true)
+{ [ "$st_ok" = 1 ] && [ "$n_two" = 0 ] && [ "$p_twist" = 1 ] && [ -z "$p_wrong" ] \
+   && [ "$csv_wiring" = 1 ]; } \
+  && ok "YAML 부모공격·CSV 열손상·임의꼬리 × 발행자 2축 실패 · 완전 2레코드=0 · Twist 타입 근거 + CSV 배선" \
+  || ng "st_note=$st_note 완전2='$n_two' type_ok='$p_twist' type_bad='$p_wrong' wiring=$csv_wiring — §9.2 P1/고정 CSV 계약 회귀"
 
 echo
 echo "== 결과: PASS $P / FAIL $F =="
