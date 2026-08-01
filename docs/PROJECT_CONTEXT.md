@@ -38,7 +38,7 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 |---|---|---|---|
 | 입력 | `/scan` | LaserScan | RPLIDAR C1 |
 | 입력 | `/odom` | Odometry | 구동부 Teensy (frame `odom`, child `base_footprint` 제안) |
-| 입력 | `/imu/data` | Imu | 구동부 Teensy (BNO055 — 코드 설정 50Hz, **실측 41.63Hz** 08-01 정정. 분포·전제조건 = `REAL_ROBOT_VALUES.md §1`) |
+| 입력 | `/imu/data` | Imu | 구동부 Teensy (BNO055 — **실측 46.4Hz** 08-02 정정. 분포·전제조건 = `REAL_ROBOT_VALUES.md §1`) |
 | 입력 | `/detections` | 커스텀 (`tunnel_interfaces` 제안) | 역할 B. 아래 §4.1 |
 | 출력 | `/cmd_vel` | Twist | Nav2 → Teensy (`linear.x`·`angular.z`만) |
 | 출력 | `/map`, `/tf` | — | SLAM |
@@ -61,9 +61,10 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
   4륜 스키드 회전 슬립 → **IMU yaw 융합(EKF) 필수** (EKF는 Jetson 위 노드 = 역할 A).
 - ★ 실측값 4종 수령 완료 (07-08~18, 정본 = **`docs/REAL_ROBOT_VALUES.md`** — 반영 지점·잔여 합의 포함):
   wheel_separation **0.49m** / 바퀴 지름 **0.13m** / footprint **0.55×0.57m**(외접반경 ≈0.40m) /
-  encoder 26PPR → 바퀴축 TOTAL_PPR **2644.3** (실측). IMU = BNO055 **실측 41.63Hz** (08-01 정정 — 구 '50Hz 확정' 폐기).
-- 배선 핀맵·구동부 검증 절차 = `0718_구동부_배선맵핑_검증절차.md`. Teensy 합의표 = `~/Desktop/TEENSY_실차연동_합의사항.md`.
-- 잔여: micro-ROS 토픽 세부 합의 + 라이다 장착높이(몸통 최상면보다 위) 확인.
+  encoder 26PPR → 바퀴축 TOTAL_PPR **2641.1** (08-02 확정 · quadrature ×4). IMU = BNO055 **실측 46.4Hz** (08-02 정정 — 구 41.63Hz·'50Hz 확정' 폐기).
+  ⚠ 바퀴 반지름은 **3종 분리**(공칭 0.065 / 실측 축높이 **0.053** / 오도메트리 계수 0.05698) · 좌우 간격은 **물리 0.49 / 실효 0.62** — `REAL_ROBOT_VALUES.md §1`.
+- 배선 핀맵·구동부 검증 절차 = `0718_구동부_배선맵핑_검증절차.md`. Teensy 계약 정본 = `~/Desktop/TEENSY_실차연동_최종합의서_0802.md` (07-24 합의사항을 대체).
+- 잔여: `frame_id` 3종 확인 + 펌웨어 소스 + 물리 E-stop 장착 + 전원 인계 + 속도 검증 — `REAL_ROBOT_VALUES.md §4`.
 - 코드 이식 트리거 = **구동부 "3m 직진 오차 3% 이내" 통과 선언.**
 
 ## 6. 아키텍처 구분 (동결 단위의 근거)
