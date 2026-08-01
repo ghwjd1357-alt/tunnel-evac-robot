@@ -24,7 +24,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**08-01 갱신** — §18 기준선 스윕·핸드오프 단일성 회귀 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**08-01 갱신** — §18 기준선 스윕·핸드오프 단일성 + §19 자리 수 양방향 계약, **§20 승인**): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
 ⚠ 이 줄을 포함해 **기준선 수치가 적힌 모든 자리**는 `tools/gate_baseline_scan.py` 가 전수로
 대조한다(현재 13 자리). 수치 뒤 단위어(`passed`/`tests`/`검사`/`케이스`)를 떼면 검사에서 빠지고,
 기준선이 **아닌** 수를 같은 줄에 적을 때는 `케이스 12` 처럼 단위어를 **앞에** 쓴다.

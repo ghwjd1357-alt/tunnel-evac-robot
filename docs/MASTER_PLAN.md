@@ -347,7 +347,7 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
      셋 다 **`lib_e2e.sh` 를 source 하지 않고**(공용 상한 함수를 못 쓴다) `make_map.sh` 는 실런 금지,
      `accuracy_bench` 는 게이트 밖이다. `test_gate_regression.sh` 는 실행 검증이 되지만 **실차
      세션이 만지는 표면**이라 이번 묶음에서 분리했다. 역회귀 앵커를 못 붙이는 수정은 하지 않는다.
-18. **`gate_fakes.py` IMU 주기가 실물과 다르다 (07-31 신설 — 미착수)** — 하네스는 IMU 를
+18. **`gate_fakes.py` IMU 주기가 실물과 다르다 (07-31 신설 — 08-01 §20 승인 후 **착수**)** — 하네스는 IMU 를
    **50Hz 등간격**으로 흉내내는데(`src/tunnel_bringup/test/gate_fakes.py:91`, 주석은 `:138` 에서
    아직 100Hz 라 **자기 자신과도 불일치**), 구동부 2차 회신 실측은 **41.63Hz · 평균주기 24.02ms ·
    min 18ms · max 30ms · σ 0.55ms** 다. **EKF 가 30Hz 인데 IMU 최대 간격이 30ms 인 조합이
