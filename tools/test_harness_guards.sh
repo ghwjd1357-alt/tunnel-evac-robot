@@ -643,6 +643,9 @@ tb_expect '2' "$TB_FULL"  "검증창에서 잔류 등장" 'aa.01|aa.01'         
 #   ② 나열 목록과 구현이 갈라진다 — 착수 때 grep 출력엔 13 자리가 다 있었는데 패턴은 7 개였고,
 #      "내가 쓴 7 개가 13 자리를 덮나?" 를 아무도 묻지 않았다. 실측 사각 6 자리.
 #   → 나열을 버리고 스윕으로 뒤집었다. 여기서는 **표기 변형마다** 검사가 살아 있는지를 박제한다.
+#   ★ 08-01 §19 P2-①: 그 보완도 자리 수를 **하한**으로만 봤다 — 줄어드는 쪽만 막고 **늘어나는
+#     쪽은 무조건 통과**했다. 올바른 값의 표기를 한 줄 더 적으면 조용히 승인됐다. 계약은
+#     양방향이어야 한다 → 아래 '자리 소실 4 종'과 '자리 증식 4 종'을 함께 박는다.
 #   ⚠ 역회귀(음성)가 본체다: 역사 수치를 현재로 오독하면 문서를 고칠 때마다 거짓 FAIL 이 난다.
 echo "== 22: 게이트 기준선 표기 전수 스윕 + 역사 수치 오독 금지"
 GBS="$HERE/gate_baseline_scan.py"
@@ -696,16 +699,38 @@ gb_pos 's/기동 14케이스/기동 13케이스/'          '주석 안 14케이�
 gb_pos 's/| 14 케이스 전부/| 13 케이스 전부/'    '표 3번째 칸 14 케이스 전부'
 gb_pos 's/\*\*159 passed\*\*/**158 passed**/'    'pytest **159 passed**'
 gb_pos 's/\*\*188 tests/**187 tests/'            'colcon **188 tests**'
-# 양성: 단위어를 떼면 자리가 사라진다 = 검사 증발 → 하한 미달로 잡아야 한다
-gb_pos 's/\*\*22검사\*\*/**22개**/'              '단위어 제거(자리 증발 → 하한 미달)'
+# 양성: 단위어를 떼면 그 자리가 사라진다 = 검사 증발 → **자리 소실**로 잡아야 한다 (4 종 전부)
+gb_pos 's/\*\*22검사\*\*/**22개**/'                    '자리 소실:harness'
+gb_pos 's/pytest \*\*159 passed\*\* \//pytest **159 통과** \//' '자리 소실:pytest'
+gb_pos 's/\*\*188 tests, 0 fail/**188 건, 0 fail/'     '자리 소실:colcon'
+gb_pos 's/기동 14케이스/기동 14건/'                    '자리 소실:gate_regression'
+# 양성: **올바른 값이라도** 현재형 표기를 한 자리 더 만들면 FAIL 이어야 한다 (§19 P2-① 부정 회귀).
+#   구판은 자리 수를 하한(`<`)으로만 봐서 늘어나는 쪽을 무조건 통과시켰다 — 자물쇠가 한 방향뿐이었다.
+#   ⚠ 자리가 실제로 +1 됐는지 먼저 확인한다. 안 늘면 '아무것도 안 넣고 통과하는 빈 테스트'다.
+gb_add() {  # $1=추가할 한 줄 $2=게이트 키 $3=라벨
+  local before after
+  before=$(python3 "$GBS" --root "$GBD" --list 2>/dev/null | grep -c ":$2:")
+  printf '%s\n' "$1" > "$GBD/extra.md"
+  after=$(python3 "$GBS" --root "$GBD" --list 2>/dev/null | grep -c ":$2:")
+  if [ "$after" != "$((before + 1))" ]; then
+    gb_ok=0; gb_note="$gb_note [$3→자리 $before→$after(기대 +1)]"
+  else
+    gb_expect 1 "자리 증식:$3"
+  fi
+  rm -f "$GBD/extra.md"
+}
+gb_add '현재 기준선 추가: test_harness_guards 22 검사'    harness         'harness'
+gb_add '현재 기준선 추가: test_gate_regression 14 케이스' gate_regression 'gate_regression'
+gb_add '현재 기준선 추가: pytest 159 passed'              pytest          'pytest'
+gb_add '현재 기준선 추가: colcon 188 tests'               colcon          'colcon'
 # 음성(역회귀): 역사·동결·보관본의 수치를 현재로 오독하면 안 된다
 gb_hist=$(python3 "$GBS" --root "$GBD" --list 2>/dev/null \
           | grep -cE 'hist\.md|legacy|FREEZE_MANIFEST')
 [ "$gb_hits" = 13 ] || { gb_ok=0; gb_note="$gb_note [자리수 $gb_hits(기대13)]"; }
 [ "$gb_hist" = 0 ]  || { gb_ok=0; gb_note="$gb_note [역사 오독 $gb_hist 건]"; }
 [ "$gb_ok" = 1 ] \
-  && ok "표기 변형 8 종 + 자리 증발 1 종 전부 검출 · 현재형 13 자리 · 역사(16/16·직전완료·동결165·legacy) 오독 0" \
-  || ng "기준선 스윕 결함:$gb_note — §18.2 P2-① 회귀"
+  && ok "값 변형 8 종 + 자리 소실 4 종 + 자리 증식 4 종 전부 검출(양방향 계약) · 현재형 13 자리 · 역사(16/16·직전완료·동결165·legacy) 오독 0" \
+  || ng "기준선 스윕 결함:$gb_note — §18.2 P2-① · §19 P2-① 회귀"
 
 # ── 케이스 23: 핸드오프가 **한 묶음만** 가리킨다 (§18.3 P2-② 부정 회귀) ───────
 #   §17 보완은 세 자리의 § 동일성만 봤고 `head -1` 로 하나만 골랐다. 값을 **바꿔치기**하면

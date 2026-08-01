@@ -24,8 +24,15 @@
   ④ `N/N` 표기(`22/22`·`16/16`) — 실행 결과의 관용 표기
 
 ⚠ 문서 쓸 때 지킬 표기 규약:
-  기준선이 **아닌** 수를 게이트 줄에 적을 때는 `케이스 12` 처럼 **단위어를 앞에** 쓴다.
-  `12케이스` 로 쓰면 기준선으로 읽혀 FAIL 한다 — 놓치는 쪽이 아니라 시끄러운 쪽으로 틀린다.
+  ① 기준선이 **아닌** 수를 게이트 줄에 적을 때는 `케이스 12` 처럼 **단위어를 앞에** 쓴다.
+     `12케이스` 로 쓰면 기준선으로 읽혀 FAIL 한다 — 놓치는 쪽이 아니라 시끄러운 쪽으로 틀린다.
+  ② **자리 수는 정확한 계약이다.** 문서에 기준선 자리를 새로 만들면 값이 맞아도 FAIL 한다.
+     늘리려면 아래 `GATES` 의 자리 수를 **같이 올려야** 한다 — 자동 편입은 없다.
+
+정책: 왜 새 자리를 자동으로 받아주지 않나 (08-01 · 검토 §19 P2-①)
+  기준선은 **정본**이다. 적힌 자리가 늘어나는 것은 *다음 갱신 때 고쳐야 할 곳이 늘어나는*
+  결정이고, 기계는 늘어난 자리 중 무엇이 의도된 정본인지 구별하지 못한다. 그래서 자리 증감은
+  사람이 명시적으로 등록해야 한다 (미등록 = 차단).
 
 사용:
   python3 tools/gate_baseline_scan.py --list
@@ -40,8 +47,11 @@ import re
 import sys
 
 # ── 등록부 ───────────────────────────────────────────────────────────────
-# min_hits = 현재형 표기가 있어야 할 **최소 자리 수**. 자리 '목록' 이 아니라 '개수' 라서
-#   표기가 바뀌어도 안 부서지고, 자리가 조용히 사라지면(= 검사가 증발하면) FAIL 한다.
+# want_hits = 현재형 표기가 있어야 할 **정확한 자리 수**. 자리 '목록' 이 아니라 '개수' 라서
+#   표기가 바뀌어도 안 부서진다(§18 이 버린 나열 구조로 되돌아가지 않는다).
+#   ⚠ 08-01 검토 §19 P2-①: 처음엔 이걸 **하한(`<`)** 으로 뒀다. 그러면 자리가 사라지는 쪽만
+#     막고 **늘어나는 쪽은 무조건 통과**한다 — 올바른 값의 표기를 한 줄 더 적으면 조용히
+#     승인됐다. 계약은 양방향이어야 한다. 이제 `!=` 로 증감을 **둘 다** 잡는다.
 #   08-01 실측 자리: pytest 2 · colcon 2 · harness 4 · gate_regression 5 (합 13).
 GATES = [
     ("pytest",          r"pytest",                               2),
@@ -166,23 +176,29 @@ def main(argv):
         return 2
 
     rc = 0
-    for name, _alias, min_hits in GATES:
+    for name, _alias, want_hits in GATES:
         if name not in expect:
             continue
         actual = expect[name]
         mine = [h for h in hits if h[2] == name]
-        wrong = [h for h in mine if h[3] != actual]
-        if wrong:
+        # 값 검사와 자리 수 검사는 **독립**이다 — 새로 생긴 자리에 틀린 값이 적히면 둘 다 알린다.
+        bad_here = False
+        for rel, lineno, _g, val in [h for h in mine if h[3] != actual]:
             rc = 1
-            for rel, lineno, _g, val in wrong:
-                print("FAIL %s 기준선 불일치: %s:%d 이 %d — 실제는 %d"
-                      % (name, rel, lineno, val, actual))
-        elif len(mine) < min_hits:
-            # 자리가 사라지면 검사도 같이 증발한다. 그것 자체가 결함이다.
+            bad_here = True
+            print("FAIL %s 기준선 불일치: %s:%d 이 %d — 실제는 %d"
+                  % (name, rel, lineno, val, actual))
+        if len(mine) != want_hits:
+            # 줄면 검사가 증발하고, 늘면 갱신해야 할 정본 자리가 사람 모르게 늘어난다.
             rc = 1
-            print("FAIL %s 기준선 표기가 %d 자리뿐 — 최소 %d (표기가 사라졌거나 단위어 누락)"
-                  % (name, len(mine), min_hits))
-        else:
+            bad_here = True
+            kind = ("자리 증식 — 새 자리는 GATES 등록부에 같이 올려야 한다"
+                    if len(mine) > want_hits
+                    else "자리 소실 — 표기가 사라졌거나 단위어 누락(검사도 같이 증발한다)")
+            where = " · ".join("%s:%d" % (h[0], h[1]) for h in mine) or "(한 자리도 없음)"
+            print("FAIL %s 기준선 자리 %d — 계약은 정확히 %d · %s ↳ %s"
+                  % (name, len(mine), want_hits, kind, where))
+        if not bad_here:
             print("OK   %s 기준선 %d = 문서 %d 자리 전부" % (name, actual, len(mine)))
     return rc
 
