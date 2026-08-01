@@ -26,7 +26,7 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md > docs/CURRENT_HANDOFF.md   # 그대로
 
 - **직전 완료 (08-02 검토 §27 P1·P2 보완 — 동결 예외 3회차)**: 08-02 사용자 승인으로 새로
   연 동결 예외를 구현했다. 서사·증거 전량 = `0801_현황.md §15`~`§18`.
-  - ★ **검토 §28 판정 대상 커밋 = `PENDING_FIX_HASH`** (직전 = `3c1c124`. 구판 대조는
+  - ★ **검토 §28 판정 대상 커밋 = `fdb2131`** (직전 = `3c1c124`. 구판 대조는
     `git show 3c1c124:src/mission_manager/mission_manager/follower_monitor.py` 로 격리 사본을
     뜬다 — 저장소를 건드리면 `src/`↔`build/` 하드링크가 끊긴다, 아래 함정 3)
   - **고친 결함 (검토 §27 P1)**: 모니터의 단절 복구 가드가 `_last_scan_t is not None` 이라
@@ -123,7 +123,7 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md > docs/CURRENT_HANDOFF.md   # 그대로
 
 ★ **구현 묶음이 아니다.** 구현자(Claude)는 이 회차에 `src/` 를 건드리지 않는다.
 
-**검토자가 판정할 것 — 대상 커밋 `PENDING_FIX_HASH` 가 아래를 실제로 만족하는가:**
+**검토자가 판정할 것 — 대상 커밋 `fdb2131` 가 아래를 실제로 만족하는가:**
 
 1. **§27 P1 이 실제로 닫혔는가** — GATHER~GUIDE 내내 `/scan` 0장인 실제 전이에서 첫 유효
    빈 프레임 한 장이 예산을 깎지 **않는가**. 그 뒤 fresh 누적 `< lost_sec` 은 보류하고
