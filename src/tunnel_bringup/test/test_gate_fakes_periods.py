@@ -37,11 +37,21 @@ test_gate_fakes_periods.py — 가짜 센서 '주기'가 실물과 같은지, �
   → 뿌리도 위치 검사 대상에 넣고, 정적 분석이 못 보는 문법은 **fail-closed** 한다.
   → 순서 계약과 **시간 편향 계약**을 분리한다 (잔차 중앙값, 임계 근거는 아래 상수).
 
+[★ 08-01 검토 §23 보완 — 원본 의미·동적 구조·안전 꼬리를 각각 닫는다]
+  §22 보완도 세 이웃 입력을 놓쳤다: probe 함수로 감싼 모듈 walrus의 의미 변화,
+  6개 이름 denylist 밖 동적 조회, 전체 중앙값에 묻힌 30ms 항목만의 +7ms 지연.
+  → 정의를 감싸지 않고 **원본 모듈 문장 그대로** CPython symtable에 묻는다.
+  → 위치 대응을 지원하지 않는 모듈 바인딩은 좁은 문법 계약으로 fail-closed하고,
+    CPython 모듈 바인딩 이름 집합과 손지도의 일치를 매번 기계 대조한다.
+  → 동적 조회는 위험 이름을 세지 않고 **안전 호출 allowlist** 밖 구조를 거부한다.
+  → 전체 편향과 별도로 30ms 최대값만 반복하는 **안전 꼬리 계약**을 실제 rclpy로 돌린다.
+
 [이 파일이 지키는 것 — 값이 아니라 '갈라질 자리']
   1. IMU 주기 열이 **실측 5통계를 재현**하는가 (평균·min·max·σ·창)  — 순수 계산
   2. 등간격으로 되돌리면 **깨지는가** (부정 회귀 — 이게 없으면 조용히 되돌아간다)
   3. **실제 rclpy 타이머**가 계획한 순서대로 콜백을 부르는가 — 생산 배선 통과
   3-b. 그 간격이 계획 대비 **체계적으로 치우치지** 않았는가 (순서와 별개 계약)
+  3-c. 안전상 최대인 30ms 항목만 늦어져도 EKF 33.33ms 경계 전에 잡는가
   4. 주기 값을 만드는 정의가 **정본 블록 안에 닫혀 있는가** (폐포 — 표기 무관)
   5. 실측을 못 받은 항목이 **'미확보'로 선언**돼 있는가 (추정으로 채우면 또 다른 거짓 입력)
   6. EKF 주기와의 관계가 **문서에 적힌 그대로**인가 (한쪽이 바뀌면 여기서 걸린다)
@@ -50,8 +60,8 @@ test_gate_fakes_periods.py — 가짜 센서 '주기'가 실물과 같은지, �
   실측 창 한 바퀴는 약 7초다. 회귀가 그걸 매번 돌 이유는 없다. 나누면 된다:
     (a) **순수 계산**으로 실측 열이 5통계를 재현하는지 본다 (빠르고 정확하다)
     (b) **실제 타이머**로 '계획한 열이 그대로 나오는지'를 짧은 시험용 계획으로 잠근다
-  (a)+(b) 의 합이 "실측 최대 간격이 실제로 발행된다"를 준다 — 배선은 계획과 무관하게
-  성립하고, 실측 계획은 그 최대값을 담고 있기 때문이다.
+    (c) 30ms 최대값만 반복해 값별 국소 지연이 다른 정상값의 중앙에 묻히지 않게 잠근다
+  (a)+(b)+(c) 의 합이 "실측 최대 간격이 안전 여유 안에서 실제 발행된다"를 준다.
 
 [실행]
   cd ~/ros2_ws && python3 -m pytest src/tunnel_bringup/test/test_gate_fakes_periods.py -q
@@ -65,7 +75,6 @@ import os
 import re
 import statistics
 import symtable
-import textwrap
 import time
 
 import rclpy
@@ -116,19 +125,24 @@ PROBE_DOMAIN_ID = '89'    # 다른 세션의 DDS 와 섞이지 않게 격리
 BIAS_TOL_US = 3_000
 BIAS_SHIFT_US = 7_000     # 부정 회귀가 주입하는 편향 크기 (§22 검토자의 반례와 같은 값)
 
-# ★ 08-01 검토 §22 P2-① — 정적 분석이 원리적으로 못 보는 자리.
-#   아래가 정본 블록 안에 나타나면 폐포 검사는 **참을 증명할 수 없으므로 멈춘다**(fail-closed).
-#   `global` 은 함수 안에서 모듈 이름을 새로 묶어 아래 바인딩 지도를 무력화하고,
-#   `eval`/`globals()` 류는 이름을 실행 시각에 만든다. 조용히 통과시키는 것이 결함이다.
-DYNAMIC_ESCAPES = frozenset({'eval', 'exec', 'globals', 'locals', 'vars', '__import__'})
+# ★ 08-01 검토 §23 P2-② — 위험한 호출 이름을 나열하지 않는다.
+#   폐포가 현재 실제로 쓰는 순수 builtin만 허용하고, 나머지 전역 builtin 호출과
+#   attribute/간접 호출은 **구조로** 거부한다. 이름 denylist는 철자를 바꾸면 뚫리지만,
+#   allowlist는 새 문법을 이해하지 못할 때 멈춘다(fail-closed).
+SAFE_BUILTIN_CALLS = frozenset({'int', 'len', 'round', 'set', 'tuple'})
+
+# 모듈을 import/실행할 때 허용하는 호출은 현행 파일에서 기계 열거한 이 여섯뿐이다.
+# 임의 helper 호출은 `global`/`exec`와 같은 숨은 바인딩을 만들 수 있으므로, 새 호출을
+# 추가하려면 왜 이름 지도를 바꾸지 않는지 부정 회귀와 함께 이 표를 갱신한다.
+SAFE_MODULE_CALLS = frozenset(
+    {'QoSProfile', 'PeriodPlan', '_build_imu_periods', 'int', 'main', 'round'})
+SAFE_MODULE_ATTRIBUTE_CALLS = frozenset({'sys.exit'})
 
 # 폐포가 **반드시 닿아야 하는** 뿌리들 — 하나라도 안 닿으면 검사가 헛돈 것이다.
 CLOSURE_ANCHORS = ('PeriodPlan', '_build_imu_periods', 'IMU_MAX_US',
                    'SCAN_PERIOD_US', 'ODOM_PERIOD_US', 'EKF_FREQUENCY_HZ')
 
-# 스코프를 여는 문법 — 이 안쪽 이름은 모듈 전역 읽기가 아니다.
-# ★ 여기서 스코프 '규칙'을 다시 구현하지 않는다. 구조 판별에만 쓰고, 이름이 어느
-#   스코프에 묶이는가는 전부 `symtable`(= CPython 자신)에 묻는다. 아래 `_outside_names` 참고.
+# 스코프를 여는 문법 — 모듈 문장 순회가 이 경계의 본문 안으로 들어가면 안 된다.
 _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
                 ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
@@ -228,7 +242,7 @@ def _nearest_planned(observed_us, periods_us):
     return best if abs(best - observed_us) <= PROBE_TOL_US else None
 
 
-def _real_timer_report(gf, steps=PROBE_STEPS):
+def _real_timer_report(gf, periods_us=PROBE_PERIODS_US, steps=PROBE_STEPS):
     """
     실제 타이머 관측을 **두 계약으로 나눠** 돌려준다 (§22 P2-② 보완).
 
@@ -238,9 +252,9 @@ def _real_timer_report(gf, steps=PROBE_STEPS):
     두 계약을 한 숫자로 묶으면 안 되는 이유: 분류 허용치는 값 간격(20ms)에서 나오므로
     같은 열 안의 +7ms 편향을 전부 승인한다. 순서는 맞는데 시간이 틀린 상태가 그것이다.
     """
-    observed = _observe_real_intervals(gf, steps=steps)
-    expected = [PROBE_PERIODS_US[i % len(PROBE_PERIODS_US)] for i in range(len(observed))]
-    classified = [_nearest_planned(v, PROBE_PERIODS_US) for v in observed]
+    observed = _observe_real_intervals(gf, periods_us=periods_us, steps=steps)
+    expected = [periods_us[i % len(periods_us)] for i in range(len(observed))]
+    classified = [_nearest_planned(v, periods_us) for v in observed]
     bias_us = statistics.median(o - e for o, e in zip(observed, expected))
     return classified == expected, bias_us, observed, expected
 
@@ -255,6 +269,27 @@ def _shifted_period_source(shift_us):
     """생산 `period_ns()` 가 모든 후속 주기를 shift_us 만큼 밀도록 만드는 변이 앵커."""
     anchor = 'return self.periods_us[index % len(self.periods_us)] * 1000'
     return anchor, f'{anchor} + ({shift_us * 1000})'
+
+
+def _max_only_shifted_period_source(shift_us):
+    """30ms 계획값에만 shift를 넣는다 — 전체 중앙값으로 숨길 수 있는 안전 꼬리 변이."""
+    anchor = 'return self.periods_us[index % len(self.periods_us)] * 1000'
+    replacement = (
+        'value_us = self.periods_us[index % len(self.periods_us)]\n'
+        f'        return (value_us + ({shift_us} if value_us == 30_000 else 0)) * 1000')
+    return anchor, replacement
+
+
+def _real_max_period_report(gf, steps=6):
+    """안전상 최대 IMU 간격만 반복해 initial 이후 setter 경로의 국소 편향을 본다."""
+    maximum_us = gf.IMU_MAX_US
+    _, _, observed, expected = _real_timer_report(
+        gf, periods_us=(maximum_us,), steps=steps)
+    # 첫 간격은 `initial_s` 경로다. 생산 `period_ns()`의 wrap/setter 책임은 그 뒤부터다.
+    setter_observed = observed[1:]
+    setter_expected = expected[1:]
+    bias_us = statistics.median(o - e for o, e in zip(setter_observed, setter_expected))
+    return bias_us, setter_observed, setter_expected
 
 
 # ============================================================
@@ -285,24 +320,50 @@ def _module_statements(tree):
       줄 번호**를 검사하게 된다. 함수·클래스 **안쪽**은 모듈 수준이 아니므로 안 들어간다.
     """
     out = []
-    for node in tree.body:
+
+    def descend(node):
         out.append(node)
-        if not isinstance(node, _SCOPE_NODES):
-            for sub in ast.walk(node):
-                if sub is not node and isinstance(sub, ast.stmt):
-                    out.append(sub)
+        if isinstance(node, _SCOPE_NODES):
+            return
+        # `ast.walk()` 는 if 안의 함수 **본문까지** 평평하게 내려간다. 여기서는 문장
+        # 필드만 재귀해 제어문은 따라가되 새 Python 스코프의 본문에서 정확히 멈춘다.
+        for _, value in ast.iter_fields(node):
+            children = value if isinstance(value, list) else (value,)
+            for child in children:
+                if isinstance(child, ast.stmt):
+                    descend(child)
+                elif isinstance(child, ast.ExceptHandler):
+                    for statement in child.body:
+                        descend(statement)
+                elif isinstance(child, ast.match_case):
+                    for statement in child.body:
+                        descend(statement)
+
+    for node in tree.body:
+        descend(node)
     return out
 
 
+def _bound_target_names(target):
+    """대입 target이 실제로 묶는 이름(Name/tuple/list/starred)만 돌려준다."""
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _bound_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return set().union(*(_bound_target_names(item) for item in target.elts), set())
+    # `obj.attr = ...` / `obj[key] = ...` 의 obj는 읽기이지 새 바인딩이 아니다.
+    return set()
+
+
 def _module_bindings(tree):
-    """모듈 수준에서 이름을 묶는 노드 전부 (대입·함수·클래스·import)."""
+    """지원 문법에서 모듈 이름을 묶는 노드 (대입·함수·클래스·import)."""
     out = {}
     for node in _module_statements(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                for sub in ast.walk(target):
-                    if isinstance(sub, ast.Name):
-                        out.setdefault(sub.id, []).append(node)
+                for name in _bound_target_names(target):
+                    out.setdefault(name, []).append(node)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             out.setdefault(node.target.id, []).append(node)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -311,6 +372,113 @@ def _module_bindings(tree):
             for alias in node.names:
                 out.setdefault((alias.asname or alias.name).split('.')[0], []).append(node)
     return out
+
+
+class _ModuleRuntimeSyntax(ast.NodeVisitor):
+    """모듈 실행 스코프의 walrus·호출을 찾고 함수·class 본문에서는 멈춘다."""
+
+    def __init__(self):
+        self.lines = []
+        self.calls = []
+        self.dunder_attributes = []
+        self.global_lines = []
+
+    def visit_NamedExpr(self, node):
+        self.lines.append(node.lineno)
+
+    def visit_Call(self, node):
+        self.calls.append((node.lineno, ast.unparse(node.func)))
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        if node.attr.startswith('__'):
+            self.dunder_attributes.append((node.lineno, node.attr))
+        self.generic_visit(node)
+
+    def visit_Global(self, node):
+        self.global_lines.append(node.lineno)
+
+    def _visit_defaults_and_annotations(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+            if arg.annotation is not None:
+                self.visit(arg.annotation)
+        if node.args.vararg and node.args.vararg.annotation is not None:
+            self.visit(node.args.vararg.annotation)
+        if node.args.kwarg and node.args.kwarg.annotation is not None:
+            self.visit(node.args.kwarg.annotation)
+        if node.returns is not None:
+            self.visit(node.returns)
+
+    def visit_FunctionDef(self, node):
+        self._visit_defaults_and_annotations(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        self._visit_defaults_and_annotations(node)
+
+    def visit_Lambda(self, node):
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+
+    def visit_ClassDef(self, node):
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+        # class 본문은 정의 시각에 즉시 실행된다. 메서드 본문은 visit_FunctionDef가
+        # 멈추지만, class 수준 `global`/`exec` 부작용은 모듈 이름을 바꿀 수 있어 본다.
+        for statement in node.body:
+            self.visit(statement)
+
+
+def _module_binding_hazards(tree):
+    """위치 대응을 지원하지 않는 모듈 바인딩 문법 — 하나라도 있으면 fail-closed."""
+    hazards = []
+    visitor = _ModuleRuntimeSyntax()
+    for node in _module_statements(tree):
+        if isinstance(node, ast.AugAssign):
+            hazards.append(f'AugAssign(line {node.lineno})')
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            hazards.append(f'{type(node).__name__}(line {node.lineno})')
+        elif isinstance(node, (ast.With, ast.AsyncWith)) \
+                and any(item.optional_vars is not None for item in node.items):
+            hazards.append(f'{type(node).__name__} as(line {node.lineno})')
+        elif isinstance(node, ast.Try):
+            for handler in node.handlers:
+                if handler.name:
+                    hazards.append(f'except as(line {handler.lineno})')
+        elif isinstance(node, ast.Match):
+            hazards.append(f'Match capture(line {node.lineno})')
+        elif isinstance(node, ast.Delete):
+            hazards.append(f'Delete(line {node.lineno})')
+        elif isinstance(node, ast.ImportFrom) and any(a.name == '*' for a in node.names):
+            hazards.append(f'import *(line {node.lineno})')
+
+    visitor.visit(tree)
+    hazards.extend(f'NamedExpr(line {line})' for line in visitor.lines)
+    for line, call in visitor.calls:
+        if call in SAFE_MODULE_CALLS or call in SAFE_MODULE_ATTRIBUTE_CALLS \
+                or call in SAFE_BUILTIN_CALLS:
+            continue
+        hazards.append(f'안전 목록 밖 모듈 호출 {call}()(line {line})')
+    hazards.extend(f'모듈 dunder attribute .{name}(line {line})'
+                   for line, name in visitor.dunder_attributes)
+    hazards.extend(f'class/module global(line {line})' for line in visitor.global_lines)
+    return hazards
+
+
+def _cpython_module_bindings(tree):
+    """원본 모듈 의미로 CPython이 판정한 바인딩 이름 집합."""
+    table = symtable.symtable(ast.unparse(tree), 'closure_module.py', 'exec')
+    return {symbol.get_name() for symbol in table.get_symbols()
+            if symbol.is_assigned() or symbol.is_imported() or symbol.is_namespace()}
 
 
 def _outside_names(node):
@@ -327,20 +495,10 @@ def _outside_names(node):
       그건 §21 에서 불승인된 `_simulate_rcl_timer()` 와 **같은 실수**다 — 생산/언어의
       의미론을 테스트 안에 재구현하면, 검사기는 자기가 푼 답을 채점하게 된다.
       대신 표준 라이브러리 `symtable`(= 인터프리터가 스코프를 컴파일할 때 쓰는 그 구현)
-      에 **물어본다**. 정의를 probe 함수로 감싸 넘기면, 모듈 전역 읽기만
-      `is_global()` 로 표시돼 나온다 — 근사가 아니라 CPython 의 답이다.
+      에 **물어본다**. ★ 정의를 다른 함수로 감싸지 않고 원래처럼 **모듈 문장**으로
+      넘긴다. 그래야 walrus·decorator·대입 오른쪽도 원본 모듈과 같은 의미를 유지한다.
     """
-    if isinstance(node, (ast.Assign, ast.AnnAssign)):
-        # 대입은 **오른쪽만** 넘긴다. 왼쪽(대상)을 같이 넣으면 probe 안에서 지역이 돼
-        # `X = X + 1` 류의 자기참조 읽기가 사라진다.
-        if node.value is None:
-            return set()
-        segment = ast.unparse(node.value)
-    else:
-        segment = ast.unparse(node)
-
-    probe = symtable.symtable('def __probe__():\n' + textwrap.indent(segment, '    '),
-                              'closure_probe.py', 'exec')
+    table = symtable.symtable(ast.unparse(node), 'closure_definition.py', 'exec')
 
     def collect(table):
         names = {sym.get_name() for sym in table.get_symbols()
@@ -349,25 +507,42 @@ def _outside_names(node):
             names |= collect(child)
         return names
 
-    return collect(probe)
+    return collect(table)
 
 
-def _dynamic_escapes(node):
-    """정적 분석이 못 보는 문법이 이 정의 안에 있는가 (있으면 fail-closed)."""
+def _unsupported_dynamic_syntax(node, outside_names, bindings):
+    """안전 allowlist 밖의 이름 해석/호출 구조 (있으면 fail-closed)."""
     found = set()
     for sub in ast.walk(node):
         if isinstance(sub, (ast.Global, ast.Nonlocal)):
             found.add('global' if isinstance(sub, ast.Global) else 'nonlocal')
-        elif isinstance(sub, ast.Name) and sub.id in DYNAMIC_ESCAPES:
-            found.add(sub.id + '()')
-        elif isinstance(sub, ast.ImportFrom) and any(a.name == '*' for a in sub.names):
-            found.add('import *')
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            found.add('주기 폐포 안 import')
+        elif isinstance(sub, ast.Attribute) and sub.attr.startswith('__'):
+            found.add(f'dunder attribute .{sub.attr}')
+        elif isinstance(sub, ast.Call):
+            if isinstance(sub.func, ast.Name):
+                name = sub.func.id
+                if name in outside_names and name not in bindings \
+                        and name not in SAFE_BUILTIN_CALLS:
+                    found.add(f'안전 목록 밖 전역 호출 {name}()')
+            elif isinstance(sub.func, ast.Attribute):
+                found.add(f'attribute 호출 {ast.unparse(sub.func)}()')
+            elif not isinstance(sub.func, ast.Lambda):
+                found.add(f'간접 호출 {ast.unparse(sub.func)}()')
     return found
 
 
 def _period_closure(tree):
     """`SENSOR_PERIODS` 가 (전이적으로) 의존하는 모듈 수준 정의 전부 + 정체불명 이름."""
     bindings = _module_bindings(tree)
+    hazards = _module_binding_hazards(tree)
+    cpython_names = _cpython_module_bindings(tree)
+    mapped_names = set(bindings)
+    if cpython_names != mapped_names:
+        missing = sorted(cpython_names - mapped_names)
+        extra = sorted(mapped_names - cpython_names)
+        hazards.append(f'CPython 바인딩 지도 불일치(누락={missing}, 오탐={extra})')
     roots = bindings.get('SENSOR_PERIODS')
     assert roots, 'SENSOR_PERIODS 를 못 찾음 — 이름이 바뀌었다면 이 회귀도 같이 고칠 것'
 
@@ -377,11 +552,12 @@ def _period_closure(tree):
     reached = [('SENSOR_PERIODS', node) for node in roots]
     queued = {id(node) for node in roots}
     queue = list(roots)
-    unknown, escapes = set(), set()
+    unknown, unsupported = set(), set(hazards)
     while queue:
         node = queue.pop()
-        escapes |= _dynamic_escapes(node)
-        for name in _outside_names(node):
+        outside_names = _outside_names(node)
+        unsupported |= _unsupported_dynamic_syntax(node, outside_names, bindings)
+        for name in outside_names:
             if name in bindings:
                 for definition in bindings[name]:
                     if id(definition) not in queued:
@@ -390,17 +566,13 @@ def _period_closure(tree):
                         queue.append(definition)
             elif not hasattr(builtins, name):
                 unknown.add(name)
-    return reached, unknown, escapes
+    return reached, unknown, unsupported
 
 
 def _assert_period_definitions_closed(src):
     """주기 값을 만드는 정의가 전부 정본 블록 안인지 — 아니면 AssertionError."""
     start, end = _block_bounds(src)
-    reached, unknown, escapes = _period_closure(ast.parse(src))
-
-    assert not escapes, (
-        '주기 계산이 정적 분석으로 따라갈 수 없는 문법에 기댄다: ' + ', '.join(sorted(escapes))
-        + '\n  이 검사는 여기서 **멈춘다**(fail-closed). 조용히 통과시키는 것이 결함이다.')
+    reached, unknown, unsupported = _period_closure(ast.parse(src))
 
     assert not unknown, (
         '주기 계산이 정체불명 이름에 기댄다 (빌트인도 모듈 정의도 아님): '
@@ -411,6 +583,11 @@ def _assert_period_definitions_closed(src):
     assert not outside, (
         '주기 값을 만드는 정의가 정본 블록 **밖**에 있다 (언젠가 갈라진다):\n  '
         + '\n  '.join(sorted(outside)))
+
+    assert not unsupported, (
+        '주기 계산이 검사기의 안전 문법 밖에 있다: ' + ', '.join(sorted(unsupported))
+        + '\n  이 검사는 여기서 **멈춘다**(fail-closed). 새 문법을 허용하려면 구조 계약과 '
+          '부정·역회귀를 함께 추가할 것.')
 
     # ★ 검사가 헛돌지 않는지 — 폐포가 실제로 네 센서의 뿌리까지 닿았는가.
     names = {name for name, _ in reached}
@@ -635,6 +812,42 @@ def test_negative_early_period_fails_the_bias_contract(tmp_path):
         f'(측정 {bias_us / 1000:+.2f}ms): {observed}')
 
 
+def test_real_timer_preserves_the_safety_critical_max_period():
+    """
+    ★ 역회귀 — 30ms 최대값 그룹이 다른 정상 간격에 묻히지 않는다 (§23 P2-③).
+
+    전체 중앙값은 '모든 값이 함께 치우치는가'만 답한다. 안전 질문은 별도다:
+    실측 최대 30ms를 setter가 실제로 심었을 때 EKF 33.33ms 여유를 보존하는가.
+    """
+    gf = _load_fakes()
+    bias_us, observed, expected = _real_max_period_report(gf)
+    ekf_period_us = round(1e6 / gf.EKF_FREQUENCY_HZ)
+    assert bias_us <= BIAS_TOL_US, (
+        f'안전 최대값 그룹이 계획보다 {bias_us / 1000:+.2f}ms 늦다 '
+        f'(허용 +{BIAS_TOL_US / 1000:.1f}ms)\n  관측(us): {observed}')
+    assert statistics.median(observed) < ekf_period_us, (
+        f'30ms 최대값 그룹 중앙이 EKF 주기 {ekf_period_us}us 밖이다: {observed}')
+    assert set(expected) == {gf.IMU_MAX_US}, '안전 꼬리 probe가 실제 IMU 최대값을 시험하지 않는다'
+
+
+def test_negative_max_only_late_period_fails_the_safety_contract(tmp_path):
+    """
+    ★ 부정 회귀 — 30ms일 때만 +7ms 늦어도 반드시 걸린다 (§23 직접 반례).
+
+    첫 간격(initial_s)은 정상이고 wrap 뒤 `period_ns()` 경로만 약 37ms가 된다. 나머지
+    계획값이 정상이라 전체 잔차 중앙값이 0이어도, 안전 최대값 그룹 계약은 따로 실패해야 한다.
+    """
+    path = _mutate(tmp_path, 'max_only_late',
+                   replacements=(_max_only_shifted_period_source(BIAS_SHIFT_US),))
+    gf = _load_fakes(path)
+    bias_us, observed, _ = _real_max_period_report(gf)
+    ekf_period_us = round(1e6 / gf.EKF_FREQUENCY_HZ)
+    assert bias_us > BIAS_TOL_US, (
+        f'30ms에만 +{BIAS_SHIFT_US / 1000:.0f}ms를 넣었는데 안전 계약이 통과한다: {observed}')
+    assert statistics.median(observed) > ekf_period_us, (
+        f'변이가 EKF 경계를 실제로 넘지 않았다 — 반례 입력이 성립하지 않음: {observed}')
+
+
 # ============================================================
 # 3. 갈라질 자리 봉쇄 — 목록과 구현이 어긋날 곳을 기계가 없앤다
 # ============================================================
@@ -767,6 +980,111 @@ def test_negative_outside_value_hidden_by_scope_shadowing_is_caught():
             f'{label}: 거부는 했는데 사유가 블록 밖 값이 아니다 (검사가 다른 데서 깨졌다):\n{reason}'
 
 
+def test_negative_module_walrus_keeps_original_scope_and_is_caught():
+    """
+    ★ 부정 회귀 — 모듈 walrus를 함수로 감싸 의미를 바꾸면 안 된다 (§23 P2-①).
+
+    모듈에서는 오른쪽 첫 `LEAKED_VALUE`가 블록 밖 24020을 실제로 읽는다. 예전 probe
+    함수에서는 walrus 때문에 함수 지역으로 바뀌어 그 읽기가 사라졌고 거짓 PASS했다.
+    """
+    preamble = (f'LEAKED_VALUE = 24_020\n\n\n# {_BLOCK_START}\n'
+                'OFFSET_US = LEAKED_VALUE + (LEAKED_VALUE := -24_020)')
+    mutated = _source_with((
+        (f'# {_BLOCK_START}', preamble),
+        ('rest = [IMU_MEAN_US + d for d in jitter]',
+         'rest = [IMU_MEAN_US + OFFSET_US + d for d in jitter]'),
+    ))
+    reason = _closure_rejects(mutated)
+    assert reason, '모듈 walrus가 블록 밖 값을 먼저 읽는데 폐포가 통과했다'
+    assert 'LEAKED_VALUE' in reason or 'NamedExpr' in reason, \
+        f'거부는 했지만 walrus/외부 읽기 때문이 아니다:\n{reason}'
+
+
+MODULE_BINDING_HAZARDS = {
+    'AugAssign': 'LEAKED_VALUE += 1\n',
+    'For': 'for LEAKED_VALUE in (24_020,):\n    pass\n',
+    'With as': 'with manager() as LEAKED_VALUE:\n    pass\n',
+    'except as': 'try:\n    pass\nexcept Exception as LEAKED_VALUE:\n    pass\n',
+    'Match capture': 'match 24_020:\n    case LEAKED_VALUE:\n        pass\n',
+    'NamedExpr': '(LEAKED_VALUE := 24_020)\n',
+}
+
+
+def test_negative_unsupported_module_binding_forms_fail_closed():
+    """
+    ★ 부정 회귀 — 위치 대응을 지원하지 않는 모듈 바인딩 6계열은 전부 멈춘다.
+
+    블록 안의 dead assignment가 같은 이름을 지도에 넣어도, 바깥 바인딩 표기를 놓쳐
+    통과하면 안 된다. 목록은 CPython symtable 대조에서 나온 Python 3.10 결함 클래스다.
+    """
+    for expected, statement in MODULE_BINDING_HAZARDS.items():
+        preamble = statement + f'\n# {_BLOCK_START}\nif False:\n    LEAKED_VALUE = 0'
+        mutated = _source_with((
+            (f'# {_BLOCK_START}', preamble),
+            ('def _build_imu_periods():',
+             'def _leaked_value():\n    return LEAKED_VALUE\n\n\ndef _build_imu_periods():'),
+            ('rest = [IMU_MEAN_US + d for d in jitter]',
+             'rest = [IMU_MEAN_US + _leaked_value() + d for d in jitter]'),
+        ))
+        reason = _closure_rejects(mutated)
+        assert reason, f'{expected} 모듈 바인딩을 폐포가 조용히 통과시켰다'
+        assert expected in reason, f'{expected}: 다른 이유로만 거부됐다:\n{reason}'
+
+
+def test_module_control_flow_does_not_promote_function_locals_to_module_bindings():
+    """★ 역회귀 — 지원 바인딩 지도는 CPython과 같고 함수/class 지역은 빠진다."""
+    tree = ast.parse(
+        'plain = 1\n'
+        'left, *rest = (1, 2)\n'
+        'annotated: int = 1\n'
+        'if True:\n'
+        '    def guarded():\n'
+        '        guarded_local = 1\n'
+        '    class GuardedClass:\n'
+        '        class_local = 1\n'
+        '    import os as imported_name\n'
+        '    from os import path as imported_from_name\n')
+    bindings = _module_bindings(tree)
+    assert 'guarded' in bindings
+    assert 'guarded_local' not in bindings, '함수 지역변수를 모듈 바인딩으로 오인했다'
+    assert 'class_local' not in bindings, 'class 지역변수를 모듈 바인딩으로 오인했다'
+    assert set(bindings) == _cpython_module_bindings(tree)
+
+
+def test_negative_module_runtime_binding_side_effects_fail_closed():
+    """
+    ★ 부정 회귀 — AST 바인딩 표기 없이 모듈 이름을 만드는 실행도 멈춘다.
+
+    `exec`와 `global` helper 호출은 CPython symtable의 이름 지도에 나타나지 않는다.
+    블록 안 미끼가 같은 이름을 제공해도 모듈 실행 allowlist가 둘 다 거부해야 한다.
+    """
+    statements = {
+        'exec': "exec('LEAKED_VALUE = 24_020')\n",
+        'global helper': (
+            'def _seed_leak():\n'
+            '    global LEAKED_VALUE\n'
+            '    LEAKED_VALUE = 24_020\n\n'
+            '_seed_leak()\n'),
+        'class global': (
+            'class _SeedLeak:\n'
+            '    global LEAKED_VALUE\n'
+            '    LEAKED_VALUE = 24_020\n'),
+    }
+    for label, statement in statements.items():
+        preamble = statement + f'\n# {_BLOCK_START}\nif False:\n    LEAKED_VALUE = 0'
+        mutated = _source_with((
+            (f'# {_BLOCK_START}', preamble),
+            ('def _build_imu_periods():',
+             'def _leaked_value():\n    return LEAKED_VALUE\n\n\ndef _build_imu_periods():'),
+            ('rest = [IMU_MEAN_US + d for d in jitter]',
+             'rest = [IMU_MEAN_US + _leaked_value() + d for d in jitter]'),
+        ))
+        reason = _closure_rejects(mutated)
+        assert reason, f'{label}: 모듈 실행 부작용이 폐포를 통과했다'
+        assert any(word in reason for word in ('모듈 호출', 'class/module global')), \
+            f'{label}: 구조 계약이 아닌 다른 이유로만 거부됨:\n{reason}'
+
+
 def test_negative_dynamic_name_lookup_is_fail_closed():
     """
     ★ 부정 회귀 — 이름을 **실행 시각에** 만들면 검사기가 멈춘다 (조용히 통과하지 않는다).
@@ -786,6 +1104,35 @@ def test_negative_dynamic_name_lookup_is_fail_closed():
     reason = _closure_rejects(mutated)
     assert reason, '동적 이름 조회를 폐포가 조용히 통과시켰다'
     assert 'globals()' in reason, f'거부 사유가 동적 조회가 아니다:\n{reason}'
+
+
+def test_negative_dynamic_lookup_outside_old_name_list_is_fail_closed():
+    """
+    ★ 부정 회귀 — 호출 철자를 바꾼 동적 조회도 구조 계약으로 멈춘다 (§23 P2-②).
+
+    첫 변이는 `importlib.import_module()+getattr`, 둘째는 함수의 `__globals__`를 쓴다.
+    예전 6개 이름 denylist에는 둘 다 없어서 외부값을 실제로 읽으면서 거짓 PASS했다.
+    """
+    bodies = {
+        'importlib/getattr': (
+            'import importlib\n\n'
+            'def _leaked_value():\n'
+            "    return getattr(importlib.import_module(__name__), 'LEAKED_VALUE')\n"),
+        'function __globals__': (
+            'def _leaked_value():\n'
+            "    return _leaked_value.__globals__['LEAKED_VALUE']\n"),
+    }
+    for label, body in bodies.items():
+        mutated = _source_with((
+            (f'# {_BLOCK_START}', f'LEAKED_VALUE = 24_020\n\n\n# {_BLOCK_START}'),
+            ('def _build_imu_periods():', body + '\n\ndef _build_imu_periods():'),
+            ('rest = [IMU_MEAN_US + d for d in jitter]',
+             'rest = [IMU_MEAN_US + _leaked_value() + d for d in jitter]'),
+        ))
+        reason = _closure_rejects(mutated)
+        assert reason, f'{label}: denylist 밖 동적 조회가 폐포를 통과했다'
+        assert any(word in reason for word in ('안전 목록', 'attribute', 'import')), \
+            f'{label}: 동적 구조가 아닌 다른 이유로만 거부됐다:\n{reason}'
 
 
 def test_period_docstring_describes_the_real_timer_regression():
