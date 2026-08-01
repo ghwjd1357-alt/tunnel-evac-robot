@@ -637,6 +637,122 @@ tb_expect '2' "$TB_FULL"  "검증창에서 잔류 등장" 'aa.01|aa.01'         
   && ok "승인 대상 창이 시작 스냅샷 확정 뒤에 열림(순차 트레이스 10종) · 근거 없으면 창 미개방 · 시작 스냅샷 복구 금지 · 내용은 조회 0회" \
   || ng "시간 경계 위반:$tb_note — §14.3 P1 회귀"
 
+# ── 케이스 22: 기준선 스윕이 **모든 표기**를 잡는다 (§18.2 P2-① 부정 회귀) ────
+#   §17 보완은 `doc_check` 안에 `grep … | head -1` 캡처 7 개를 손으로 나열했다. 두 가지로 샜다:
+#   ① 표기가 조금만 달라도 못 본다 — `22 검사` 는 잡고 `22검사`(TEST_GATES:129)는 놓쳤다.
+#   ② 나열 목록과 구현이 갈라진다 — 착수 때 grep 출력엔 13 자리가 다 있었는데 패턴은 7 개였고,
+#      "내가 쓴 7 개가 13 자리를 덮나?" 를 아무도 묻지 않았다. 실측 사각 6 자리.
+#   → 나열을 버리고 스윕으로 뒤집었다. 여기서는 **표기 변형마다** 검사가 살아 있는지를 박제한다.
+#   ⚠ 역회귀(음성)가 본체다: 역사 수치를 현재로 오독하면 문서를 고칠 때마다 거짓 FAIL 이 난다.
+echo "== 22: 게이트 기준선 표기 전수 스윕 + 역사 수치 오독 금지"
+GBS="$HERE/gate_baseline_scan.py"
+GBD="$FAKEBIN/gbdocs"; rm -rf "$GBD"; mkdir -p "$GBD/legacy"
+cat > "$GBD/a.md" << 'EOF'
+| test_harness_guards | 설명이 아주 길게 들어가는 표의 가운데 칸 | **22 케이스** 전부 ✓ |
+`tools/test_harness_guards.sh` **22검사** 가 Gazebo 없이 격리 검증한다
+harness guards **22 검사** · test_gate_regression **14 케이스**
+`tools/test_gate_regression.sh`(**14**케이스, ~163s) 그리고 기동 14케이스(Gazebo 불필요)
+| **test_gate_regression** | 아주 긴 설명 (케이스 6)·(케이스 3) | 14 케이스 전부 ✓ (케이스 12) |
+pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip**
+6. **기준선**: pytest **159 passed** · colcon **188 tests** · gate regression **14 케이스** · harness guards **22 검사**
+EOF
+cat > "$GBD/hist.md" << 'EOF'
+- **직전 완료 (07-31 §14)**: 옛 회차
+  - 실측: harness guards **16/16** · gate regression **14/14** · pytest **159** · colcon **188**
+  - 그때는 `test_harness_guards` 16 검사 였다
+- **다음 불릿**: 여기서 블록이 끝난다
+⚠ 동결 태그 자체의 수치는 pytest 159 / colcon 165 tests 로 불변이다
+EOF
+printf '`test_harness_guards` 10 검사 (보관본 — 스윕 대상 아님)\n' > "$GBD/legacy/old.md"
+printf '| colcon test-result | **165 tests** |\n' > "$GBD/FREEZE_MANIFEST.md"
+EXP=(--expect harness=22 --expect gate_regression=14 --expect pytest=159 --expect colcon=188)
+gb_ok=1; gb_note=""
+gb_expect() {  # $1=기대종료코드 $2=라벨 $3..=추가 인자
+  local want="$1" label="$2"; shift 2
+  python3 "$GBS" --root "$GBD" "${EXP[@]}" "$@" > "$FAKEBIN/gb.out" 2>&1
+  local got=$?
+  [ "$got" = "$want" ] || { gb_ok=0; gb_note="$gb_note [$label→rc$got(기대$want)]"; }
+}
+gb_hits=$(python3 "$GBS" --root "$GBD" --list 2>/dev/null | wc -l)
+gb_expect 0 "정상 원본"
+# 양성: 표기 변형을 **하나씩** 틀린 값으로 → 전부 잡혀야 한다.
+#   ⚠ sed 가 실제로 뭔가를 바꿨는지도 같이 확인한다 — 픽스처 표기가 나중에 바뀌면
+#     치환이 조용히 no-op 이 되어 '통과하는 빈 테스트'가 된다.
+gb_pos() {  # $1=sed 표현식 $2=라벨
+  cp "$GBD/a.md" "$FAKEBIN/a.bak"
+  sed -i "$1" "$GBD/a.md"
+  if cmp -s "$GBD/a.md" "$FAKEBIN/a.bak"; then
+    gb_ok=0; gb_note="$gb_note [$2→치환 no-op(픽스처 표기 변경?)]"
+  else
+    gb_expect 1 "양성:$2"
+  fi
+  cp "$FAKEBIN/a.bak" "$GBD/a.md"
+}
+gb_pos 's/\*\*22 케이스\*\*/**21 케이스**/'      '표 가운데칸 **22 케이스**'
+gb_pos 's/\*\*22검사\*\*/**21검사**/'            '띄어쓰기 없는 **22검사**'
+gb_pos 's/\*\*22 검사\*\*/**21 검사**/'          '띄어쓰기 있는 **22 검사**'
+gb_pos 's/(\*\*14\*\*케이스/(**13**케이스/'      '굵게가 숫자만 감싼 (**14**케이스'
+gb_pos 's/기동 14케이스/기동 13케이스/'          '주석 안 14케이스'
+gb_pos 's/| 14 케이스 전부/| 13 케이스 전부/'    '표 3번째 칸 14 케이스 전부'
+gb_pos 's/\*\*159 passed\*\*/**158 passed**/'    'pytest **159 passed**'
+gb_pos 's/\*\*188 tests/**187 tests/'            'colcon **188 tests**'
+# 양성: 단위어를 떼면 자리가 사라진다 = 검사 증발 → 하한 미달로 잡아야 한다
+gb_pos 's/\*\*22검사\*\*/**22개**/'              '단위어 제거(자리 증발 → 하한 미달)'
+# 음성(역회귀): 역사·동결·보관본의 수치를 현재로 오독하면 안 된다
+gb_hist=$(python3 "$GBS" --root "$GBD" --list 2>/dev/null \
+          | grep -cE 'hist\.md|legacy|FREEZE_MANIFEST')
+[ "$gb_hits" = 13 ] || { gb_ok=0; gb_note="$gb_note [자리수 $gb_hits(기대13)]"; }
+[ "$gb_hist" = 0 ]  || { gb_ok=0; gb_note="$gb_note [역사 오독 $gb_hist 건]"; }
+[ "$gb_ok" = 1 ] \
+  && ok "표기 변형 8 종 + 자리 증발 1 종 전부 검출 · 현재형 13 자리 · 역사(16/16·직전완료·동결165·legacy) 오독 0" \
+  || ng "기준선 스윕 결함:$gb_note — §18.2 P2-① 회귀"
+
+# ── 케이스 23: 핸드오프가 **한 묶음만** 가리킨다 (§18.3 P2-② 부정 회귀) ───────
+#   §17 보완은 세 자리의 § 동일성만 봤고 `head -1` 로 하나만 골랐다. 값을 **바꿔치기**하면
+#   잡지만 행을 **하나 더 추가**하면 뒤로 숨었다 — 계약("항상 이 한 묶음만 유지")을 깨는
+#   가장 직접적인 방법이 그것이다. 상단도 파일 전체의 마지막 일치라 아무 데나 넣으면 바뀌었다.
+#   → 값보다 **개수와 경계**를 먼저 본다. 역회귀 = 역사 절의 옛 § 는 그대로 허용돼야 한다.
+echo "== 23: 핸드오프 현재 지시의 단일성(개수·블록 경계)"
+HSC="$HERE/handoff_single_check.sh"
+HSF="$FAKEBIN/ho.md"
+ho_base() {
+  cat > "$HSF" << 'EOF'
+- **현재 기준 커밋**: 이 파일과 같은 커밋
+- **현재 단계**: 5단 완료 → **예약 17 봉쇄**
+  → **검토 §16 P1+P2 보완**(line continuation)
+  → **검토 §17 P2 2건 보완**(문서 수치를 기계가 지키게)
+- **⏸ 6단 보류 기록**: 여기서 블록이 끝난다
+- **직전 완료 (07-31 §14)**: 옛 회차 — 검토 §14 · §15 · §16 을 지나왔다
+
+| 항목 | 값 | 상태 |
+| **진행 중 묶음** | §17 P2 2건 | 진행 |
+
+## 이번 한 묶음 목표 — **검토 §17 P2 2건 보완** (구현)
+EOF
+}
+hs_ok=1; hs_note=""
+hs_expect() {  # $1=기대종료코드 $2=라벨
+  bash "$HSC" "$HSF" > "$FAKEBIN/hs.out" 2>&1
+  local got=$?
+  [ "$got" = "$1" ] || { hs_ok=0; hs_note="$hs_note [$2→rc$got(기대$1) '$(cat "$FAKEBIN/hs.out")']"; }
+}
+ho_base; hs_expect 0 "역회귀:정상(§17 세 자리 일치 + 역사 §14·§15·§16 허용)"
+ho_base; printf '| **진행 중 묶음** | §18 새 묶음 | 진행 |\n' >> "$HSF"
+hs_expect 1 "진행표 행 2 개"
+ho_base; printf '## 이번 한 묶음 목표 — **검토 §18**\n' >> "$HSF"
+hs_expect 1 "본문 목표 제목 2 개"
+ho_base; printf -- '- 참고: 옛 이력 → **검토 §9 어쩌구** 로 남긴다\n' >> "$HSF"
+hs_expect 1 "블록 밖 화살표(상단 값 하이재킹)"
+ho_base; sed -i 's/| \*\*진행 중 묶음\*\* | §17 P2 2건/| **진행 중 묶음** | §12 옛것/' "$HSF"
+hs_expect 1 "세 자리 값 불일치(구판도 잡던 것 — 역회귀)"
+ho_base; sed -i '/^| \*\*진행 중 묶음\*\*/d' "$HSF"
+hs_expect 1 "진행표 행 0 개(누락)"
+ho_base; printf -- '- **현재 단계**: 두 번째 현재 단계\n' >> "$HSF"
+hs_expect 1 "'현재 단계' 불릿 2 개"
+[ "$hs_ok" = 1 ] \
+  && ok "중복 2 종 · 누락 1 종 · 블록 밖 1 종 · 불릿 중복 1 종 · 값 불일치 1 종 검출 + 정상 통과" \
+  || ng "핸드오프 단일성 결함:$hs_note — §18.3 P2-② 회귀"
+
 echo
 echo "== 결과: PASS $P / FAIL $F =="
 [ "$F" = 0 ]

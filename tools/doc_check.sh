@@ -89,80 +89,75 @@ echo "=== 문서 동기화 검사 ==="
 # 낡은 기준선은 회귀 검출력을 조용히 무력화한다(테스트가 사라져도 PASS 로 보임).
 ACTUAL=$(python3 -m pytest src/mission_manager/test/ -q 2>/dev/null \
          | grep -oP '\d+(?= passed)' | head -1)
-DOC=$(grep -oP 'pytest \*\*\K\d+' docs/TEST_GATES.md | head -1)
 if [ -z "$ACTUAL" ]; then
     bad "pytest 실행 실패 — 테스트가 깨졌거나 환경 문제"
-elif [ "$ACTUAL" = "$DOC" ]; then
-    ok "pytest 기준선 $DOC 개 = 실제"
 else
-    bad "pytest 기준선 불일치: 문서 $DOC / 실제 $ACTUAL → docs/TEST_GATES.md §1 갱신"
+    ok "pytest 실행 $ACTUAL 개 passed (문서 대조는 아래 2b 전수 스윕)"
 fi
 
-# ── 2. colcon 기준선 (이전 실행 결과가 있을 때만) ────────────────────────
+# ── 2. colcon 실제값 (이전 실행 결과가 있을 때만) ────────────────────────
+CA=""
 if command -v colcon >/dev/null 2>&1 && [ -d build ]; then
     CA=$(colcon test-result 2>/dev/null | grep -oP '\d+(?= tests)' | tail -1)
-    CD=$(grep -oP 'colcon \*\*\K\d+' docs/TEST_GATES.md | head -1)
     if [ -z "$CA" ]; then
-        skip "colcon 기준선 — 테스트 결과 없음(colcon test 미실행)"
-    elif [ "$CA" = "$CD" ]; then
-        ok "colcon 기준선 $CD 개 = 실제"
+        skip "colcon 실제값 — 테스트 결과 없음(colcon test 미실행)"
     else
-        bad "colcon 기준선 불일치: 문서 $CD / 실제 $CA → docs/TEST_GATES.md §1 갱신"
+        ok "colcon 실제 $CA 개 (문서 대조는 아래 2b 전수 스윕)"
     fi
 else
-    skip "colcon 기준선 — colcon 없음 또는 build/ 없음"
+    skip "colcon 실제값 — colcon 없음 또는 build/ 없음"
 fi
 
-# ── 2b. 셸 게이트 기준선: harness · gate_regression ──────────────────────
-# ★ 08-01 §17.4 P2-②: pytest·colcon 만 실제와 대조하고 **셸 게이트 2종은 무방비**였다.
-#   그래서 `TEST_GATES.md` 안에서 harness 수치가 §1=22 / §2=21 로 갈라진 채
-#   `--strict` 가 전 항목 OK 를 냈다. 기준선이 실제보다 작으면 케이스가 사라져도 조용히 통과한다.
-#   ⚠ `AGENTS.md §3-10`(같은 종류 전수) 적용 결과, 지적된 harness 외에 **gate_regression 도
-#     같은 구멍**임이 전수 조사에서 드러나 함께 닫는다.
+# ── 2b. 게이트 기준선 4종 — 문서 **전수 스윕** 대조 ──────────────────────
+# ★ 08-01 §18.2 P2-①: 직전 구현은 여기에 `grep … | head -1` 캡처 7개를 **손으로 나열**했다.
+#   나열은 두 가지로 샌다 — ① 표기가 조금만 달라도 못 본다(`22 검사` 는 잡고 `22검사` 는 놓쳤다)
+#   ② 나열 목록과 구현이 갈라진다(착수 때 grep 출력엔 13자리가 다 있었는데 패턴은 7개였다).
+#   실측 사각 6자리: TEST_GATES:129·:11·:71 · MASTER_PLAN:197 · CURRENT_HANDOFF 의 pytest·colcon.
+#   → 나열을 버리고 **훑는 행위 자체를 검사로** 만든다 (`AGENTS.md §3-10` 커버리지 폐포).
+#     규칙·역사 제외·표기 규약 전량 = `tools/gate_baseline_scan.py` 머리말.
 #
-# 세는 법: 각 케이스는 성공 시 `ok "…"` 를 **정확히 한 번** 부른다(`ng` 는 실패 분기가
-#   여러 개일 수 있어 케이스 수와 무관). 실측 대조: harness ok=22=실제, gate_regr ok=14=실제.
-#   실행(≈130초·≈163초)을 doc_check 에 넣지 않고 정적으로 세어 1초 안에 끝낸다.
-check_shell_gate() {   # $1=스크립트 $2=라벨 $3..=문서 수치들(전부 같아야 한다)
-    local script="$1" label="$2"; shift 2
-    local actual; actual=$(grep -cP '(^|\s)ok "' "$script")
-    local v
-    for v in "$@"; do
-        if [ -z "$v" ]; then
-            bad "$label 기준선 — 문서에서 수치를 못 찾음(표기 변경?)"; return
-        elif [ "$v" != "$actual" ]; then
-            bad "$label 기준선 불일치: 문서 '$v' / 실제 $actual → docs/TEST_GATES.md·CURRENT_HANDOFF 갱신"; return
-        fi
-    done
-    ok "$label 기준선 $actual 개 = 실제 (문서 $# 자리 일치)"
-}
-# ⚠ CURRENT_HANDOFF 는 반드시 **함정 6번(현재 기준선) 줄로 한정**해서 뽑는다 —
-#   '직전 완료' 역사 절에도 `harness guards **16/16**` 같은 **그 시점의 실측**이 남아 있어
-#   무한정 grep 하면 역사를 현재 기준선으로 오독한다(구현 중 실제로 16 을 잡았다).
-BASE_LINE='^6\. \*\*기준선\*\*'
-check_shell_gate tools/test_harness_guards.sh "harness" \
-    "$(grep -oP 'test_harness_guards \K\d+(?= 검사)' docs/TEST_GATES.md | head -1)" \
-    "$(grep -oP '\*\*\K\d+(?= 케이스\*\* 전부)' docs/TEST_GATES.md | head -1)" \
-    "$(grep -oP "$BASE_LINE.*harness guards \*\*\K\d+" docs/CURRENT_HANDOFF.md | head -1)"
-check_shell_gate tools/test_gate_regression.sh "gate_regression" \
-    "$(grep -oP 'test_gate_regression \K\d+' docs/TEST_GATES.md | head -1)" \
-    "$(grep -oP "$BASE_LINE.*gate regression \*\*\K\d+" docs/CURRENT_HANDOFF.md | head -1)"
+# 셸 게이트를 세는 법: 각 케이스는 성공 시 `ok "…"` 를 **정확히 한 번** 부른다(`ng` 는 실패
+#   분기가 여러 개일 수 있어 케이스 수와 무관). 실행(≈130초·≈163초)을 doc_check 에 넣지 않고
+#   정적으로 세어 1초 안에 끝낸다. ⚠ 이 규약은 강제가 아니라 관례다 — 실측 대조 = harness 22,
+#   gate_regr 14 로 일치(08-01, 검토 §18.5 가 독립 재확인).
+GB_ARGS=()
+[ -n "$ACTUAL" ] && GB_ARGS+=(--expect "pytest=$ACTUAL")
+[ -n "$CA" ]     && GB_ARGS+=(--expect "colcon=$CA")
+GB_ARGS+=(--expect "harness=$(grep -cP '(^|\s)ok "' tools/test_harness_guards.sh)")
+GB_ARGS+=(--expect "gate_regression=$(grep -cP '(^|\s)ok "' tools/test_gate_regression.sh)")
+GB_OUT=$(python3 tools/gate_baseline_scan.py "${GB_ARGS[@]}" 2>&1)
+if [ -z "$GB_OUT" ]; then
+    bad "gate_baseline_scan 이 아무 출력도 못 냈다 — 스윕 자체가 죽었다(fail-closed)"
+else
+    while IFS= read -r gb_line; do
+        case "$gb_line" in
+            "OK   "*) ok   "${gb_line#OK   }" ;;
+            "FAIL "*) bad  "${gb_line#FAIL }" ;;
+            *)        bad  "gate_baseline_scan: $gb_line" ;;
+        esac
+    done <<< "$GB_OUT"
+fi
 
 # ── 2c. CURRENT_HANDOFF '지금 하는 일'의 단일성 ──────────────────────────
-# ★ 08-01 §16.3 P2 → §17.3 P2-①: 상단 '현재 단계'·진행표·본문 '이번 한 묶음 목표'가
-#   서로 다른 묶음(§15 / §12 / §14·fc5b915)을 가리킨 채 세 회차를 지나갔다. "항상 이 한
-#   묶음만 유지"가 이 파일의 계약인데 사람이 손으로 맞추다 갈라졌고, 기계가 안 잡았다.
-#   → 세 자리에서 § 번호를 뽑아 **동일성만** 본다. 문구 형식은 강제하지 않는다.
-#   ⚠ '직전 완료' 역사 절의 옛 § 번호들은 대상이 아니다 — 아래 세 패턴만 본다.
-HS_TOP=$(grep -oP '→ \*\*검토 §\K\d+(?=[^*]*\*\*[^\n]*$)' docs/CURRENT_HANDOFF.md | tail -1)
-HS_TBL=$(grep -oP '\|\s*\*\*진행 중 묶음\*\*\s*\|\s*§\K\d+' docs/CURRENT_HANDOFF.md | head -1)
-HS_BODY=$(grep -oP '^## 이번 한 묶음 목표.*?§\K\d+' docs/CURRENT_HANDOFF.md | head -1)
-if [ -z "$HS_TOP" ] || [ -z "$HS_TBL" ] || [ -z "$HS_BODY" ]; then
-    bad "CURRENT_HANDOFF 현재 묶음 § 를 세 자리(상단·진행표·본문 목표)에서 다 못 찾음: 상단='$HS_TOP' 진행표='$HS_TBL' 본문='$HS_BODY'"
-elif [ "$HS_TOP" = "$HS_TBL" ] && [ "$HS_TBL" = "$HS_BODY" ]; then
-    ok "CURRENT_HANDOFF 현재 묶음 단일 (§$HS_TOP — 상단·진행표·본문 일치)"
+# ★ 08-01 §16.3 P2 → §17.3 → §18.3: 상단 '현재 단계'·진행표·본문 '이번 한 묶음 목표'가
+#   서로 다른 묶음(§15 / §12 / §14)을 가리킨 채 세 회차를 지나갔다. "항상 이 한 묶음만 유지"가
+#   이 파일의 계약인데 사람이 손으로 맞추다 갈라졌고, 기계가 안 잡았다.
+#   ⚠ §18.3: 직전 구현은 `head -1`/`tail -1` 로 **첫(끝) 하나만** 골랐다. 값을 바꿔치기하면
+#     잡지만 **행을 하나 더 추가**하면 뒤로 숨었다 — 계약을 깨는 가장 직접적인 방법이 그것이다.
+#     그리고 상단을 파일 전체의 `tail -1` 로 읽어, 아무 데나 표기를 넣으면 현재값이 바뀌었다.
+#   → 규칙 전량과 판정 = `tools/handoff_single_check.sh` (픽스처로 회귀를 걸 수 있게 분리했다 —
+#     doc_check 안에 두면 진짜 문서 하나로만 검사돼 부정 회귀를 영구화할 수 없다).
+HS_OUT=$(bash tools/handoff_single_check.sh docs/CURRENT_HANDOFF.md 2>&1)
+if [ -z "$HS_OUT" ]; then
+    bad "handoff_single_check 가 아무 출력도 못 냈다 — 검사 자체가 죽었다(fail-closed)"
 else
-    bad "CURRENT_HANDOFF 가 서로 다른 묶음을 지시: 상단=§$HS_TOP 진행표=§$HS_TBL 본문=§$HS_BODY — '항상 이 한 묶음만 유지' 위반"
+    while IFS= read -r hs_line; do
+        case "$hs_line" in
+            "OK   "*) ok  "CURRENT_HANDOFF ${hs_line#OK   }" ;;
+            "FAIL "*) bad "CURRENT_HANDOFF ${hs_line#FAIL }" ;;
+            *)        bad "handoff_single_check: $hs_line" ;;
+        esac
+    done <<< "$HS_OUT"
 fi
 
 # ── 3. '현재 위치' 단일 출처: MASTER_PLAN 이 현재를 가리키면 안 됨 ────────

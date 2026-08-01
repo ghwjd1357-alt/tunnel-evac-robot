@@ -24,7 +24,10 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**08-01 갱신** — §16 line-continuation 회귀 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 22 검사** / test_gate_regression 14 / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**08-01 갱신** — §18 기준선 스윕·핸드오프 단일성 회귀 반영): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
+⚠ 이 줄을 포함해 **기준선 수치가 적힌 모든 자리**는 `tools/gate_baseline_scan.py` 가 전수로
+대조한다(현재 13 자리). 수치 뒤 단위어(`passed`/`tests`/`검사`/`케이스`)를 떼면 검사에서 빠지고,
+기준선이 **아닌** 수를 같은 줄에 적을 때는 `케이스 12` 처럼 단위어를 **앞에** 쓴다.
 ★ 하네스 증분 = **10 → 13**(07-30: 예약 4 분류 2 + `gz model` 상한 1) → **13 → 16**
   (07-31 Codex §7 P1 보완: cmdvel 판독기 fail-closed 2 + ground truth 정상화 1)
   → **16 → 17** (07-31 Codex §8 P1 보완: cmdvel 판독기 구조 검증 1)
@@ -59,6 +62,9 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 `git diff platform-core-freeze-260724 --stat` 이 1차 용의선상 — 증거 전량 = `docs/FREEZE_MANIFEST.md`.
 ⚠ 이 수치는 묶음 완료 때마다 갱신한다 (테스트가 늘었는데 기준선이 옛 수치면 회귀 검출력이 조용히 떨어진다).
 **갱신을 잊어도 `doc_check.sh` 가 실제 개수와 대조해 잡는다** — 기억이 아니라 기계가 지키는 구조.
+그것도 **한 자리가 아니라 전수**다 (08-01 §18): `tools/gate_baseline_scan.py` 가 `docs/**.md` 를
+훑어 게이트 4종의 현재형 표기 **13자리**를 전부 대조하고, 자리가 조용히 사라지면(단위어 누락)
+하한 미달로 FAIL 한다. 직접 돌려보려면 `python3 tools/gate_baseline_scan.py --list`.
 `make_map.sh` 는 이 게이트에 포함하지 않는다 (지도 자산 변경 — 명시 승인 시에만).
 
 ## 2. 각 테스트의 목적과 PASS 기준
@@ -66,9 +72,9 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 | 검증 | 목적 | PASS 기준 |
 |---|---|---|
 | pytest | 단위·경계조건 (알람/그래프/디바운스/취소 레이스/validator) | 전부 passed |
-| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **22 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1 · §10 P2 · 예약 17 · §11 P1 · §14 P1 · **§16 P1**) |
+| test_harness_guards | E2E 하네스 유한 상한 (`read_param_float` 복구 상한·`wait_state` 벽시계 deadline·**SIGTERM 무시도 hard-kill**·daemon kick 남은-예산 배분·mission topic-pub wiring) + **실정지 실패 원인 분류**(케이스 11·12)와 **`gz model` 유한 상한**(케이스 13) — Gazebo 불필요 | **24 케이스** 전부 ✓ (§14~§16 P1 · 07-30 예약 4 · 07-31 §7~§9 P1 · §10 P2 · 예약 17 · §11 P1 · §14 P1 · §16 P1 · **§18 P2 2건** = 케이스 22 기준선 스윕 · 케이스 23 핸드오프 단일성) |
 | ↳ **케이스 11·12 가 요구하는 것** | "분류 코드를 넣었다"와 "그 분류가 두 경우를 **구분한다**"는 다른 명제다. 가짜 `/cmd_vel` 덤프 2종으로 분기를 확인하고, 나아가 `abort_e2e.sh` 안에서 **수집 줄 번호 < `fail()` 줄 번호**까지 단언한다 — 함수가 멀쩡해도 배선이 뒤집히면 증거는 여전히 사라진다 | 두 분류 문자열이 실제로 상이 + 수집이 `fail()` 앞 |
-| **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (12케이스). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
+| **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (케이스 12). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
 | ↳ **검출력 경계 (정직하게)** | 이 셸 층은 **2차 P1(소실 경계 in-flight 조회 폐기)을 검출하지 못한다** — 실측: 보완을 되돌려도 12/12 PASS. 소실 순간의 늦은 응답은 서비스 파괴와 함께 DDS 에서 소멸해 실물 층에서 만들 수 없다. 검출은 `src/tunnel_bringup/test/` 단위층 3케이스가 한다 | 층 분담을 흐리지 말 것 — 셸이 PASS 라고 세대 결함이 없는 것이 아니다 |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
@@ -126,7 +132,7 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
   - **§16 P1 추가**: `mission_e2e.sh`의 alarm·stop·follow `topic pub` 3곳도 공통
     `hard_timeout 12`로 통일한다. TERM 무시 fake CLI가 상위 cutoff 없이 각 12s+유예 안에
     종결하고, 정상 fake CLI는 즉시 반환하며, 실제 wiring이 hard-timeout 3/3인지 함께 검사한다.
-  - 이 부정·역회귀는 `tools/test_harness_guards.sh` **22검사**가 Gazebo 없이 격리 검증한다
+  - 이 부정·역회귀는 `tools/test_harness_guards.sh` **24검사**가 Gazebo 없이 격리 검증한다
     (case 6=34s·case 7=13s·case 8=30s·case 9=TERM 무시 topic 3종·case 10=정상 topic 3종·
     **case 11·12=실정지 실패 분류 + 수집/`fail()` 배선 순서·case 13=`gz model` hard 상한 10s·
     case 14·15=cmdvel 판독기 fail-closed 계약 + '관측된 침묵' 역회귀·case 16=ground truth 정상화·
