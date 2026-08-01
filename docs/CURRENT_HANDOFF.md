@@ -121,16 +121,22 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md > docs/CURRENT_HANDOFF.md   # 그대로
 
 **만들 것 — `MASTER_PLAN.md §3` S6 표의 ❌ 5종** (S6-6 은 이미 ✅):
 
-| # | 준비물 | 산출물(제안) | 왜 D+0 을 좌우하나 |
-|---|---|---|---|
-| S6-1 | Jetson 셋업 런북 | docs/JETSON_SETUP.md **(신설)** | apt·rosdep 목록 + 빌드 순서. 이게 없으면 D+0 오전을 검색으로 날린다 |
-| S6-2 | `micro_ros_agent` 확보 **2안** | 위 런북의 한 절 | **apt 바이너리가 없다.** 소스 빌드 절차 + Docker `microros/micro-ros-agent:humble`(arm64) 백업. **D+0 최대 시간 소모 구간** |
-| S6-3 | udev 규칙 `/dev/teensy_drive` | tools/udev/99-teensy-drive.rules **(신설)** | 합의서 §4.5 에 장치명만 있고 **작성 주체가 정해진 적이 없다.** 없으면 `/dev/ttyACM*` 번호가 매번 바뀐다 |
-| S6-4 | 3줄 검증 스크립트 | tools/d0_check.sh **(신설)** | D+0 통과 판정 — `topic hz /odom`·`/imu/data` + 전진 시 twist 부호 |
-| S6-5 | D+1 첫 스텝 런북 | docs/D1_FIRST_STEP.md **(신설)** | agent 연결 → TF 트리 → EKF 기동 → R3 rosbag |
+★ **번호순으로 쓰지 않는다.** 순서 정본 = `MASTER_PLAN.md §3` S6 표의 **작성순** 열.
+번호는 등록 순서(식별자)일 뿐이다.
+
+| 작성순 | # | 준비물 | 산출물(제안) | 왜 이 순서인가 |
+|:---:|---|---|---|---|
+| **1** | S6-2 | `micro_ros_agent` 확보 **2안** | docs/JETSON_SETUP.md 의 한 절 | ★ **유일하게 '방법 자체가 미확정'인 항목.** apt 바이너리가 없어 소스 빌드/Docker 조사가 먼저다. **그 결과가 S6-1 런북의 내용을 바꾼다** — 즉 **S6-2 는 S6-1 의 입력**이다 |
+| **2** | S6-4 | 검증 스크립트 (3줄 → **4줄**) | `tools/d0_check.sh` **(신설)** | 여기서 **"무엇을 통과로 볼 것인가"** 가 정해지고 그것이 S6-5 의 **시작 조건**이 된다. ⚠ `topic hz` ×2 + twist 부호 + **`topic info -v` QoS 확인**(예약 19 ① 미반영 상태를 D+0 에 눈으로 잡기 위함) |
+| **3** | S6-3 | udev 규칙 `/dev/teensy_drive` | `tools/udev/99-teensy-drive.rules` **(신설)** | 독립적. `idVendor`/`idProduct` 는 실측이 필요하므로 자리 + 확인 명령만 (함정 S6-e) |
+| **4** | S6-1 | Jetson 셋업 런북 | docs/JETSON_SETUP.md **(신설)** | 위 3종이 정해져야 순서가 확정된다. apt·rosdep + 빌드 + `COLCON_IGNORE` |
+| **5** | S6-5 | D+1 첫 스텝 런북 | docs/D1_FIRST_STEP.md **(신설)** | S6-4 통과를 시작점으로 삼는다. agent → TF 트리 → EKF → R3 rosbag |
 
 ⚠ **파일 위치**: `src/tunnel_bringup/**` 는 동결이므로 **새 파일도 거기 두지 않는다.**
 `tools/`·`docs/` 에 만들고, 예약 19 로 그 패키지가 열릴 때 이관 여부를 판단한다.
+
+⚠ **S6-2 와 S6-1 이 같은 파일**(JETSON_SETUP.md)이다 — S6-2 를 그 파일의 한 절로 먼저 쓰고,
+S6-1 에서 나머지를 채운다. 두 번 만들지 않는다.
 
 **반드시 반영할 확정값** (구값을 쓰면 D+0 에 틀린다 — 정본 = `REAL_ROBOT_VALUES.md §1`):
 `serial_baud` **115200** · `/imu/data` **46.4Hz**(20~23ms) · `/odom` **46.5Hz**(20~22ms) ·
