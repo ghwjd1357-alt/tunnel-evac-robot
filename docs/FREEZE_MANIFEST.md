@@ -382,3 +382,38 @@ FAIL 한다 — 사람이 목록을 보고 옮겨 적는 자리를 없앤 것이
 | 검토자 인프라 실패 1건 | 최초 `colcon` 이 sandbox 의 `~/.ros/log` 쓰기 거부로 연쇄 실패 → **원인 분류 후** sandbox 밖 재실행하여 245 확보 (`AGENTS.md §3-6` 준수) |
 
 전문 = `~/Desktop/개발현황/CODEX 현황/0801검토현황.md §28`.
+
+### 10.4 예약 19 — `src/tunnel_bringup/**` 구동부 확정값 코드 반영 (2026-08-02, **네 번째 예외**)
+
+★ **처음으로 `mission_manager` 밖이 열린 예외다.** §10.1~§10.3 은 전부 미션 층이었다.
+
+| 항목 | 값 |
+|---|---|
+| 승인 | 2026-08-02 **사용자(역할 A) 명시 승인** |
+| 승인 범위 | `src/tunnel_bringup/config/**` · `src/tunnel_bringup/urdf/robot_real.urdf` · `src/tunnel_bringup/launch/**` — **대상 5건에 한정** (아래) |
+| 열린 이유 | 구동부 3차 회신(08-01) 확정값을 **문서 정본에는 반영했으나**(`f4bfa74`) 코드가 구값이라 **문서와 코드가 갈라진 상태**였다. 그중 2건은 **인수 당일(2026-08-03) 즉발**이다 |
+| 착수 순서 | **S6 작성순 1번(맨 앞)** — `MASTER_PLAN.md §3` S6 표. `launch` 기본값이 바뀌어 S6-1·S6-5 런북 내용을 좌우하므로 런북보다 먼저 한다 |
+| **변경 안 함 (경계)** | `src/tunnel_sim/**` · `src/mission_manager/**` · `src/tunnel_bringup/tunnel_bringup/**`(노드 코드) · `src/tunnel_bringup/test/**` — **전부 무변경이어야 한다** |
+| ⚠ **특히 `gate_fakes.py` 무변경** | IMU 주기 정본은 **§25 결정 B 로 동결**된 트랙이다. 재개방 조건(R3 rosbag)이 아직 안 걸렸고, 지금 고치면 **요약통계를 다른 요약통계로** 바꾸는 것이라 R3 때 두 번 일한다. 전제·교체 시점 = `TEST_GATES.md §2` 검증 상한 5 ⓒ |
+
+**대상 5건** (정본 = `MASTER_PLAN.md §7` 예약 19)
+
+| # | 파일 | 현재 → 반영 | 급 |
+|---|---|---|:--:|
+| ① | `config/ekf_real.yaml` | QoS 오버라이드 없음(RELIABLE) → `/odom`·`/imu/data` **BEST_EFFORT** | 🔴 |
+| ② | `config/nav2_params_real.yaml` | `max_velocity: [0.30, 0.0, 0.80]` → **`[0.12, 0.0, 0.50]`** | 🔴 |
+| ③ | `urdf/robot_real.urdf` | `base_footprint→base_link` `z=0.065` → **`z=0.053`** | 🔴 |
+| ④ | `urdf/robot_real.urdf` | `imu_link` TODO → **`xyz="0 0 0.339" rpy="0 0 -1.5708"`** | 🟠 |
+| ⑤ | `config/ekf_real.yaml` 주석 · `launch/*.launch.py` | 41.63Hz·`serial_baud 921600` → **46.4Hz·115200** | 🟡 |
+
+**⚠ 판정 근거에서 제외한 게이트 — 의도된 예외**
+
+`test_gate_regression` 은 이 묶음의 **판정 근거가 아니다.** 4회 중 3회 `13/14` 로 갈리는
+간헐 실패(§24.5a)가 **미규명**이라, 실패해도 **내 변경 탓인지 원래 flake 인지 분리할 수 없다**
+(`AGENTS.md §3-6`). 원래 규칙은 "다음 `tunnel_bringup` 묶음 착수 **전에** 규명"이었으나
+**인수일이 2026-08-03** 이라 기다리면 🔴 즉발 2건을 못 고친 채 인수를 맞는다.
+
+- **판정**: `pytest` · `colcon` · `doc_check` 로 한다
+- **실행은 하되** 결과는 **참고 기록**으로만 남긴다
+- **재개방 조건**: 인수 후 flake 를 규명하면 **그때 이 변경을 게이트로 재판정**한다.
+  규명 전까지 "게이트가 통과했으니 안전하다"고 **쓰지 않는다**
