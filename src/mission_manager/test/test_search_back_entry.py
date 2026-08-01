@@ -40,6 +40,7 @@ test_search_back_entry.py — SEARCH_BACK 진입 봉인 (예약 16 ①+②′, 0
 """
 
 import os
+import re
 import types
 
 import yaml
@@ -187,6 +188,20 @@ def run(env, seconds, scan, dt=0.1):
     for _ in range(round(seconds / dt)):
         env.clock.advance(dt)
         env.node.monitor.update(scan)
+        env.step += 1
+        if env.step % 5 == 0:
+            env.node.tick()
+
+
+def tick_only(env, seconds, dt=0.1):
+    """시간과 tick 만 진행하고 **/scan 은 한 장도 넣지 않는다** (08-02 §27 P1 재료).
+
+    run() 과의 차이가 이 검사의 전부다: run() 은 매 스텝 monitor.update() 를 부르므로
+    `_last_scan_t` 가 곧바로 non-None 이 되어 '센서가 아직 한 번도 안 살아난' 구간을
+    영원히 재현하지 못한다. 라이다 드라이버·DDS discovery 가 미션 노드보다 늦게 뜨는
+    것은 실차의 **정상 기동 순서**다."""
+    for _ in range(round(seconds / dt)):
+        env.clock.advance(dt)
         env.step += 1
         if env.step % 5 == 0:
             env.node.tick()
@@ -574,3 +589,127 @@ def test_sb19_last_seen_updates_after_rearm_without_any_detection():
     run(env, 1.0, EMPTY)
     assert env.node.last_seen == (7.0, 8.0), \
         '재무장 뒤 무검출 구간에서도 갱신된다 — 검출 증거가 아니다'
+
+
+# ============================================================
+# ★ 센서 관측 세대 (08-02 검토 §27 P1) — '아직 한 번도 안 살아난 라이다'
+#   ─────────────────────────────────────────────────────────
+#   §27 불승인 사유: §26 보완이 GUIDE 진입 시 놓침 타이머의 기산점을 세우는데,
+#   그 시점에 **/scan 이 한 장도 온 적이 없으면**(`_last_scan_t is None`)
+#   모니터의 '단절 복구' 보호가 발동하지 않는다 — 그 가드가 "이전에 scan 을
+#   받은 적이 있을 때"만 열리기 때문이다. 그래서 첫 유효 빈 프레임 한 장이
+#   도착하는 순간 그동안 흐른 벽시계 시간이 통째로 '미검출 시간'으로 계산돼
+#   즉시 lost 가 되고, 그 구간엔 기록도 못 했으므로(stale) 좌표가 없어
+#   **역행 0회로 예산만 태우고 단독 탈출** — §26 P1 과 결과가 같다.
+#   ⚠ 라이다 드라이버·DDS discovery 가 미션 노드보다 늦게 뜨는 것은 실차의
+#     정상 기동 순서다. 시뮬에선 거의 안 나지만 실물에선 흔하다.
+# ============================================================
+def test_sb20_first_valid_scan_after_dead_start_does_not_declare_loss():
+    """부정 — scan 이력 0 인 채 GUIDE 진입 → lost_sec 초과 → 첫 EMPTY 1장.
+
+    이 한 장으로 예산이 깎이거나 역행이 열리면 FAIL.
+    ★ 경계 양방향(`AGENTS.md §3-10 ⑤`): 첫 유효 scan 뒤 fresh 누적이 lost_sec
+      미만이면 계속 보류하고, 넘긴 뒤에만 **진짜 좌표로** 역행 1회.
+    """
+    env = make_env(state=State.GATHER)
+    tick_only(env, 9.0)                    # scan 0장인 채 GATHER 8초 → 진짜 GUIDE 전이
+    assert env.node.state == State.GUIDE
+    assert env.node.monitor._last_scan_t is None, '전제 불성립: scan 이 들어와 버렸다'
+
+    tick_only(env, 5.0)                    # 여전히 0장 — lost_sec(3.0)을 훌쩍 넘긴다
+    assert env.node.monitor.scan_stale()
+    assert env.node.search_attempts == 0    # stale 중엔 판정 보류 (기존 계약)
+    assert env.tf.calls == 0                # stale 중엔 기록도 보류 (sb9 와 같은 계약)
+
+    env.clock.advance(0.1)
+    env.node.monitor.update(EMPTY)         # ★ 첫 유효 스캔 한 장 (사람 없음)
+    assert not env.node.monitor.lost('any'), \
+        '센서가 죽어 있던 시간이 미검출 시간으로 계산됐다 — watchdog 계약 위반'
+
+    env.node.tick()
+    assert env.node.search_attempts == 0, '첫 유효 프레임 한 장이 예산을 깎았다'
+    assert not env.node.give_up
+    assert env.node.state == State.GUIDE
+    assert env.node.last_seen == (1.0, 2.0), 'scan 이 살아났는데 기록이 안 됐다'
+
+    run(env, 2.5, EMPTY)                   # fresh 누적 2.5s < lost_sec 3.0
+    assert env.node.state == State.GUIDE, '새 세대의 lost_sec 를 안 채우고 열렸다'
+    assert env.node.search_attempts == 0
+
+    run(env, 1.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
+    assert env.node.state == State.SEARCH_BACK
+    assert env.node.search_attempts == 1
+    assert env.node.search_goal == {'x': 1.0, 'y': 2.0, 'yaw': 0.0}, \
+        '좌표 없이 예산만 태우는 경로로 갔다'
+    assert not any('역행 불가' in m for m in msgs(env))
+
+
+def test_sb21_dead_start_still_ends_with_real_search_backs_then_report():
+    """정책 종결 — 결정 B 는 '**실제 역행** max_attempts 회 → 보고 → 단독 탈출'이다.
+    센서가 늦게 살아난 경우에도 역행 0회로 예산만 태우면 그 결정을 어긴 것이다."""
+    env = make_env(state=State.GATHER)
+    tick_only(env, 9.0)
+    tick_only(env, 5.0)
+    env.clock.advance(0.1)
+    env.node.monitor.update(EMPTY)         # 첫 유효 스캔
+
+    max_attempts = int(env.node.wp['search_back']['max_attempts'])
+    run_with_nav(env, 60.0, EMPTY)
+
+    assert env.node.give_up
+    assert env.node.search_attempts == max_attempts
+    assert [tag for tag, _ in env.goals].count('search_back') == max_attempts, \
+        '역행 goal 이 안 나갔다 — 예산만 태우고 보고했다(§27 P1 재발)'
+    assert any('추종자 확인 불가' in m for m in msgs(env))
+    assert not any('역행 불가' in m for m in msgs(env))
+
+
+def test_sb22_first_valid_scan_with_person_keeps_normal_following():
+    """역회귀 — 첫 유효 스캔이 **사람**이면 기존 의미 그대로 정상 추종이다.
+    §27 보완이 '첫 스캔은 무조건 재무장'으로 과하게 가도 이건 안 깨져야 한다."""
+    env = make_env(state=State.GATHER)
+    tick_only(env, 9.0)
+    tick_only(env, 5.0)
+
+    env.clock.advance(0.1)
+    env.node.monitor.update(PERSON)        # 첫 유효 스캔 = 사람
+    assert not env.node.monitor.lost('any')
+
+    run(env, 5.0, PERSON)
+    assert env.node.state == State.GUIDE
+    assert env.node.search_attempts == 0
+    assert not env.node.give_up
+    assert env.node.last_seen == (1.0, 2.0)
+
+
+# ============================================================
+# ★ P2 (§27.3) — reset() 의 호출 계약을 기계가 대조한다
+#   사람이 목록을 보고 설명으로 옮겨 적는 순간 둘은 갈라진다(`AGENTS.md §3-10 ②`).
+#   → 호출 자리마다 `[reset-role] <이름>` 을 달고, 그 집합과 독스트링의 집합을
+#     **양방향**으로 대조한다. 자리를 추가하고 설명을 안 고치면 여기서 FAIL 한다.
+# ============================================================
+RESET_ROLE_RE = re.compile(r'\[reset-role\]\s*([a-z0-9-]+)')
+
+
+def _production_src(name):
+    p = os.path.join(os.path.dirname(__file__), '..', 'mission_manager', name)
+    with open(p, encoding='utf-8') as f:
+        return f.read()
+
+
+def test_sb23_reset_docstring_covers_every_production_caller():
+    node_src = _production_src('mission_node.py')
+    call_lines = [ln for ln in node_src.splitlines() if 'self.monitor.reset(' in ln]
+    assert call_lines, '전제 불성립: 생산 코드에서 reset 호출을 못 찾았다'
+
+    tagged = [role for ln in call_lines for role in RESET_ROLE_RE.findall(ln)]
+    assert len(tagged) == len(call_lines), \
+        (f'reset() 호출 자리 {len(call_lines)} 곳 중 [reset-role] 태그가 붙은 것은 '
+         f'{len(tagged)} 곳뿐이다 — 태그 없는 자리는 대조에서 조용히 빠진다')
+
+    documented = set(RESET_ROLE_RE.findall(FollowerMonitor.reset.__doc__ or ''))
+    called = set(tagged)
+    assert called <= documented, \
+        f'reset() 설명이 빠뜨린 호출 역할: {sorted(called - documented)}'
+    assert documented <= called, \
+        f'설명에는 있는데 호출 자리가 사라진 역할: {sorted(documented - called)}'

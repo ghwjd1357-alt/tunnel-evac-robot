@@ -676,8 +676,13 @@ class MissionNode(Node):
         #     "본 적 없으면 판단 보류"가 GUIDE 구간에서만 해제된다 — 유도 중의
         #     '판단 보류'는 곧 무한 방치이기 때문이다. 그 결과 never-seen 은
         #     역행 2회 → '추종자 확인 불가' 보고 → 단독 탈출로 **유한하게** 끝난다.
+        #   ⚠ 이 재무장은 **관측 없이** 기산점을 세운다. 그래서 라이다가 아직 한 번도
+        #     안 살아난 상태에서 여기를 지나면 첫 유효 스캔까지의 시간이 미검출
+        #     시간으로 샌다 — 08-02 검토 §27 P1. 그 누수는 FollowerMonitor.update()
+        #     의 단절 복구가 **최초 스캔까지** 덮도록 고쳐서 막았다.
+        #     **이 자리의 안전은 그 보호에 의존한다** — 둘을 따로 손대지 말 것.
         if self.state == State.GUIDE and self._prev_tick_state != State.GUIDE:
-            self.monitor.reset('any')
+            self.monitor.reset('any')    # [reset-role] guide-entry
         # 이 tick 이 실제로 분기시킬 상태를 기록한다. 분기 도중 바뀐 상태(예:
         # SEARCH_BACK→GUIDE)는 다음 tick 에서 '진입'으로 잡힌다 — 그래서 스냅샷을
         # 분기 '앞'에서 뜬다. (분기 뒤에 뜨면 같은 tick 안의 전이가 삼켜진다.)
@@ -771,7 +776,7 @@ class MissionNode(Node):
                 self.get_logger().info('★ 추종자 재발견 → GUIDE 복귀')
                 self.cancel_current_goal()
                 self.refind_since = None
-                self.monitor.reset('any')    # 타이머 리셋 — 복귀 즉시 재-놓침 방지
+                self.monitor.reset('any')    # [reset-role] refind-return — 복귀 즉시 재-놓침 방지
                 self.state = State.GUIDE
             elif not self.goal_active and self.refind_since is None:
                 # ★ 07-23 §14 P1 — SEARCH_BACK 도 guide 유도 임무의 일부이므로
@@ -800,7 +805,7 @@ class MissionNode(Node):
                     #   → 방금 10초 기다리다 떠나온 같은 last_seen 으로 즉시 2차 역행,
                     #   예산이 "같은 곳 두 번"으로 소진 (max_attempts 의 의도 붕괴).
                     #   재무장하면 2차는 새로 lost_sec 연속 미검출을 다시 채워야 나감.
-                    self.monitor.reset('any')
+                    self.monitor.reset('any')    # [reset-role] refind-timeout-return
                     self.state = State.GUIDE   # 놓친 채 계속 — 재놓침 판정은 GUIDE 가 함
 
         elif self.state == State.ESCAPED:
