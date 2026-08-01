@@ -24,7 +24,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**08-01 갱신** — §18 기준선 스윕·핸드오프 단일성 + §19 자리 수 양방향 계약, **§20 승인**): pytest **159 passed** / colcon **188 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**08-01 갱신** — §20 승인 뒤 **예약 18**(가짜 IMU 주기를 실측 분포로) 회귀 11건 편입): pytest **159 passed** / colcon **199 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
 ⚠ 이 줄을 포함해 **기준선 수치가 적힌 모든 자리**는 `tools/gate_baseline_scan.py` 가 전수로
 대조한다(현재 13 자리). 수치 뒤 단위어(`passed`/`tests`/`검사`/`케이스`)를 떼면 검사에서 빠지고,
 기준선이 **아닌** 수를 같은 줄에 적을 때는 `케이스 12` 처럼 단위어를 **앞에** 쓴다.
@@ -54,6 +54,13 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
   조립 1·주석 다음 물리행 1)과 음성 3(실제 background·guarded·분할 hard_timeout)을 교차하며,
   논리행 결합 뒤에도 외부 명령의 원본 시작 줄번호를 보존한다.
   pytest·colcon 은 **무변동** — 이 묶음의 변경 표면이 `tools/` 뿐이라 그래야 맞다.
+★ 08-01 colcon 증분 = `tunnel_bringup` **+11** (188 → 199, 예약 18). 전부
+  `src/tunnel_bringup/test/test_gate_fakes_periods.py` — 가짜 센서 **주기**가 실물 실측과
+  같은지, 그리고 주기 수치가 **한 자리에만 있는지**를 지킨다. harness·gate_regression·pytest 는
+  **무변동**이어야 맞다(변경 표면이 `src/tunnel_bringup/test/` 라 `tools/` 게이트와 무관하다).
+  ⚠ 이 11건 중 3건은 **소스를 AST·정규식으로 훑는 전수 검사**다(타이머 주기 리터럴 0건 ·
+  발행 토픽 == 주기 표 · 정본 블록 밖 `<숫자>Hz` 0건) — `AGENTS.md §3-10` 커버리지 폐포 ②
+  ('열거를 검사기 안으로')를 `tools/` 밖에서 처음 적용한 자리다.
 ★ 07-30 증분 = `tunnel_bringup` **+23** (게이트 판정 단위 **20** + lint 3, 그중 copyright 1건 skip).
   1차 보완이 181(단위 13), 2차 보완이 **188**(단위 20 — lifecycle 세대 3 + TF 갱신 4 추가).
 pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/` 에 있어 `colcon test` 로만 돈다
@@ -80,6 +87,7 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 | **test_gate_regression** | 실차 조건 기동 게이트(`readiness_gate`)의 **미통과**가 실제로 지켜지는가 — 토픽·TF·lifecycle·액션을 가짜로 주입해 로봇·Gazebo 없이 검증. 음성이 본체(양성 4 + 음성 10). ★ 핵심은 **"한 번 관측 = 통과" 금지**: lifecycle 이 ACTIVE 를 1회 답한 뒤 멎는 입력(케이스 6)과 토픽이 1건만 오고 죽는 입력(케이스 3). 케이스 13·14 = 서비스 소실→복구 경계 가드 | 14 케이스 전부 ✓ (~163초 실측). 런치 양성 체인 생략 = `GATE_SKIP_LAUNCH=1` (케이스 12). ⚠ Gazebo 실행 중이면 자체 거부(정리 단계가 nav2 를 전역 kill) |
 | ↳ **검출력 경계 (정직하게)** | 이 셸 층은 **2차 P1(소실 경계 in-flight 조회 폐기)을 검출하지 못한다** — 실측: 보완을 되돌려도 12/12 PASS. 소실 순간의 늦은 응답은 서비스 파괴와 함께 DDS 에서 소멸해 실물 층에서 만들 수 없다. 검출은 `src/tunnel_bringup/test/` 단위층 3케이스가 한다 | 층 분담을 흐리지 말 것 — 셸이 PASS 라고 세대 결함이 없는 것이 아니다 |
 | colcon test | 워크스페이스 lint+단위 | test-result 0 errors/failures |
+| ↳ **가짜 센서 주기 회귀** (예약 18) | 게이트 회귀의 **입력원**이 실물과 같은 입력을 만드는가. IMU 주기 열이 실측 5통계(평균 24.02ms·min 18·max 30·σ 0.55·창 295)를 재현하고, **등간격으로 되돌리면 깨지며**, 주기 수치가 '주기 정본' 블록 **한 자리**에만 있는지를 AST·정규식 전수로 본다. 실측을 못 받은 `/scan`·`/odom` 은 **'미확보' 선언**을 강제한다 | 11건 전부 ✓ (`colcon test` 안에서 돈다). ⚠ 이 층의 상한 = **스케줄**을 대조할 뿐 실제 발행 열에는 파이썬·DDS 지터 ±4ms 가 얹힌다(구판에서도 σ 0.97ms 관측 — 이 묶음이 만든 것이 아니다) |
 | regression_negative | **안 돼야 하는 게 안 되는가** — 지도밖/벽너머/막힌 goal 실패 종결 + 정상 goal 양성 대조군 | 불가 3종 ABORTED + 정상 SUCCEEDED (막힌 goal 은 BT 재시도 소진까지 ~2분 정상) |
 | regression_3goals | 주행 정확도 회귀 | 3종 SUCCEEDED, 최종 오차 **≤0.3m** |
 | mission_e2e | 미션 전체 흐름 | GUIDE 0.12 실측 → SEARCH_BACK → 재발견 → ESCAPED |

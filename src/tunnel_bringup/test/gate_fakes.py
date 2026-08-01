@@ -10,9 +10,9 @@ gate_fakes.py — `readiness_gate` 회귀용 '가짜 조건' 발생기 (로봇·
   (이 성질은 원래 설계 의도이기도 하다 — 그래서 `ros2 bag play` 로도 상위 스택이 돈다.)
 
 [이 파일이 만드는 것 — 모드별]
-  sensors    : /scan 10Hz · /odom 50Hz · /imu/data 50Hz (+옵션 /odometry/filtered) 를
-               micro-ROS 토픽 계약대로 발행. ⚠ IMU 는 07-30 확정 **50Hz** 다
-               (`REAL_ROBOT_VALUES.md §1` 의 '100Hz 발행 예정'은 옛 값 — 정본 갱신 필요).
+  sensors    : /scan · /odom · /imu/data (+옵션 /odometry/filtered) 를 micro-ROS 토픽
+               계약대로 발행. **발행 주기와 그 근거는 아래 '주기 정본' 블록 한 곳에만**
+               적는다 — 이 독스트링에 숫자를 다시 쓰지 않는다(갈라질 자리를 없앤다).
                --messages N 으로 **N건만 보내고 멈추는** 죽은 퍼블리셔도 흉내 낸다.
   lifecycle  : `<노드>/get_state` 서비스를 대본대로 응답. 대본 항목:
                  active   = ACTIVE(3) 응답
@@ -71,6 +71,111 @@ BEST_EFFORT = QoSProfile(
 )
 
 
+# ============================================================
+# --- 주기 정본 시작 ---
+#
+# ★ 여기가 '가짜 센서가 몇 ms 마다 발행하는가'의 **유일한 자리**다.
+#   주기 수치를 이 블록 밖(주석·독스트링·타이머 인자)에 다시 적지 않는다.
+#   같은 사실을 두 곳에 적으면 언젠가 갈라지고, 실제로 갈라졌던 것이 이 묶음의 발단이다:
+#   코드 50Hz(타이머) / 독스트링 100Hz / 구동부 실측 41.63Hz — **셋이 전부 달랐다.**
+#   회귀(`test_gate_fakes_periods.py`)가 "이 블록 밖에 <숫자>Hz 표기가 0건"임을 기계로 지킨다.
+#
+# ★ 규약 — 무엇이 이 표의 대상인가: **가짜 '센서 입력'의 발행 주기만** 넣는다.
+#   하네스 자신의 제어 타이머(FakeLifecycle 의 소실/복구 tick 등)는 실물이 만드는 입력이
+#   아니라 시험 대본이므로 대상이 아니다. (열거를 좁히는 판단은 규약으로 고정한다.)
+# ============================================================
+
+# [/imu/data] BNO055 — 구동부 2차 회신 §11 **실측** (window 295 표본):
+#   평균 24.02ms · min 18ms · max 30ms · σ 0.55ms  (= 41.63Hz)
+#   구동부 코드 설정은 20000us(50Hz)인데 실제 루프가 18~30ms 로 도는 상태다.
+#   ⚠ 우리가 받은 것은 이 **5개 요약통계뿐**이고 원자료(타임스탬프 열)는 못 받았다.
+#     따라서 아래 시퀀스는 '그 5통계를 만족하는 한 대표'이지 실차의 실제 시간열이 아니다.
+#     지터의 세부 파형은 **미확보**이며, 원자료를 받으면 이 시퀀스를 통째로 교체한다.
+#   ⚠ 30ms 는 '상한'이 아니라 **7초 남짓한 창에서 관측된 최대**다. 더 긴 창에서 더 큰
+#     간격이 나올 수 있다 — 재개방 조건은 `docs/REAL_ROBOT_VALUES.md §1`.
+IMU_WINDOW = 295          # 실측 표본 수 — 시퀀스 길이를 여기 맞춘다
+IMU_MEAN_US = 24_020      # 평균 24.02ms
+IMU_MIN_US = 18_000       # 관측 최소
+IMU_MAX_US = 30_000       # 관측 최대 ★ EKF 한 주기에 가장 가까이 붙는 값
+IMU_SIGMA_US = 550        # 표준편차 0.55ms
+
+# [왜 이런 모양이 되는가 — 추측이 아니라 위 4수치에서 나오는 산술적 귀결]
+#   창 295 · σ 0.55 → 편차제곱합 = 295 x 0.55^2 = 89.24 ms^2.
+#   그런데 극단 2개(18·30)만으로 6.02^2 + 5.98^2 = 72.00 ms^2 를 이미 써 버린다.
+#   → 나머지 293 표본이 나눠 쓸 수 있는 것은 17.24 ms^2, 즉 rms 0.2425ms 뿐이다.
+#   **즉 18·30 은 자주 나오는 값이 아니라 창당 한 번꼴의 이탈이고, 나머지는 잔잔하다.**
+#   그래서 시퀀스는 '±0.242ms 지터 + 창당 1회의 18·30' 모양이다. 이 유도가 틀렸다면
+#   회귀의 통계 대조가 즉시 깨진다(값을 손으로 맞춰 넣은 것이 아니다).
+_IMU_JITTER_US = 242      # 기저 지터 진폭 — 위 유도의 rms 를 만든다
+_IMU_TRIM_US = 40         # 표본 수가 홀수라 남는 한 칸 — 평균을 24.020ms 에 정확히 맞춘다
+_IMU_MAX_AT = 98          # 극단값 위치. 창을 대략 3등분한 고정 좌표(근거 없는 임의값 = 규약)
+_IMU_MIN_AT = 197
+
+# [/scan] RPLIDAR C1 — 사양 10Hz. **실측 미확보** (우리 쪽 센서라 구동부 회신 대상이 아니었다).
+SCAN_PERIOD_US = 100_000
+SCAN_UNMEASURED = '실측 미확보 — RPLIDAR C1 사양값. R3 rosbag 에서 실측 후 교체'
+
+# [/odom] 구동부 계약 50Hz (`TEENSY_실차연동_합의사항.md §4.5`). **실측 미확보** —
+#   2차 회신 §10.3 토픽 목록에 `/odom` 이 아직 없어서 주기를 잴 대상 자체가 없었다.
+ODOM_PERIOD_US = 20_000
+ODOM_UNMEASURED = '실측 미확보 — 합의서 계약값. 인수 항목 1(통합 펌웨어) 수령 후 실측'
+
+# [/odometry/filtered] EKF 출력 자리 — 게이트 단독 케이스에서 EKF 를 대신한다.
+#   근거는 실측이 아니라 **우리 설정값**이다: `config/ekf_real.yaml` 의 frequency.
+#   회귀가 그 YAML 을 직접 읽어 아래 값과 대조한다(두 자리가 갈라지지 않게).
+EKF_FREQUENCY_HZ = 30.0
+EKF_CONFIG_REL = 'config/ekf_real.yaml'
+
+
+def _build_imu_periods():
+    """실측 5통계를 재현하는 결정적 주기 열(us)을 만든다 — 난수 없음, 시드도 없음."""
+    pairs = (IMU_WINDOW - 3) // 2          # 극단 2개 + 보정 1칸을 뺀 나머지를 ± 로 채운다
+    jitter = [_IMU_JITTER_US, -_IMU_JITTER_US] * pairs + [_IMU_TRIM_US]
+    rest = [IMU_MEAN_US + d for d in jitter]
+    return tuple(
+        rest[:_IMU_MAX_AT] + [IMU_MAX_US]
+        + rest[_IMU_MAX_AT:_IMU_MIN_AT - 1] + [IMU_MIN_US]
+        + rest[_IMU_MIN_AT - 1:]
+    )
+
+
+class PeriodPlan:
+    """가짜 센서 한 종의 발행 주기 열 + 그 주기의 출처. **불변** (커서는 쓰는 쪽이 갖는다)."""
+
+    def __init__(self, topic, periods_us, basis, unmeasured=None):
+        self.topic = topic
+        self.periods_us = tuple(periods_us)
+        self.basis = basis              # 이 주기가 어디서 왔는가 (실측/계약/설정)
+        self.unmeasured = unmeasured    # None 이 아니면 '실측 미확보' + 그 사유
+
+    @property
+    def initial_s(self):
+        """타이머를 만들 때 줄 첫 주기(초)."""
+        return self.periods_us[0] / 1e6
+
+    @property
+    def varies(self):
+        """주기가 매번 바뀌는가 (= 콜백마다 타이머에 갈아 끼워야 하는가)."""
+        return len(set(self.periods_us)) > 1
+
+    def period_ns(self, index):
+        """시퀀스의 index 번째 주기(ns). 끝나면 처음으로 돌아온다."""
+        return self.periods_us[index % len(self.periods_us)] * 1000
+
+
+SENSOR_PERIODS = {
+    'scan': PeriodPlan('/scan', (SCAN_PERIOD_US,),
+                       basis='RPLIDAR C1 사양', unmeasured=SCAN_UNMEASURED),
+    'odom': PeriodPlan('/odom', (ODOM_PERIOD_US,),
+                       basis='합의사항 §4.5 계약값', unmeasured=ODOM_UNMEASURED),
+    'imu': PeriodPlan('/imu/data', _build_imu_periods(),
+                      basis='구동부 2차 회신 §11 실측 (window 295)'),
+    'filtered': PeriodPlan('/odometry/filtered', (int(round(1e6 / EKF_FREQUENCY_HZ)),),
+                           basis=f'{EKF_CONFIG_REL} 의 frequency (실측 아님 — 우리 설정값)'),
+}
+# --- 주기 정본 끝 ---
+
+
 class FakeSensors(Node):
     """계약대로 도는 가짜 센서. --messages N 이면 N건 뒤 발행을 멈춘다(죽은 퍼블리셔)."""
 
@@ -83,16 +188,18 @@ class FakeSensors(Node):
         #   1건이 구독 뒤에 와야 한다. 안 그러면 구독 전에 흘려보내 '수신 0건'이 되고,
         #   시험하려던 것(1건 받고도 통과 못 함)이 아니라 엉뚱한 이유로 실패한다.
         self._go_at = time.monotonic() + delay
+        self._imu_step = 0
         self.scan_pub = self.create_publisher(LaserScan, '/scan', BEST_EFFORT)
         self.odom_pub = self.create_publisher(Odometry, '/odom', BEST_EFFORT)
         self.imu_pub = self.create_publisher(Imu, '/imu/data', BEST_EFFORT)
-        self.create_timer(0.1, self._scan)      # 10Hz
-        self.create_timer(0.02, self._odom)     # 50Hz
-        self.create_timer(0.02, self._imu)      # 50Hz (07-30 확정 — 옛 '100Hz 예정' 아님)
+        # ★ 주기 리터럴을 여기 쓰지 않는다 — 전부 '주기 정본' 표에서 꺼낸다.
+        self.create_timer(SENSOR_PERIODS['scan'].initial_s, self._scan)
+        self.create_timer(SENSOR_PERIODS['odom'].initial_s, self._odom)
+        self.imu_timer = self.create_timer(SENSOR_PERIODS['imu'].initial_s, self._imu)
         if with_filtered:
             # EKF 를 띄우지 않는 게이트 단독 케이스용 — EKF 출력 자리를 대신 채운다.
             self.filtered_pub = self.create_publisher(Odometry, '/odometry/filtered', 10)
-            self.create_timer(0.033, self._filtered)
+            self.create_timer(SENSOR_PERIODS['filtered'].initial_s, self._filtered)
 
     def _budget(self, key):
         """이 토픽이 아직 발행해도 되는지 (한도 소진 = 죽은 퍼블리셔 흉내)."""
@@ -134,8 +241,27 @@ class FakeSensors(Node):
             msg.twist.covariance[i] = 0.05
         self.odom_pub.publish(msg)
 
+    def _advance_imu_period(self):
+        """
+        다음 발행 간격을 시퀀스에서 꺼내 타이머에 갈아 끼운다.
+
+        ★ 한 칸 늦게 반영되는 것이 **정상이고, 그래서 결과가 맞는다.**
+          rcl 은 콜백을 부르기 **전에** `next_call_time += 현재주기` 로 다음 만기를
+          이미 확정한다. 그래서 k 번째 콜백에서 심은 값은 k+1 번째 간격을 지배한다.
+          초기 주기를 seq[0] 으로 두고 k 번째 콜백이 seq[k] 를 심으면, 실제 발행
+          간격 열이 정확히 seq[0], seq[1], seq[2] … 가 된다.
+          이 순서는 추론이 아니라 **실측으로 확정**했고(rclpy Humble), 회귀가
+          같은 순서를 시뮬레이터로 다시 대조한다 — 누가 rclpy 를 올려 순서가
+          바뀌면 그 회귀가 깨진다.
+        ★ 예산(`_budget`) 검사보다 **먼저** 부른다. --delay·--messages 로 발행이
+          멈춰도 스케줄 자체는 흐르게 해서, 주기 열이 발행 여부에 좌우되지 않게 한다.
+        """
+        self._imu_step += 1
+        self.imu_timer.timer_period_ns = SENSOR_PERIODS['imu'].period_ns(self._imu_step)
+
     def _imu(self):
-        """BNO055 흉내 (100Hz — 합의사항)."""
+        """BNO055 흉내 — 주기는 실측 분포다 ('주기 정본' 블록의 IMU 항목)."""
+        self._advance_imu_period()
         if not self._budget('imu'):
             return
         msg = self._stamp(Imu(), 'imu_link')
@@ -283,8 +409,8 @@ def build_parser():
                            help='이름[:대본] (예: /planner_server:active,hang)')
     lifecycle.add_argument('--drop-at', type=int, default=0,
                            help='N회 답한 뒤 get_state 서비스를 파괴한다 (0=안 함)')
-    lifecycle.add_argument('--drop-sec', type=float, default=2.0,
-                           help='파괴 후 몇 초 뒤 재생성할지 (게이트 유효기간 5s 보다 짧게)')
+    lifecycle.add_argument('--drop-sec', type=float, default=6.0,
+                           help='파괴 후 몇 초 뒤 재생성할지 (5초 이상 — 위 클래스 독스트링)')
 
     action = sub.add_parser('action', help='액션 서버 존재만 흉내')
     action.add_argument('--name', default='/navigate_to_pose')

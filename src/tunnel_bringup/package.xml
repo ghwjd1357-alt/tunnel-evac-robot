@@ -34,6 +34,9 @@
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
+  <!-- 예약 18: 가짜 센서 주기 회귀가 `config/ekf_real.yaml` 을 직접 읽어 대조한다
+       (하네스 주기와 EKF 설정이 갈라지는 것을 기계가 막는다). -->
+  <test_depend>python3-yaml</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

@@ -32,7 +32,11 @@ ekf_filter_node:
     # ★ 실차 = 실제 시계. 시뮬 전용 시계를 쓰면 stamp 가 전부 어긋나 TF 가 폭주한다.
     use_sim_time: false
 
-    frequency: 30.0             # 융합 결과 발행 주기(Hz). 입력(odom 50Hz·IMU 100Hz)보다 낮게.
+    frequency: 30.0             # 융합 결과 발행 주기(Hz). 입력(odom 계약 50Hz · IMU 실측
+                                #   41.63Hz)보다 낮게. ⚠ 08-01: IMU **최대 간격 30ms** 와
+                                #   이 주기 33.33ms 의 여유가 3.33ms 뿐이다 — 이 값을
+                                #   33.33Hz 위로 올리면 EKF 한 주기가 IMU 없이 지나갈 수
+                                #   있다. 회귀가 그 관계를 감시한다(test_gate_fakes_periods).
                                 # TODO: R4 실측 후 확정 — Jetson CPU 여유와 Nav2 제어주기
                                 #   20Hz 를 함께 보고 조정한다.
     two_d_mode: true            # 평면 주행(터널 바닥): z·roll·pitch 를 0 으로 강제.

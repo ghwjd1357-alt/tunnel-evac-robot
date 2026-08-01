@@ -527,7 +527,7 @@ def main(args=None):
 
             # ★ 조건 '평가'는 poll_period_sec 마다만 한다.
             #   spin_once 는 콜백이 하나라도 있으면 즉시 돌아오므로, 여기서 매번
-            #   판정까지 하면 센서 주기(IMU 100Hz 등)만큼 그래프 조회·TF 조회가 돌아
+            #   판정까지 하면 센서 주기(IMU 실측 41.63Hz 등)만큼 그래프 조회·TF 조회가 돌아
             #   Jetson 기동 중에 쓸데없이 CPU 를 먹는다 (Nav2 활성화를 오히려 늦춘다).
             now = time.monotonic()
             if now < next_check:
