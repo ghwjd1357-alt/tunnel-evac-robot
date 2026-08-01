@@ -86,16 +86,23 @@ class FakeTF:
                 translation=types.SimpleNamespace(x=x, y=y)))
 
 
-def make_env(tf_ok=True):
+def make_env(tf_ok=True, state=State.GUIDE):
     """껍데기 MissionNode + ★진짜 FollowerMonitor★ + 진짜 waypoints.yaml.
 
     반환 env:
-      env.node  = MissionNode (state=GUIDE)
+      env.node  = MissionNode (기본 state=GUIDE)
       env.clock = FakeClock (정수 ns 누적 — 디바운스 경계 오차 방지)
       env.tf    = FakeTF (pose 이동·fail 토글)
       env.logs  = [(메시지, kwargs)] — throttle 유무까지 단언 가능
       env.goals = [(tag, wp)] · env.cancels = 취소 횟수
       env.step  = 0.1s 스텝 카운터 (5스텝마다 tick — 실제 2Hz)
+
+    ★ `state` 인자의 의미 (08-01 검토 §26 P1 이 지적한 바로 그 구멍):
+      기본값 `State.GUIDE` 는 **"이미 GUIDE 로 유도 중"** 을 뜻하며 `_prev_tick_state`
+      도 같이 GUIDE 로 둔다 — 진입 전이가 **아니다.** 진입 경계를 검사하는 회귀는
+      `state=State.GATHER` 로 만들어 **진짜 `_on_guide_speed_ok()`** 가 전환하게 한다
+      (`speed.request_guide` 를 그 콜백에 배선해 뒀다). 상태를 손으로 GUIDE 에 꽂는
+      env 만으로는 진입 경계가 영원히 녹색이다 — 그게 §26 불승인 사유였다.
     """
     node = MissionNode.__new__(MissionNode)
     clock = FakeClock()
@@ -122,7 +129,8 @@ def make_env(tf_ok=True):
         error=lambda m, **kw: logs.append((m, kw)))
 
     node.wp = wp
-    node.state = State.GUIDE
+    node.state = state
+    node._prev_tick_state = state    # "이 상태로 이미 진행 중" — 진입 전이가 아니다
     node.siren_on = True
     node.fire = None
     node.goal_active = False
@@ -131,6 +139,18 @@ def make_env(tf_ok=True):
     node.last_seen = None
     node.search_goal = None
     node.refind_since = None
+    # --- 상태머신의 나머지 소유 필드 (진짜 전이 경로가 읽고 쓴다) ---
+    node.patrol_idx = 0
+    node.gather_wp = None
+    node.gather_since = clock.now()
+    node._guide_pending = False
+    node._escaped_logged = False
+    node._cancel_intent = None
+    node.fault_retries = 0
+    node.fault_since = None
+    node.resume_state = None
+    node.MAX_RETRIES = 2
+    node.RETRY_WAIT = 5.0
 
     tf = FakeTF()
     tf.fail = not tf_ok
@@ -145,11 +165,17 @@ def make_env(tf_ok=True):
     node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
     node.get_clock = lambda: clock
     # 속도 수명주기는 이 결함과 무관 — 저속이 '적용 확인된' 정상 상태로 고정.
+    # ★ request_guide 는 진짜 성공 콜백에 배선한다 — GATHER→GUIDE 전환을
+    #   테스트가 흉내내지 않고 **생산 코드 `_on_guide_speed_ok()` 가** 하게.
+    #   (SpeedManager 의 비동기 수명주기만 가짜다. 그건 이 결함과 무관하다.)
     node.speed = types.SimpleNamespace(
         tick=lambda: None,
         ensure_sync=lambda v: None,
         guide_speed_recovery_exhausted=False,
-        guide_speed_applied=True)
+        guide_speed_applied=True,
+        request_guide=lambda v: node._on_guide_speed_ok(),
+        request_restore=lambda v: None,
+        cancel_pending=lambda why: None)
 
     return types.SimpleNamespace(node=node, clock=clock, tf=tf, logs=logs,
                                  goals=goals, cancels=cancels, step=0)
@@ -164,6 +190,26 @@ def run(env, seconds, scan, dt=0.1):
         env.step += 1
         if env.step % 5 == 0:
             env.node.tick()
+
+
+def run_with_nav(env, seconds, scan, dt=0.1):
+    """run() + "보낸 goal 은 Nav2 가 도착시켜 준다" 시늉.
+
+    가짜인 것은 **'언제 도착했나'뿐**이고 도착 처리는 진짜 `on_reached()` 가 한다
+    (SEARCH_BACK → refind_since 세팅). goal_active 를 내리는 것도 실제 GoalManager
+    가 결과 콜백에서 하는 일이다. 이게 없으면 역행이 영원히 '주행 중'이라
+    max_attempts 소진 경로를 끝까지 못 돌린다."""
+    for _ in range(round(seconds / dt)):
+        env.clock.advance(dt)
+        env.node.monitor.update(scan)
+        env.step += 1
+        if env.step % 5 == 0:
+            env.node.tick()
+            if (env.node.state == State.SEARCH_BACK
+                    and env.node.goal_active
+                    and env.node.refind_since is None):
+                env.node.goal_active = False
+                env.node.on_reached()          # 역행 지점 도착
 
 
 def msgs(env):
@@ -332,3 +378,199 @@ def test_sb11_give_up_still_stops_all_follower_monitoring():
     assert env.node.last_seen is None
     assert env.node.search_attempts == 0
     assert env.node.state == State.GUIDE
+
+
+# ============================================================
+# ★ GUIDE 진입 세대 (08-01 검토 §26 P1) — 진짜 전이를 태우는 부정 회귀
+#   ─────────────────────────────────────────────────────────
+#   §26 불승인 사유: 위 sb1~sb11 은 전부 `state = GUIDE` 를 손으로 꽂은
+#   env 라 **GUIDE 진입 경계가 한 번도 실행되지 않았다.** 아래는 진짜
+#   `_on_guide_speed_ok()` · `on_reached()` · `on_cmd('reset')` · FAULT 재시도로
+#   전이시킨다. grep 전수로 센 GUIDE 진입 4경로 + 관제 reset 잔재를 각각 덮는다.
+# ============================================================
+def test_sb12_prelost_gather_to_guide_does_not_burn_budget_without_search_back():
+    """① GATHER 중 1프레임만 보고 놓침 타이머가 만료된 채 GUIDE 로 들어간다.
+
+    보완 전(§26.2 재현): 진입 첫 tick 이 lost=True 로 시작해 record_last_seen()
+    호출 기회가 **0회**(tf_calls=0) → last_seen=None → '역행 불가'로 예산 2회를
+    1.5초에 태우고 give_up. **TF 는 멀쩡한데 SEARCH_BACK 을 한 번도 안 하고
+    사람을 버린다.**
+    보완 후: 진입이 관측 세대를 재무장 → 정상 기록 → 진짜 좌표로 역행 1회.
+    """
+    env = make_env(state=State.GATHER)
+    run(env, 0.1, PERSON)          # GATHER 중 1프레임 검출
+    run(env, 3.6, EMPTY)           # lost_sec(3.0) 초과 — 아직 GATHER 다
+    assert env.node.monitor.lost('any'), '전제 불성립: 전환 전에 이미 놓침이어야 한다'
+    assert env.node.state == State.GATHER
+
+    run(env, 5.0, EMPTY)           # gather_wait_sec(8.0) 충족 → 진짜 GUIDE 전환
+    assert env.node.state == State.GUIDE, '전제 불성립: _on_guide_speed_ok 가 안 걸렸다'
+    assert env.node.search_attempts == 0, \
+        '진입하자마자 예산이 깎였다 — 역행 한 번 없이 give_up 으로 간다 (§26 P1)'
+    assert env.tf.calls > 0, 'TF 가 멀쩡한데 기록 기회가 0회였다 (§26 P1 의 핵심)'
+    assert env.node.last_seen == (1.0, 2.0)
+    assert not any('역행 불가' in m for m in msgs(env)), \
+        'TF 실패가 아닌데 "역행 불가"로 예산을 태웠다'
+
+    run(env, 3.5, EMPTY)           # 이제 이 세대에서 lost_sec 를 채운다
+    assert env.node.state == State.SEARCH_BACK
+    assert env.node.search_attempts == 1
+    assert env.node.search_goal == {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
+    assert not env.node.give_up
+
+
+def test_sb13_never_seen_follower_ends_finitely_with_report():
+    """② GATHER 부터 GUIDE 까지 **0프레임** 검출 — 사용자 정책 결정(08-01).
+
+    보완 전: `_last_seen_t` 가 None 이라 lost 가 **영원히 False** →
+    역행도 보고도 안 열리고 escape 만 계속 = 사람을 두고 조용히 나간다.
+    정책 A(다른 놓침과 동일 취급): 역행 max_attempts 회 → '추종자 확인 불가'
+    보고 → 단독 탈출. **유한하고 관측 가능하게** 끝나야 한다.
+    """
+    env = make_env(state=State.GATHER)
+    run_with_nav(env, 9.0, EMPTY)          # 검출 0건인 채 GATHER 8초 → GUIDE
+    assert env.node.state == State.GUIDE
+    assert env.node.monitor._last_seen_t['any'] is not None, \
+        'GUIDE 진입이 관측 세대를 열지 않았다 — lost 가 영원히 False 로 남는다'
+
+    max_attempts = int(env.node.wp['search_back']['max_attempts'])
+    run_with_nav(env, 60.0, EMPTY)
+
+    assert env.node.give_up, '무한 GUIDE — 역행도 보고도 열리지 않았다'
+    assert env.node.search_attempts == max_attempts
+    assert any('추종자 확인 불가' in m for m in msgs(env)), '보고 경로에 도달 못 함'
+    assert [tag for tag, _ in env.goals].count('search_back') == max_attempts, \
+        '예산만 태우고 실제 역행은 안 했다'
+    assert not any('역행 불가' in m for m in msgs(env)), \
+        'TF 가 멀쩡한데 좌표 없이 예산만 소모했다'
+
+
+def test_sb14_fault_resume_to_guide_rearms_generation():
+    """③ FAULT → resume_state 복귀. FAULT 로 멈춰 있던 시간이 놓침 시간으로
+    계산되면 복귀 즉시 역행이 터진다 (로봇은 서 있었는데 사람을 '놓쳤다'고 판정).
+
+    ★ 경계 양방향 (AGENTS.md §3-10 ⑤): 복귀 후 lost_sec 미만이면 안 열리고,
+      넘기면 열려야 한다. 한쪽만 박으면 반대 방향을 안 물은 것이다."""
+    env = make_env()
+    run(env, 2.0, PERSON)                  # 정상 추종 중
+    assert env.node.last_seen == (1.0, 2.0)
+
+    env.node.enter_fault()                 # 진짜 FAULT 진입 (resume_state=GUIDE)
+    assert env.node.resume_state == State.GUIDE
+    run(env, 6.0, EMPTY)                   # RETRY_WAIT(5.0) 경과 → 진짜 GUIDE 복귀
+    assert env.node.state == State.GUIDE, '전제 불성립: FAULT 재시도가 안 걸렸다'
+    assert env.node.search_attempts == 0, \
+        'FAULT 로 정지해 있던 시간이 놓침으로 계산돼 복귀 즉시 역행했다'
+
+    run(env, 2.0, EMPTY)                   # 복귀 후 2.5s < lost_sec 3.0
+    assert env.node.state == State.GUIDE
+    assert env.node.search_attempts == 0
+    run(env, 2.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
+    assert env.node.state == State.SEARCH_BACK
+    assert env.node.search_attempts == 1
+
+
+def test_sb15_control_reset_does_not_leak_old_generation_into_next_mission():
+    """④ 관제 reset 은 last_seen 만 비우고 **모니터는 안 건드린다**(생산 사실).
+    그 잔재가 다음 임무의 GUIDE 로 새면, 진입하자마자 옛 타이머로 놓침 판정 +
+    last_seen 은 None → '역행 불가'로 예산이 즉시 소진된다.
+
+    ⚠ 상태를 손으로 꽂는 것은 APPROACH 하나뿐이다(주행 배선은 이 결함과 무관).
+      APPROACH→GATHER 는 진짜 `on_reached()`, GATHER→GUIDE 는 진짜 콜백이 한다."""
+    env = make_env()
+    run(env, 0.1, PERSON)
+    run(env, 5.0, EMPTY)                   # 놓침 → 역행 (이전 임무)
+    assert env.node.search_attempts == 1
+
+    env.node.on_cmd(types.SimpleNamespace(data='reset'))
+    assert env.node.state == State.PATROL
+    assert env.node.last_seen is None and env.node.search_attempts == 0
+    assert env.node.monitor._last_seen_t['any'] is not None, \
+        '전제 불성립: 관제 reset 이 모니터 잔재를 남긴다는 사실이 바뀌었다'
+
+    env.node.state = State.APPROACH        # 다음 임무 — 집결지로 주행 중
+    env.node.on_reached()                  # 진짜 전이: APPROACH → GATHER
+    assert env.node.state == State.GATHER
+    run(env, 9.0, EMPTY)                   # 진짜 전이: GATHER → GUIDE
+    assert env.node.state == State.GUIDE
+    assert env.node.search_attempts == 0, \
+        '옛 임무의 목격 시각으로 새 임무 진입 즉시 놓침 판정했다'
+
+    run(env, 2.5, EMPTY)
+    assert env.node.state == State.GUIDE, '새 세대의 lost_sec 를 안 채우고 열렸다'
+    run(env, 1.0, EMPTY)
+    assert env.node.state == State.SEARCH_BACK   # 반대 방향 경계
+    assert env.node.search_attempts == 1
+
+
+def test_sb16_refind_return_to_guide_does_not_relose_immediately():
+    """역회귀 — SEARCH_BACK 재발견 복귀(이미 reset('any') 하던 경로)가
+    초크포인트 추가로 깨지지 않는다."""
+    env = make_env(state=State.SEARCH_BACK)
+    env.node.last_seen = (1.0, 2.0)
+    env.node.search_goal = {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
+    env.node.search_attempts = 1
+
+    run(env, 1.5, PERSON)                  # seen_sec(1.0) 충족 → 재발견 복귀
+    assert env.node.state == State.GUIDE
+    run(env, 2.5, PERSON)                  # 계속 보이는 동안은 재놓침 없음
+    assert env.node.state == State.GUIDE
+    assert env.node.search_attempts == 1
+
+    run(env, 3.5, EMPTY)                   # 진짜로 다시 놓치면 2회차는 열린다
+    assert env.node.state == State.SEARCH_BACK
+    assert env.node.search_attempts == 2
+
+
+def test_sb17_refind_timeout_return_to_guide_does_not_relose_immediately():
+    """역회귀 — SEARCH_BACK 재탐색 실패 복귀(07-07 의 두 번째 reset('any') 경로).
+    "같은 곳 두 번"으로 예산이 소진되던 07-07 결함이 되살아나면 안 된다."""
+    env = make_env(state=State.SEARCH_BACK)
+    env.node.last_seen = (1.0, 2.0)
+    env.node.search_goal = {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
+    env.node.search_attempts = 1
+    env.node.refind_since = env.clock.now()
+
+    run(env, 11.0, EMPTY)                  # refind_wait_sec(10.0) 만료 → GUIDE 복귀
+    assert env.node.state == State.GUIDE
+    assert env.node.search_attempts == 1, '복귀 즉시 같은 지점으로 2차 역행이 나갔다'
+
+    # ⚠ 경계에 딱 붙이지 않는다 — 이 검사는 **역회귀 앵커**다(구판도 통과해야
+    #   "안 깨졌다"가 증명된다). 초크포인트는 이 경로의 재무장을 0.5초(1 tick)
+    #   늦추는데, 그 차이에 단언을 걸면 앵커가 부정 회귀로 둔갑한다.
+    run(env, 1.5, EMPTY)                   # 복귀 후 ~2s < lost_sec 3.0
+    assert env.node.state == State.GUIDE
+    run(env, 2.0, EMPTY)                   # 넘김 → 양쪽 다 열려야 한다
+    assert env.node.state == State.SEARCH_BACK
+    assert env.node.search_attempts == 2
+
+
+# ============================================================
+# ★ P2 (§26.3) — last_seen 의 실제 의미를 코드로 못박는다
+#   주석만 고치면 다음 회차에 또 갈라진다. "무엇이 저장되는가"를 단언한다.
+# ============================================================
+def test_sb18_last_seen_is_robot_pose_before_loss_not_the_detection_moment():
+    """검출이 끊긴 뒤에도 놓침 확정 직전까지 갱신된다 —
+    즉 저장값은 '목격한 순간의 좌표'가 아니라 **그 직전 로봇 좌표**다."""
+    env = make_env()
+    run(env, 1.0, PERSON)
+    assert env.node.last_seen == (1.0, 2.0)
+
+    env.tf.pose = (5.0, 6.0)               # 검출이 끊긴 뒤에도 로봇은 전진한다
+    run(env, 2.0, EMPTY)                   # 2.5s < lost_sec 3.0 — 아직 놓침 아님
+    assert env.node.state == State.GUIDE
+    assert env.node.last_seen == (5.0, 6.0), \
+        'last_seen 은 "마지막 목격 좌표"가 아니라 놓침 확정 직전의 로봇 좌표다'
+
+
+def test_sb19_last_seen_updates_after_rearm_without_any_detection():
+    """세대 재무장 뒤에는 **실제 재검출 0건**이어도 갱신된다.
+    이 값을 '사람을 봤다'는 관측 증거로 읽으면 안 된다는 규약의 근거."""
+    env = make_env(state=State.GATHER)
+    run(env, 9.0, EMPTY)                   # 검출 0건으로 GUIDE 진입
+    assert env.node.state == State.GUIDE
+
+    env.tf.pose = (7.0, 8.0)
+    run(env, 1.0, EMPTY)
+    assert env.node.last_seen == (7.0, 8.0), \
+        '재무장 뒤 무검출 구간에서도 갱신된다 — 검출 증거가 아니다'

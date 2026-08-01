@@ -499,6 +499,9 @@ class MissionNode(Node):
 
         # --- 상태머신 내부 변수 ---
         self.state = State.PATROL
+        # ★ 직전 tick 이 '실제로 분기시킨' 상태 (08-01 검토 §26 P1 — GUIDE 진입 감지용).
+        #   resume_state(FAULT 복귀 목적지)와 혼동 금지: 이건 순수한 전이 감지 재료다.
+        self._prev_tick_state = None
         self.patrol_idx = 0
         # ★ goal 수명주기(전송·수락·취소확인·결과감시·stale 세대 구분·유도정지
         #   종결 직렬화)는 전부 GoalManager 소유 (07-23 구조 분리 2/3).
@@ -536,7 +539,17 @@ class MissionNode(Node):
         # --- SEARCH_BACK 관리 ---
         self.search_attempts = 0        # 역행 시도 횟수 (안전장치 ①)
         self.give_up = False            # 제한 초과 → 단독 탈출 모드
-        self.last_seen = None           # 마지막 목격 시점의 로봇 map 좌표 (x, y)
+        # ★ last_seen 의 실제 의미 (08-01 검토 §26 P2 정정 — 구 주석은 '마지막 목격
+        #   시점의 좌표'라고 했으나 코드와 다르다): **역행 목표의 근사값으로 쓰는
+        #   로봇 자신의 map 좌표**이며, 갱신 조건은 "이번 GUIDE 세대에서 놓침이
+        #   확정되기 전 · /scan 이 신선한 tick"이다. 검출 성공의 증거가 아니다 —
+        #   ① 검출이 끊긴 뒤에도 lost 확정 직전까지 갱신되고(그래서 첫 놓침의 목표는
+        #      마지막 검출 지점보다 최대 lost_sec×guide_speed 만큼 앞선다),
+        #   ② 세대 재무장(GUIDE 진입 · SEARCH_BACK 복귀 2곳) 뒤에는 실제 재검출이
+        #      0건이어도 갱신된다.
+        #   근사가 허용되는 이유는 추종자가 ~1.2m 뒤라는 전제뿐이다. 이 값을
+        #   '사람을 봤다'는 관측 증거로 읽고 상태 전이를 만들면 안 된다.
+        self.last_seen = None           # (x, y) — 위 규약대로만 해석할 것
         self.search_goal = None         # 이번 역행의 목표
         self.refind_since = None        # 역행 목표 도착 후 재탐색 대기 시작 시각
 
@@ -631,6 +644,44 @@ class MissionNode(Node):
         b = Bool()
         b.data = self.siren_on
         self.siren_pub.publish(b)
+
+        # ★ GUIDE 진입 = 추종 관측 '세대'의 시작 (08-01 검토 §26 P1 봉합)
+        #   ─────────────────────────────────────────────────────────────
+        #   결함: 놓침 타이머(FollowerMonitor._last_seen_t)는 상태 경계를
+        #   모른다. /scan 은 상태와 무관하게 계속 들어오므로(on_scan) GUIDE 로
+        #   들어오는 순간 타이머가 이미 '남의 상태에서' 만료돼 있을 수 있다.
+        #   그러면 GUIDE 첫 tick 이 lost=True 로 시작한다 — 아래 GUIDE 분기는
+        #   lost 를 '먼저' 읽고 그 뒤에만 기록하므로(elif) TF 가 멀쩡해도
+        #   record_last_seen() 호출 기회가 **0회**다. 그 상태에서 ②′ 안전망은
+        #   last_seen is None 을 "GUIDE 내내 TF 가 안 풀렸다"로 오분류해
+        #   예산 2회를 3 tick 만에 태우고 give_up(단독 탈출)으로 넘어간다.
+        #   실측(검토 §26.2 재현): 전환 후 1.5초 만에 SEARCH_BACK **0회**로
+        #   attempts 2/2 소진 · tf_calls 0 — 역행 한 번 없이 사람을 버렸다.
+        #   반대 경계도 같은 뿌리다: GATHER 부터 한 프레임도 못 본 경우
+        #   _last_seen_t 가 None 이라 lost 가 **영원히 False** → 역행도 보고도
+        #   열리지 않고 escape 만 계속된다.
+        #   ─────────────────────────────────────────────────────────────
+        #   불변조건: **놓침 판정은 그 GUIDE 구간에서 관측한 시간으로만 한다.**
+        #   왜 진입 경로마다가 아니라 여기 한 곳인가 — 아래 저속 fail-closed
+        #   게이트가 이미 같은 논증을 했다(경로를 세지 말고 '시작하는 지점'을
+        #   막는다). grep 전수로 GUIDE 로 들어오는 자리는 4곳이고
+        #   (SEARCH_BACK 재발견 · SEARCH_BACK 대기실패 · GATHER 저속확인 콜백 ·
+        #   FAULT resume_state 복귀) 그중 재무장하던 곳은 2곳뿐이었다.
+        #   전이 감지로 걸면 남은 2곳과 **앞으로 생길 경로**가 자동으로 덮인다.
+        #   관제 reset 은 last_seen 만 비우고 모니터를 안 건드렸는데, 다음 임무의
+        #   GUIDE 진입이 여기를 지나므로 그 잔재도 같이 닫힌다.
+        #   ⚠ 'any' 만 재무장한다 — GUIDE 추종감시가 쓰는 zone 이 'any' 하나다.
+        #   ⚠ 사용자 정책 결정 (08-01): 한 번도 못 본 경우도 **다른 놓침과 동일
+        #     취급**한다. reset 은 _last_seen_t 를 None→now 로 바꾸므로 모니터의
+        #     "본 적 없으면 판단 보류"가 GUIDE 구간에서만 해제된다 — 유도 중의
+        #     '판단 보류'는 곧 무한 방치이기 때문이다. 그 결과 never-seen 은
+        #     역행 2회 → '추종자 확인 불가' 보고 → 단독 탈출로 **유한하게** 끝난다.
+        if self.state == State.GUIDE and self._prev_tick_state != State.GUIDE:
+            self.monitor.reset('any')
+        # 이 tick 이 실제로 분기시킬 상태를 기록한다. 분기 도중 바뀐 상태(예:
+        # SEARCH_BACK→GUIDE)는 다음 tick 에서 '진입'으로 잡힌다 — 그래서 스냅샷을
+        # 분기 '앞'에서 뜬다. (분기 뒤에 뜨면 같은 tick 안의 전이가 삼켜진다.)
+        self._prev_tick_state = self.state
 
         if self.state == State.PATROL:
             if not self.goal_active:
@@ -794,8 +845,15 @@ class MissionNode(Node):
             # ★ ②′ 안전망 (08-01 예약 16): 구판은 여기서 그냥 return 했다.
             #   그러면 시도 횟수가 0 에 고정돼 위 give_up 보고 분기가 영영 안
             #   열린다 = 놓침을 판정하고도 조용히 갇힌다.
-            #   기록 조건을 고친 뒤에도 이 자리가 열리는 경우가 하나 남는다:
-            #   GUIDE 내내 TF(map→base_footprint)가 한 번도 안 풀린 경우
+            #   ⚠ 이 자리가 열리는 조건은 08-01 검토 §26 P1 보완으로 **좁아졌다**.
+            #   구판 논증("None = GUIDE 내내 TF 실패")은 그때 반증됐다 — GUIDE 진입
+            #   순간 이미 lost 였으면 TF 가 멀쩡해도 기록 기회가 0회였기 때문이다
+            #   (재현: 전환 후 tf_calls 0 인 채 1.5초 만에 예산 소진).
+            #   지금은 tick 의 GUIDE 진입 초크포인트가 세대를 재무장하므로
+            #   진입 첫 tick 은 반드시 lost=False 로 시작한다 → 그 tick 에서
+            #   record_last_seen 이 호출된다. /scan 두절 중에는 lost 자체가 False 라
+            #   여기 못 오고, 두절이 풀리면 monitor.update 가 다시 재무장한다.
+            #   ⇒ **여기 도달 = 진입 이후 신선한 모든 tick 에서 TF 조회가 실패했다**
             #   (last_seen 은 한 번 기록되면 관제 reset 전엔 None 으로 안 돌아간다).
             #   그건 순간 딸꾹질이 아니라 Nav2 주행 자체가 불가능한 상태이므로
             #   '실패한 시도'로 예산을 소모하고, 소진되면 위 보고 경로로 빠진다.
@@ -837,7 +895,13 @@ class MissionNode(Node):
         self.state = State.SEARCH_BACK
 
     def record_last_seen(self):
-        """추종자가 보이는 동안 로봇의 map 좌표를 기록 (추종자는 ~1.2m 뒤 = 근사 충분)."""
+        """역행 목표의 근사값으로 쓸 **로봇 자신의** map 좌표를 기록.
+
+        ⚠ 이름이 'last_seen' 이지만 호출 조건은 '검출 중'이 아니다 (08-01 §26 P2):
+        호출자(GUIDE 분기)의 조건은 `not lost and not scan_stale` 이므로
+        검출이 끊긴 뒤에도 놓침 확정 직전까지, 세대 재무장 직후에는 실제 재검출
+        0건에도 갱신된다. 규약 전문 = `self.last_seen` 선언부 주석.
+        근사가 성립하는 전제는 '추종자는 ~1.2m 뒤'뿐이다."""
         try:
             t = self.tf_buffer.lookup_transform('map', 'base_footprint',
                                                 rclpy.time.Time())

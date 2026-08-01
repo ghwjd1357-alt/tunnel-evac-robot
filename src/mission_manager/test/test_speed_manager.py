@@ -58,6 +58,10 @@ def make_env(ready=True, state=State.GATHER, timeout=30.0):
     node.get_logger = lambda: logger
     node._logs = logs
     node.state = state
+    # tick() 의 GUIDE 진입 초크포인트가 읽는 전이 감지 재료 (08-01 §26 P1).
+    # 같은 값 = "이 상태로 이미 진행 중" — 이 하네스는 진입 전이를 재현하지 않는다
+    # (진입 경계 검사는 test_search_back_entry.py 담당).
+    node._prev_tick_state = state
     node._guide_pending = False
     node._faults = []
     node._cancels = []
