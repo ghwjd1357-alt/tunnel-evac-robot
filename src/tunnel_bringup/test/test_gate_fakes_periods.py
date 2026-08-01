@@ -22,11 +22,27 @@ test_gate_fakes_periods.py — 가짜 센서 '주기'가 실물과 같은지, �
   → `Hz` 정규식 대신 **의존 폐포**(그 값을 만드는 정의가 전부 블록 안인가)를 본다.
   → 반례 4종을 **영구 부정 회귀**로 박제한다 (한 번 해보고 마는 것은 또 뚫린다).
 
+[★ 08-01 검토 §22 보완 — 같은 실수가 한 겹 더 있었다]
+  §21 보완도 불승인됐다. 검토자가 세 가지 거짓 PASS 를 실행으로 재현했고, 전부 재현됐다:
+    ① 폐포가 **뿌리 자신의 위치**를 안 봤다 → `SENSOR_PERIODS` 표를 통째로 블록 밖으로
+       옮겨도 "밖에 0건". 정본 블록이 텅 비어도 녹색이었다.
+    ② 자유변수 계산이 `ast.walk()` 로 모든 `Store` 를 평평하게 걷어 "지역"으로 쳤다.
+       그런데 comprehension·중첩 함수·lambda·class 본문은 **각각 다른 스코프**다 —
+       이름을 가리면 블록 밖 값을 읽으면서도 통과했다 (검토자가 실행으로 증명).
+    ③ 분류 허용치 ±8ms 하나가 **두 일을 겸했다**. 순서 분류에 필요한 여유가 같은 열
+       안의 +7ms 체계 편향을 통째로 승인했다 (생산 `period_ns()` 변이로 3/3 거짓 PASS).
+  근인은 §21 과 **같은 모양**이다 — 언어/생산의 의미론을 테스트 안에 다시 구현한 것.
+  이번엔 스코프 규칙을 '더 정확히 다시 짜는' 길을 택하지 않는다:
+  → 스코프 판단을 표준 라이브러리 **`symtable`(= CPython 자신)** 에 **물어본다**.
+  → 뿌리도 위치 검사 대상에 넣고, 정적 분석이 못 보는 문법은 **fail-closed** 한다.
+  → 순서 계약과 **시간 편향 계약**을 분리한다 (잔차 중앙값, 임계 근거는 아래 상수).
+
 [이 파일이 지키는 것 — 값이 아니라 '갈라질 자리']
   1. IMU 주기 열이 **실측 5통계를 재현**하는가 (평균·min·max·σ·창)  — 순수 계산
   2. 등간격으로 되돌리면 **깨지는가** (부정 회귀 — 이게 없으면 조용히 되돌아간다)
   3. **실제 rclpy 타이머**가 계획한 순서대로 콜백을 부르는가 — 생산 배선 통과
-  4. 주기 값을 만드는 정의가 **정본 블록 안에 닫혀 있는가** (AST 폐포 — 표기 무관)
+  3-b. 그 간격이 계획 대비 **체계적으로 치우치지** 않았는가 (순서와 별개 계약)
+  4. 주기 값을 만드는 정의가 **정본 블록 안에 닫혀 있는가** (폐포 — 표기 무관)
   5. 실측을 못 받은 항목이 **'미확보'로 선언**돼 있는가 (추정으로 채우면 또 다른 거짓 입력)
   6. EKF 주기와의 관계가 **문서에 적힌 그대로**인가 (한쪽이 바뀌면 여기서 걸린다)
 
@@ -48,6 +64,8 @@ import importlib.util
 import os
 import re
 import statistics
+import symtable
+import textwrap
 import time
 
 import rclpy
@@ -72,9 +90,47 @@ UNMEASURED_KEYS = frozenset({'scan', 'odom'})
 #   · 회전대칭이 없어서 '한 칸 어긋남'이 다른 열로 보인다 (그래서 부정 회귀가 산다).
 PROBE_PERIODS_US = (30_000, 90_000, 50_000, 140_000)
 PROBE_STEPS = 10          # 2.5 바퀴 — 되감기(wraparound)까지 덮는다
-MUTATION_STEPS = 4        # 부정 회귀는 첫 바퀴에서 이미 갈라진다
-PROBE_TOL_US = 8_000      # 관측 오차 허용 (값 간격 20ms 의 절반보다 작다)
+MUTATION_STEPS = 4        # 순서 부정 회귀는 첫 바퀴에서 이미 갈라진다
+PROBE_TOL_US = 8_000      # **순서 분류 전용** 허용 (값 간격 20ms 의 절반보다 작다)
 PROBE_DOMAIN_ID = '89'    # 다른 세션의 DDS 와 섞이지 않게 격리
+
+# ★ 08-01 검토 §22 P2-② — 분류 허용치 하나가 두 가지 일을 겸하고 있었다.
+#   최근접 분류는 '관측이 어느 계획값인가'(순서)만 답한다. 그런데 값 간격이 20ms 라
+#   같은 열 안에서 +7ms 씩 **한결같이 늦어도** 분류는 그대로 맞는다 — 실제로 생산
+#   `period_ns()` 에 +7ms 를 주입했더니 순서 검사가 3/3 통과했다(거짓 PASS).
+#   그래서 **시간 정확도**를 별도 계약으로 뽑는다: 부호 있는 잔차의 **중앙값**.
+#   중앙값을 쓰는 이유 = 스케줄러가 한 번 튀어도 안 흔들리고 지속적 편향에만 반응한다.
+#
+#   임계값 3.0ms 의 근거는 임의 숫자가 아니라 **안전량**이다: 실측 IMU 최대 간격 30ms 와
+#   EKF 주기 33.33ms 의 여유가 3.33ms 다(아래 §4 가 감시하는 그 관계). 즉 이 임계를
+#   넘는 편향은 '실측 최대를 EKF 한 주기 밖으로 밀 수 있는 크기'다.
+#
+#   [08-01 측정] 무변이 편향을 8회씩 쟀다 — 무부하 |편향| 최대 **0.137ms**,
+#   16 코어를 전부 점유한 부하 아래에서도 **0.165ms**. 단일 표본이 2.3ms 튄 회차에도
+#   중앙값은 0.137ms 에 머물렀다(중앙값을 쓴 이유가 이것이다). 즉 임계 3.0ms 는
+#   **잡음이 정한 값이 아니라 안전 의미가 정한 값**이고, 잡음 대비 18 배 여유가 있다.
+#   ⚠ 그래서 남는 구멍: 0.2~3.0ms 사이의 체계적 편향은 **의도적으로 통과시킨다.**
+#     더 조일 수도 있지만(잡음만 보면 1ms 도 가능) 이 회귀는 Jetson(aarch64)에서도
+#     돌고 거기 타이머 잡음은 **아직 못 쟀다.** 간헐 실패하는 게이트는 결국 꺼지므로
+#     구멍보다 나쁘다. 재개방 조건 = Jetson 에서 같은 측정을 하면 임계를 다시 정한다.
+BIAS_TOL_US = 3_000
+BIAS_SHIFT_US = 7_000     # 부정 회귀가 주입하는 편향 크기 (§22 검토자의 반례와 같은 값)
+
+# ★ 08-01 검토 §22 P2-① — 정적 분석이 원리적으로 못 보는 자리.
+#   아래가 정본 블록 안에 나타나면 폐포 검사는 **참을 증명할 수 없으므로 멈춘다**(fail-closed).
+#   `global` 은 함수 안에서 모듈 이름을 새로 묶어 아래 바인딩 지도를 무력화하고,
+#   `eval`/`globals()` 류는 이름을 실행 시각에 만든다. 조용히 통과시키는 것이 결함이다.
+DYNAMIC_ESCAPES = frozenset({'eval', 'exec', 'globals', 'locals', 'vars', '__import__'})
+
+# 폐포가 **반드시 닿아야 하는** 뿌리들 — 하나라도 안 닿으면 검사가 헛돈 것이다.
+CLOSURE_ANCHORS = ('PeriodPlan', '_build_imu_periods', 'IMU_MAX_US',
+                   'SCAN_PERIOD_US', 'ODOM_PERIOD_US', 'EKF_FREQUENCY_HZ')
+
+# 스코프를 여는 문법 — 이 안쪽 이름은 모듈 전역 읽기가 아니다.
+# ★ 여기서 스코프 '규칙'을 다시 구현하지 않는다. 구조 판별에만 쓰고, 이름이 어느
+#   스코프에 묶이는가는 전부 `symtable`(= CPython 자신)에 묻는다. 아래 `_outside_names` 참고.
+_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+                ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
 def _load_fakes(path=_FAKES_PATH):
@@ -172,12 +228,33 @@ def _nearest_planned(observed_us, periods_us):
     return best if abs(best - observed_us) <= PROBE_TOL_US else None
 
 
-def _real_timer_follows_plan(gf, steps=PROBE_STEPS):
-    """실제 타이머가 계획 열을 그대로 냈는가 (부정 회귀가 이 함수의 False 를 요구한다)."""
+def _real_timer_report(gf, steps=PROBE_STEPS):
+    """
+    실제 타이머 관측을 **두 계약으로 나눠** 돌려준다 (§22 P2-② 보완).
+
+      order_ok — 관측 열이 계획 열과 **같은 순서**인가 (최근접 분류)
+      bias_us  — 계획 대비 부호 있는 잔차의 **중앙값** = 체계적으로 늦는가/빠른가
+
+    두 계약을 한 숫자로 묶으면 안 되는 이유: 분류 허용치는 값 간격(20ms)에서 나오므로
+    같은 열 안의 +7ms 편향을 전부 승인한다. 순서는 맞는데 시간이 틀린 상태가 그것이다.
+    """
     observed = _observe_real_intervals(gf, steps=steps)
-    classified = [_nearest_planned(v, PROBE_PERIODS_US) for v in observed]
     expected = [PROBE_PERIODS_US[i % len(PROBE_PERIODS_US)] for i in range(len(observed))]
-    return classified == expected, observed, expected
+    classified = [_nearest_planned(v, PROBE_PERIODS_US) for v in observed]
+    bias_us = statistics.median(o - e for o, e in zip(observed, expected))
+    return classified == expected, bias_us, observed, expected
+
+
+def _real_timer_follows_plan(gf, steps=PROBE_STEPS):
+    """순서 계약만 — 부정 회귀(커서·setter 4종)가 이 함수의 False 를 요구한다."""
+    order_ok, _, observed, expected = _real_timer_report(gf, steps=steps)
+    return order_ok, observed, expected
+
+
+def _shifted_period_source(shift_us):
+    """생산 `period_ns()` 가 모든 후속 주기를 shift_us 만큼 밀도록 만드는 변이 앵커."""
+    anchor = 'return self.periods_us[index % len(self.periods_us)] * 1000'
+    return anchor, f'{anchor} + ({shift_us * 1000})'
 
 
 # ============================================================
@@ -199,10 +276,28 @@ def _block_bounds(src):
     return starts[0], ends[0]
 
 
+def _module_statements(tree):
+    """
+    모듈 수준에서 **실행되는** 문장 전부 — `if`/`try`/`for`/`with` 안까지 들어간다.
+
+    ★ 08-01 검토 §22 보완(자체 발견). 예전에는 `tree.body` 한 겹만 봐서, 모듈 수준
+      `try:` 안의 정의가 지도에 안 잡혔다. 같은 이름이 위에도 있으면 **엉뚱한 노드의
+      줄 번호**를 검사하게 된다. 함수·클래스 **안쪽**은 모듈 수준이 아니므로 안 들어간다.
+    """
+    out = []
+    for node in tree.body:
+        out.append(node)
+        if not isinstance(node, _SCOPE_NODES):
+            for sub in ast.walk(node):
+                if sub is not node and isinstance(sub, ast.stmt):
+                    out.append(sub)
+    return out
+
+
 def _module_bindings(tree):
     """모듈 수준에서 이름을 묶는 노드 전부 (대입·함수·클래스·import)."""
     out = {}
-    for node in tree.body:
+    for node in _module_statements(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 for sub in ast.walk(target):
@@ -218,21 +313,56 @@ def _module_bindings(tree):
     return out
 
 
-def _free_names(node):
-    """이 정의가 **바깥에서 끌어오는** 이름만 (인자·지역변수·컴프리헨션 변수는 뺀다)."""
-    bound = set()
+def _outside_names(node):
+    """
+    이 정의가 **모듈 전역에서 읽는** 이름. 스코프 판단은 전부 CPython 에 맡긴다.
+
+    ★ 08-01 검토 §22 P2-① 의 근인과 그 처방.
+      초판은 `ast.walk()` 로 모든 `Store` 를 평평하게 걷어 "지역변수"로 쳤다. 그런데
+      Python 3 에서 comprehension·lambda·중첩 함수·class 본문은 **각각 다른 스코프**다.
+      그래서 `[X for X in ()]` 뒤의 `return X` 가 블록 밖 전역을 읽는데도 검사기는
+      지역으로 오인해 통과시켰다 (검토자가 실행으로 반증: 실제로 24020 을 읽었다).
+
+      고치는 방법으로 '스코프 규칙을 더 정확히 다시 구현'하는 길은 택하지 않는다.
+      그건 §21 에서 불승인된 `_simulate_rcl_timer()` 와 **같은 실수**다 — 생산/언어의
+      의미론을 테스트 안에 재구현하면, 검사기는 자기가 푼 답을 채점하게 된다.
+      대신 표준 라이브러리 `symtable`(= 인터프리터가 스코프를 컴파일할 때 쓰는 그 구현)
+      에 **물어본다**. 정의를 probe 함수로 감싸 넘기면, 모듈 전역 읽기만
+      `is_global()` 로 표시돼 나온다 — 근사가 아니라 CPython 의 답이다.
+    """
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        # 대입은 **오른쪽만** 넘긴다. 왼쪽(대상)을 같이 넣으면 probe 안에서 지역이 돼
+        # `X = X + 1` 류의 자기참조 읽기가 사라진다.
+        if node.value is None:
+            return set()
+        segment = ast.unparse(node.value)
+    else:
+        segment = ast.unparse(node)
+
+    probe = symtable.symtable('def __probe__():\n' + textwrap.indent(segment, '    '),
+                              'closure_probe.py', 'exec')
+
+    def collect(table):
+        names = {sym.get_name() for sym in table.get_symbols()
+                 if sym.is_referenced() and sym.is_global()}
+        for child in table.get_children():
+            names |= collect(child)
+        return names
+
+    return collect(probe)
+
+
+def _dynamic_escapes(node):
+    """정적 분석이 못 보는 문법이 이 정의 안에 있는가 (있으면 fail-closed)."""
+    found = set()
     for sub in ast.walk(node):
-        if isinstance(sub, ast.arg):
-            bound.add(sub.arg)
-        elif isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
-            bound.add(sub.id)
-        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(sub.name)
-        elif isinstance(sub, ast.ExceptHandler) and sub.name:
-            bound.add(sub.name)
-    used = {sub.id for sub in ast.walk(node)
-            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)}
-    return used - bound
+        if isinstance(sub, (ast.Global, ast.Nonlocal)):
+            found.add('global' if isinstance(sub, ast.Global) else 'nonlocal')
+        elif isinstance(sub, ast.Name) and sub.id in DYNAMIC_ESCAPES:
+            found.add(sub.id + '()')
+        elif isinstance(sub, ast.ImportFrom) and any(a.name == '*' for a in sub.names):
+            found.add('import *')
+    return found
 
 
 def _period_closure(tree):
@@ -241,12 +371,17 @@ def _period_closure(tree):
     roots = bindings.get('SENSOR_PERIODS')
     assert roots, 'SENSOR_PERIODS 를 못 찾음 — 이름이 바뀌었다면 이 회귀도 같이 고칠 것'
 
+    # ★ 08-01 검토 §22 P2-① — 뿌리도 **위치 검사 대상**이다.
+    #   예전에는 뿌리를 큐에만 넣고 결과에는 안 넣어서, `SENSOR_PERIODS = {...}` 를
+    #   통째로 블록 밖으로 옮기면 "밖에 0건"으로 거짓 통과했다 (검토자 반례).
+    reached = [('SENSOR_PERIODS', node) for node in roots]
     queued = {id(node) for node in roots}
     queue = list(roots)
-    reached, unknown = [], set()
+    unknown, escapes = set(), set()
     while queue:
         node = queue.pop()
-        for name in _free_names(node):
+        escapes |= _dynamic_escapes(node)
+        for name in _outside_names(node):
             if name in bindings:
                 for definition in bindings[name]:
                     if id(definition) not in queued:
@@ -255,13 +390,17 @@ def _period_closure(tree):
                         queue.append(definition)
             elif not hasattr(builtins, name):
                 unknown.add(name)
-    return reached, unknown
+    return reached, unknown, escapes
 
 
 def _assert_period_definitions_closed(src):
     """주기 값을 만드는 정의가 전부 정본 블록 안인지 — 아니면 AssertionError."""
     start, end = _block_bounds(src)
-    reached, unknown = _period_closure(ast.parse(src))
+    reached, unknown, escapes = _period_closure(ast.parse(src))
+
+    assert not escapes, (
+        '주기 계산이 정적 분석으로 따라갈 수 없는 문법에 기댄다: ' + ', '.join(sorted(escapes))
+        + '\n  이 검사는 여기서 **멈춘다**(fail-closed). 조용히 통과시키는 것이 결함이다.')
 
     assert not unknown, (
         '주기 계산이 정체불명 이름에 기댄다 (빌트인도 모듈 정의도 아님): '
@@ -275,8 +414,7 @@ def _assert_period_definitions_closed(src):
 
     # ★ 검사가 헛돌지 않는지 — 폐포가 실제로 네 센서의 뿌리까지 닿았는가.
     names = {name for name, _ in reached}
-    for required in ('PeriodPlan', '_build_imu_periods', 'IMU_MAX_US',
-                     'SCAN_PERIOD_US', 'ODOM_PERIOD_US', 'EKF_FREQUENCY_HZ'):
+    for required in CLOSURE_ANCHORS:
         assert required in names, f'폐포가 {required} 에 닿지 않았다 — 이 검사가 헛돌고 있다'
 
 
@@ -284,6 +422,30 @@ def _assert_period_definitions_closed(src):
 # C. 변이 주입 — 반례를 **영구 회귀**로 박제한다
 #    (한 번 손으로 해보고 마는 반례는 다음 회차에 또 뚫린다)
 # ============================================================
+def _source_with(replacements, src=None):
+    """
+    원본에 문자열 변이를 넣은 **소스 문자열**을 준다 (앵커가 1회가 아니면 크게 실패).
+
+    파일로 안 떨구는 이유: AST 검사는 소스만 있으면 되고, 썼다가 다시 읽는 왕복은
+    변이가 실제로 적용됐는지를 흐린다. 문법 유효성은 `compile()` 로 여기서 확인한다.
+    """
+    out = _source() if src is None else src
+    for old, new in replacements:
+        assert out.count(old) == 1, f'변이 앵커가 정확히 1회가 아니다: {old!r} — 회귀를 같이 고칠 것'
+        out = out.replace(old, new)
+    compile(out, 'mutated_gate_fakes.py', 'exec')   # 파싱만 되는 변이는 반례가 못 된다
+    return out
+
+
+def _closure_rejects(src):
+    """폐포 검사가 이 소스를 거부하는가 — 거부하면 그 사유(문자열)를, 통과하면 None."""
+    try:
+        _assert_period_definitions_closed(src)
+    except AssertionError as exc:
+        return str(exc)
+    return None
+
+
 def _mutate(tmp_path, name, replacements=(), inserts=()):
     """`gate_fakes.py` 사본에 변이를 넣고 경로를 준다. 앵커가 없으면 **크게 실패**한다."""
     src = _source()
@@ -430,6 +592,49 @@ def test_negative_setter_reading_other_plan_breaks_the_real_timer(tmp_path):
     assert not ok, f'다른 센서의 계획을 읽는데도 통과한다: {observed}'
 
 
+def test_real_timer_has_no_systematic_period_bias():
+    """
+    ★ 역회귀 — 관측 간격이 계획보다 **한결같이 늦거나 빠르지** 않다 (§22 P2-② 보완).
+
+    위 순서 검사와 **다른 계약**이다. 순서는 '어느 계획값인가'만 보므로, 값 간격
+    20ms 안에서 매번 +7ms 늦어도 통과한다. 여기서는 부호 있는 잔차의 중앙값을 본다.
+    """
+    _, bias_us, observed, expected = _real_timer_report(_load_fakes())
+    assert abs(bias_us) <= BIAS_TOL_US, (
+        f'주기가 계획 대비 체계적으로 {bias_us / 1000:+.2f}ms 치우쳤다 '
+        f'(허용 ±{BIAS_TOL_US / 1000:.1f}ms)\n  관측(us): {observed}\n  계획(us): {expected}')
+
+
+def test_negative_late_period_survives_order_but_fails_bias(tmp_path):
+    """
+    ★ 부정 회귀 — 생산 `period_ns()` 가 매번 +7ms 늦으면 **시간 계약**이 깨진다.
+
+    §22 검토자의 직접 반례다. 이 변이는 순서 검사를 3/3 통과했다(거짓 PASS) —
+    분류가 20ms 간격이라 +7ms 로는 다른 열로 안 넘어가기 때문이다.
+    같은 편향이 실측 대표열에 생기면 최대 간격이 30 → 37ms 로 EKF 주기 33.33ms 를
+    넘어, 정본이 감시하는 3.33ms 여유가 사라진다. 그래서 이건 안전 관계를 뒤집는다.
+
+    ★ 여기서 순서 계약은 단언하지 않는다. 7ms 편향은 분류 허용치 8ms 의 **경계 근처**라
+      지터에 따라 순서가 깨지기도 한다 — 그걸 단언하면 간헐 실패하는 게이트가 되고,
+      간헐 실패하는 게이트는 결국 꺼지므로 구멍보다 나쁘다. 이 반례가 지는 계약은
+      '편향을 잡는가' 하나다. ("순서만으로는 못 잡는다"는 §22 검토자가 3/3 로 재현했다.)
+    """
+    path = _mutate(tmp_path, 'late', replacements=(_shifted_period_source(BIAS_SHIFT_US),))
+    _, bias_us, observed, _ = _real_timer_report(_load_fakes(path))
+    assert abs(bias_us) > BIAS_TOL_US, (
+        f'주기를 매번 +{BIAS_SHIFT_US / 1000:.0f}ms 늦췄는데 편향 계약이 통과한다 '
+        f'(측정 {bias_us / 1000:+.2f}ms): {observed}')
+
+
+def test_negative_early_period_fails_the_bias_contract(tmp_path):
+    """★ 부정 회귀 — 같은 크기로 **빨라지는** 편향도 잡는다 (증가·감소 양쪽 잠금)."""
+    path = _mutate(tmp_path, 'early', replacements=(_shifted_period_source(-BIAS_SHIFT_US),))
+    _, bias_us, observed, _ = _real_timer_report(_load_fakes(path))
+    assert abs(bias_us) > BIAS_TOL_US, (
+        f'주기를 매번 -{BIAS_SHIFT_US / 1000:.0f}ms 당겼는데 편향 계약이 통과한다 '
+        f'(측정 {bias_us / 1000:+.2f}ms): {observed}')
+
+
 # ============================================================
 # 3. 갈라질 자리 봉쇄 — 목록과 구현이 어긋날 곳을 기계가 없앤다
 # ============================================================
@@ -497,6 +702,111 @@ def test_negative_period_from_outside_helper_is_caught(tmp_path):
         except AssertionError:
             continue
         raise AssertionError(f'{name} 를 블록 밖 헬퍼가 공급하는데 검사가 통과했다')
+
+
+def test_negative_root_table_moved_outside_the_block_is_caught():
+    """
+    ★ 부정 회귀 — `SENSOR_PERIODS` **표 자체**를 블록 밖으로 옮기면 반드시 걸린다.
+
+    §22 P2-① 검토자 반례. 예전 폐포는 뿌리를 '출발점'으로만 쓰고 위치는 안 봤다.
+    그래서 표를 통째로 블록 끝 뒤로 옮겨도 "밖에 있는 정의 0건"으로 거짓 통과했다 —
+    정본 블록이 텅 비어도 녹색이 나오는 상태였다.
+    """
+    src = _source()
+    match = re.search(r'^SENSOR_PERIODS = \{.*?^\}\n', src, re.S | re.M)
+    assert match, 'SENSOR_PERIODS 대입을 못 찾음 — 모양이 바뀌었다면 이 회귀도 같이 고칠 것'
+    moved = _source_with(((f'# {_BLOCK_END}', f'# {_BLOCK_END}\n\n\n' + match.group(0)),),
+                         src=src[:match.start()] + src[match.end():])
+
+    reason = _closure_rejects(moved)
+    assert reason, '주기 정본 표를 블록 밖으로 옮겼는데 폐포 검사가 통과했다'
+    assert 'SENSOR_PERIODS' in reason, f'거부는 했는데 사유가 뿌리 이동이 아니다:\n{reason}'
+
+
+# 블록 밖 값을 '지역변수처럼 보이게' 가리는 네 가지 스코프 — 전부 같은 결함 클래스다.
+# ★ 초판의 평평한 `ast.walk()` 는 넷 다 지역으로 오인했다. 넷을 각각 박제하는 이유는
+#   §19 의 불승인 근인이 "검토가 준 목록을 항목별로 대조하지 않은 것"이었기 때문이다.
+SCOPE_SHADOWS = {
+    'comprehension': '    _ = [LEAKED_VALUE for LEAKED_VALUE in ()]\n'
+                     '    return LEAKED_VALUE\n',
+    'nested-function': '    def _inner():\n'
+                       '        LEAKED_VALUE = 0\n'
+                       '        return LEAKED_VALUE\n'
+                       '    _inner()\n'
+                       '    return LEAKED_VALUE\n',
+    'lambda-argument': '    _ = (lambda LEAKED_VALUE: LEAKED_VALUE)(0)\n'
+                       '    return LEAKED_VALUE\n',
+    'class-body': '    class _Holder:\n'
+                  '        LEAKED_VALUE = 0\n'
+                  '    _Holder()\n'
+                  '    return LEAKED_VALUE\n',
+}
+
+
+def test_negative_outside_value_hidden_by_scope_shadowing_is_caught():
+    """
+    ★ 부정 회귀 — 블록 **밖** 값을 이름 가림으로 숨겨도 반드시 걸린다 (네 스코프 전부).
+
+    §22 P2-① 검토자 반례와 그 이웃들. Python 3 에서 comprehension·중첩 함수·lambda·
+    class 본문은 각각 다른 스코프라, 그 안의 대입은 바깥 이름을 **가리지 않는다.**
+    검토자는 실행으로 반증했다 — `return LEAKED_VALUE` 가 실제로 블록 밖 24020 을 읽는데
+    검사기는 "지역변수"로 보고 통과시켰다.
+    이제 스코프 판단을 `symtable`(CPython 자신)에 맡기므로 넷 다 걸려야 한다.
+    """
+    for label, body in SCOPE_SHADOWS.items():
+        mutated = _source_with((
+            (f'# {_BLOCK_START}', f'LEAKED_VALUE = 24_020\n\n\n# {_BLOCK_START}'),
+            ('def _build_imu_periods():',
+             f'def _leaked_value():\n{body}\n\ndef _build_imu_periods():'),
+            ('rest = [IMU_MEAN_US + d for d in jitter]',
+             'rest = [IMU_MEAN_US + _leaked_value() + d for d in jitter]'),
+        ))
+        reason = _closure_rejects(mutated)
+        assert reason, f'{label} 로 가린 블록 밖 값이 폐포를 통과했다'
+        assert 'LEAKED_VALUE' in reason, \
+            f'{label}: 거부는 했는데 사유가 블록 밖 값이 아니다 (검사가 다른 데서 깨졌다):\n{reason}'
+
+
+def test_negative_dynamic_name_lookup_is_fail_closed():
+    """
+    ★ 부정 회귀 — 이름을 **실행 시각에** 만들면 검사기가 멈춘다 (조용히 통과하지 않는다).
+
+    정적 분석으로 `globals()['X']` 를 따라가는 것은 원리적으로 불가능하다. 여기서
+    할 수 있는 정직한 최선은 "못 본다"를 **크게 말하는 것**이다. 이 단언이 없으면
+    폐포 검사는 이 경로에서 아무것도 못 보고 녹색을 준다 — 그게 예약 18 의 결함 모양이다.
+    """
+    mutated = _source_with((
+        (f'# {_BLOCK_START}', f'LEAKED_VALUE = 24_020\n\n\n# {_BLOCK_START}'),
+        ('def _build_imu_periods():',
+         "def _leaked_value():\n    return globals()['LEAKED_VALUE']\n\n\n"
+         'def _build_imu_periods():'),
+        ('rest = [IMU_MEAN_US + d for d in jitter]',
+         'rest = [IMU_MEAN_US + _leaked_value() + d for d in jitter]'),
+    ))
+    reason = _closure_rejects(mutated)
+    assert reason, '동적 이름 조회를 폐포가 조용히 통과시켰다'
+    assert 'globals()' in reason, f'거부 사유가 동적 조회가 아니다:\n{reason}'
+
+
+def test_period_docstring_describes_the_real_timer_regression():
+    """
+    ★ 문서 대조 — 생산 설명이 **현행** 회귀를 가리킨다 (§22 P2-③ 보완).
+
+    §21 에서 `_simulate_rcl_timer()` 를 지웠는데 독스트링은 "회귀가 시뮬레이터로 다시
+    대조한다"를 현재형으로 남겨 뒀다. 런타임 영향은 없지만, 유지보수자가 그 문장을 읽고
+    **테스트 안 시뮬레이터를 정상 설계로 되돌릴 수 있다** — 이번 근인이 바로 그것이다.
+    초판 결함의 '역사' 설명은 반대로 반드시 남아 있어야 한다.
+    """
+    fn = next(node for node in ast.walk(_fake_sensors_class())
+              if isinstance(node, ast.FunctionDef) and node.name == '_advance_imu_period')
+    doc = ast.get_docstring(fn) or ''
+
+    assert '시뮬레이터로 다시 대조' not in doc, \
+        '삭제된 시뮬레이터를 아직 현행 검사로 설명한다 — 현재형 서술을 고칠 것'
+    assert 'rclpy executor' in doc, \
+        '현행 회귀(실제 FakeSensors + rclpy executor 관측)를 설명하지 않는다'
+    assert '§21' in doc, \
+        '초판 결함의 역사 설명이 사라졌다 — 근거가 없으면 같은 설계로 되돌아간다'
 
 
 def test_harness_script_timers_stay_outside_the_table_by_convention():
