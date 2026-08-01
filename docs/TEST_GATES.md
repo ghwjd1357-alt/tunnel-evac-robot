@@ -88,6 +88,20 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
   양방향 · `/scan` 두절 중 기록 보류 · `give_up` 단독 탈출 정책 불변).
   ★ 이 파일은 **진짜 `FollowerMonitor` + 진짜 `MissionNode.tick()` + 진짜 `waypoints.yaml`**
   로 돈다 (핸드오프 함정 8 — 흉내 내면 게이트가 아니다). 서사 = `0801_현황.md §3`.
+  → **233 → 241** (`+8`, 08-01 검토 §26 P1·P2 보완 · pytest 170 → 178). 부정 회귀 4
+  (GUIDE 진입 4경로: GATHER 콜백 pre-lost · never-seen · FAULT resume · 관제 reset 잔재)
+  + 역회귀 앵커 4 (SEARCH_BACK 두 복귀 · `last_seen` 실제 의미 2).
+  ⚠ **§26 불승인 사유가 바로 이 파일이었다** — 11건이 전부 `state = GUIDE` 를 손으로 꽂아
+  **진입 경계를 한 번도 실행하지 않았다.** 부품을 다 진짜로 바꿔도 **자리가 가짜면** 게이트가
+  아니다. 지금은 `make_env(state=State.GATHER)` + 진짜 `_on_guide_speed_ok()` 로 전이시킨다.
+  → **241 → 245** (`+4`, 08-02 검토 §27 P1·P2 보완 · pytest 178 → 182). 부정 회귀 3
+  (스캔 이력 0 → 첫 유효 EMPTY 가 예산을 안 깎음 · 그 경계에서 실제 역행 2회 후 보고 ·
+  `reset()` 계약 대조) + 역회귀 앵커 1 (첫 유효 스캔이 **사람**인 경우).
+  ★ 새 헬퍼 `tick_only()` 가 이 회차의 핵심이다 — `run()` 이 매 스텝 `monitor.update()` 를
+  불러서 **"센서가 아직 한 번도 안 살아난"** 구간이 회귀에 **원리적으로 등장할 수 없었다**.
+  결함은 코드가 아니라 **하네스의 암묵 전제** 안에 있었다.
+  ⚠ `reset()` 계약 검사(sb23)의 **알려진 사각** = 주석 잔존 소실 (`MASTER_PLAN.md §7` 예약 20).
+  서사 = `0801_현황.md §10`~`§18`.
 ★ 07-30 증분 = `tunnel_bringup` **+23** (게이트 판정 단위 **20** + lint 3, 그중 copyright 1건 skip).
   1차 보완이 181(단위 13), 2차 보완이 **188**(단위 20 — lifecycle 세대 3 + TF 갱신 4 추가).
 pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/` 에 있어 `colcon test` 로만 돈다
