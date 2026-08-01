@@ -682,14 +682,36 @@ class MissionNode(Node):
             #    클러스터 크기 판별로 any 가 신뢰 가능해져 이 수정이 가능해짐)
             if not self.give_up:
                 # watchdog 발동 중이면 판정 자체가 보류 상태 — 관제가 알아야 할 이상
-                if self.monitor.scan_stale():
+                stale = self.monitor.scan_stale()
+                if stale:
                     self.get_logger().warn(
                         '⚠ /scan 끊김 — 추종감시 불가 (유도는 계속)',
                         throttle_duration_sec=5.0)
-                if self.monitor.visible(zone='any'):
-                    self.record_last_seen()       # 보이는 동안 위치 갱신
-                elif self.monitor.lost(zone='any'):
+                # ★ ②′ 술어 불일치 봉합 (08-01 예약 16 — 0730_현황.md §2.5)
+                #   구판은 visible(엄격·1초 연속 검출)이 last_seen 을 '쓰고'
+                #   lost(관대·3초 미검출)가 그걸 '읽었다'. 검출이 깜빡이면
+                #   visible 은 한 번도 참이 안 되는데 lost 는 참이 된다 →
+                #   last_seen=None 인 채 놓침 확정 → enter_search_back 이 조용히
+                #   return → 시도 횟수를 안 깎으니 give_up('관제 보고: 추종자
+                #   확인 불가')에 영영 도달하지 못한다. 그동안 /mission_state 는
+                #   GUIDE 를 계속 발행하고 escape goal 도 살아 있다 =
+                #   "놓친 걸 알면서 돌아가지도 알리지도 않고 혼자 나간다."
+                #   불변조건: 기록은 그 기록을 소비하는 술어와 같은 타이머를 쓴다.
+                #   → last_seen 을 '읽는' 곳은 enter_search_back 하나뿐이고
+                #     (전수 근거 = grep -n "self.last_seen" — 나머지는 초기화 2·
+                #     기록 1) 그 진입 술어가 lost 이므로, 기록 조건도 lost 가
+                #     보는 타이머에 맞춘다. ⚠ 줄번호는 적지 않는다 (곧 어긋난다).
+                #   ⚠ 안전 술어 visible 자체는 건드리지 않는다 (③ 철회) — 그
+                #     비대칭은 버그가 아니라 설계다("따라온다" 오판 = 사람 유기).
+                #     last_seen 은 로봇 자기 좌표 저장일 뿐 안전 판단이 아니라서
+                #     1초 연속 검출로 잠글 이유가 없었던 것뿐이다.
+                #   ⚠ stale 중엔 기록도 보류한다: lost 는 stale 중 False 를 주므로
+                #     'not lost' 만으로 쓰면 라이다가 죽은 동안 목격 지점이 로봇을
+                #     따라 계속 전진해 역행 목표가 무의미해진다.
+                if self.monitor.lost(zone='any'):
                     self.enter_search_back()      # 놓침 확정 → 역행
+                elif not stale:
+                    self.record_last_seen()       # 놓치기 전까지 위치 갱신
 
         elif self.state == State.SEARCH_BACK:
             # 재발견은 zone='any'(전방위) — 역행 중엔 사람이 로봇 '앞'에 있으므로!
@@ -769,7 +791,22 @@ class MissionNode(Node):
                     '⚠ 역행 재시도 소진 — 관제 보고: 추종자 확인 불가. 단독 탈출 계속.')
             return
         if self.last_seen is None:
-            self.get_logger().warn('마지막 목격 지점 없음 — 역행 불가, 유도 계속')
+            # ★ ②′ 안전망 (08-01 예약 16): 구판은 여기서 그냥 return 했다.
+            #   그러면 시도 횟수가 0 에 고정돼 위 give_up 보고 분기가 영영 안
+            #   열린다 = 놓침을 판정하고도 조용히 갇힌다.
+            #   기록 조건을 고친 뒤에도 이 자리가 열리는 경우가 하나 남는다:
+            #   GUIDE 내내 TF(map→base_footprint)가 한 번도 안 풀린 경우
+            #   (last_seen 은 한 번 기록되면 관제 reset 전엔 None 으로 안 돌아간다).
+            #   그건 순간 딸꾹질이 아니라 Nav2 주행 자체가 불가능한 상태이므로
+            #   '실패한 시도'로 예산을 소모하고, 소진되면 위 보고 경로로 빠진다.
+            #   ⚠ 아래 화재 클램프 포기는 여전히 예산을 안 깎는다 (07-06 결정 유지):
+            #     그쪽은 로봇이 움직이면 last_seen 이 갱신돼 회복 가능한 실패지만,
+            #     이쪽은 이번 유도 구간 안에서 회복될 수 없는 실패다.
+            self.search_attempts += 1
+            self.get_logger().warn(
+                f'마지막 목격 지점 없음 — 역행 불가 '
+                f'({self.search_attempts}/{sb["max_attempts"]}), 유도 계속',
+                throttle_duration_sec=5.0)
             return
 
         gx, gy = self.last_seen
@@ -806,8 +843,16 @@ class MissionNode(Node):
                                                 rclpy.time.Time())
             self.last_seen = (t.transform.translation.x,
                               t.transform.translation.y)
-        except Exception:
-            pass                        # TF 아직 없음 — 다음 tick 에
+        except Exception as e:
+            # ★ ① 진단 (08-01 예약 16): 구판은 여기서 조용히 삼켰다(pass).
+            #   그래서 last_seen 이 왜 None 인지 다음 재현 때 밝힐 재료가 없었다
+            #   (07-30 '깜빡임 15초 지속' 원인 미규명 — 0730_현황.md §1.4).
+            #   동작은 그대로다: 예외를 밖으로 내지 않고 다음 tick 에 재시도하며
+            #   기존 기록도 지우지 않는다. 바뀌는 것은 로그 한 줄뿐.
+            #   ⚠ TF 미준비면 매 tick(2Hz) 찍히므로 throttle 필수 (기존 코드 관례).
+            self.get_logger().warn(
+                f'마지막 목격 지점 기록 실패 (TF map→base_footprint): {e}',
+                throttle_duration_sec=5.0)
 
     # ===========================================================
     # 이벤트 콜백 (funnel)

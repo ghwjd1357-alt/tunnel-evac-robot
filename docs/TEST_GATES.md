@@ -24,7 +24,7 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
 새 커밋을 만들고 push 를 잊어도 앞 단계에서는 잡히지 않는다 (Codex 07-20 지적).
 `--strict` 를 붙이면 생략된 검사(colcon 결과 없음 등)도 실패로 취급한다.
 
-기준선 (**08-01 재갱신** — 예약 18 회귀 11건 편입 → §21 P2 보완 20건 → §22 P2 보완 27건 → **§23 P2 3건 보완**으로 34건이 됨): pytest **159 passed** / colcon **222 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**08-01 재갱신 2** — 위 34건 위에 **예약 16 회귀 11건**(`test_search_back_entry.py` — SEARCH_BACK 진입 봉인) 편입): pytest **170 passed** / colcon **233 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
 ⚠ 이 줄을 포함해 **기준선 수치가 적힌 모든 자리**는 `tools/gate_baseline_scan.py` 가 전수로
 대조한다(현재 13 자리). 수치 뒤 단위어(`passed`/`tests`/`검사`/`케이스`)를 떼면 검사에서 빠지고,
 기준선이 **아닌** 수를 같은 줄에 적을 때는 `케이스 12` 처럼 단위어를 **앞에** 쓴다.
@@ -78,6 +78,16 @@ bash tools/doc_check.sh --after-push                     # 원격 동기 재확�
   최대 30ms 꼬리 정상·+7ms 변이를 덮는 7건이다. 교체 핵심은 ① probe 함수로
   감싸지 않은 **원본 모듈 `symtable`** + 수동/관측 바인딩 집합 대조 ② 동적 이름
   denylist 대신 지원 호출 구조 allowlist ③ 실제 rclpy setter 경로의 최대 꼬리 계약.
+★ **08-01 증분 = `mission_manager` `+11`** (222 → 233 · pytest 159 → 170 — **예약 16**
+  `①`+`②′` 동결 예외 수리). 이번엔 **생산 코드도 같이 바뀌었다**(`mission_node.py` 3 hunk) —
+  위 §21~§23 처럼 '회귀만' 늘어난 회차가 아니다. 증분 전량 =
+  `src/mission_manager/test/test_search_back_entry.py`: **보완 전 FAIL 을 관측한 부정 회귀 5**
+  (깜빡임 놓침이 역행에 실제 진입 · 갇힘 무한반복 금지 · TF 사망 시 보고 경로 도달 ·
+  TF 예외 로그+throttle · 놓침 확정 tick 에서 기록 정지) + **역회귀 앵커 6**
+  (`①` 동작 변경 0 · `visible` 술어 비완화 · 정상 추종 시 역행 금지 · `lost_sec` 경계
+  양방향 · `/scan` 두절 중 기록 보류 · `give_up` 단독 탈출 정책 불변).
+  ★ 이 파일은 **진짜 `FollowerMonitor` + 진짜 `MissionNode.tick()` + 진짜 `waypoints.yaml`**
+  로 돈다 (핸드오프 함정 8 — 흉내 내면 게이트가 아니다). 서사 = `0801_현황.md §3`.
 ★ 07-30 증분 = `tunnel_bringup` **+23** (게이트 판정 단위 **20** + lint 3, 그중 copyright 1건 skip).
   1차 보완이 181(단위 13), 2차 보완이 **188**(단위 20 — lifecycle 세대 3 + TF 갱신 4 추가).
 pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/` 에 있어 `colcon test` 로만 돈다
