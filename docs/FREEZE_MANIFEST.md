@@ -111,6 +111,11 @@ git show 212885a:docs/CURRENT_HANDOFF.md      # 동결 당시의 완료조건·�
 그 watchdog 은 `MASTER_PLAN.md §3` 의 R0 **통과조건으로 계획되어 있을 뿐 아직 실측되지 않았다.**
 **R0 실측에서 watchdog 이 확인되지 않으면 이 항목은 다시 열린다.**
 
+**D+0 실행 절차** = `JETSON_SETUP.md §7-c`의 7-c-0. 바퀴를 공중에 띄우고 zero Twist 없이
+publisher를 끝낸 뒤, 60fps 동일 화면 영상에서 마지막 발행 표시→마지막 바퀴 회전이 30프레임
+이하인지 본다. `/odom.pose` raw encoder 적분 정지는 교차 증거이고 EMA `/odom.twist`의 0 도달
+시각은 판정에서 제외한다. **PASS 기록이 `D1_FIRST_STEP.md §0-a`에 없으면 R1로 진행하지 않는다.**
+
 **후속** = `MASTER_PLAN.md §7` 예약 항목 4·5 (abort 진단 강화 / 시뮬-실차 watchdog 정합성).
 
 ## 7. 환경 이탈 기록 (게이트 실행 당시)
@@ -683,3 +688,23 @@ colcon **245**(0e·0f·3s) (`colcon test` → `colcon test-result`) · `doc_chec
   결과 이 오탐 위험은 실재하지만 **방향이 fail-closed**(조용한 통과가 아니라 시끄러운 차단)
   라 받아들였다. 현재 체인의 `→ **예약 18 = §25 …**` 는 꼬리가 아니라 무해하다.
 - 이번 회귀도 **저장소에 안 박혔다**(스크래치패드 실행). 편입은 **예약 21**.
+
+### 10.8 검토 §34 보완 — AI 문맥·R0 watchdog·TODO 폐포 (2026-08-03, **동결 예외 아님**)
+
+사용자 명시 아래 **Codex가 구현자**, Claude가 독립 재검토자다. `src/**`에서 바뀐 것은
+`gate_fakes.py`의 **출처 주석·문자열**과 그 표기를 잠그는 기존 테스트 단언뿐이다. 센서 주기
+값·타이머·발행·게이트 분기는 0건 변경이며 예약 19의 R3 전 동결을 유지한다.
+
+| §34 발견 클래스 | 전수·완료판정 | 보완 |
+|---|---|---|
+| fenced code의 `#`를 제목으로 오인 | 착수 **17곳**, watchdog 주석 추가 뒤 최종 **18곳**; `TEST_GATES §1` 끝 문단 포함·fence 짝수 | backtick/tilde·들여쓰기 fence 상태 추적, 빈 제목 안전 처리 |
+| common gate가 inventory anchor를 대신 충족 | 구현·검토 공통 ref까지 비우면 **0/59**, 정상 profile **59/59** | 지목 6개를 포함해 같은 클래스 **10 anchor**를 profile-only로 교체 |
+| 한 경로의 복수 profile 유실 | tracked 복수 일치 경로를 합집합 처리 | 첫 일치 `break` 제거, JETSON 단독에서 bringup+docs 보장 |
+| R0 watchdog 절차 부재 | D+0 PASS 증거 없으면 R1 금지 | `JETSON_SETUP §7-c`, `D1_FIRST_STEP §0-a`, 이 문서 §6 정합 |
+| D1 목록 10건 ↔ 실행 표식 7건 | D+0 11건·D+1 10건의 목록/주장/표식 exact 계약 | phase 공통 scanner + 증감 양방향 합성 회귀 5건 |
+| gate fake 출처가 구 회신을 현행처럼 표기 | 주기 값·통계 34건 무변동 | 3차 회신 뒤에도 R3 시간열까지 의도적 동결임을 명시 |
+
+검증 = AI context **27/27** · TODO scanner **5/5** · gate-fakes **34/34** · pytest
+**182/182** · harness **24/24** · colcon **245/245**(0 failure, 3 skip) · build·문서/정적 검사
+PASS. readiness 통합 **13/14**는 이미 `TEST_GATES §1`에 공개된 case 12 간헐성 그대로이며,
+실행 값·분기 diff 0이라 승인 근거에서 제외하고 실패 사실을 보존한다.

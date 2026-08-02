@@ -502,7 +502,7 @@ bash tools/d0_check.sh
 ### 7-c. ★ `d0_check` 통과 뒤 R1·R2 사전 실측 — R3보다 먼저
 
 `d0_check.sh` 종료 0은 **연결·입력 안전 게이트**다. `MASTER_PLAN.md §3`의 순서는
-R0→R1→R2→R3이므로, 다음 날 R3 런북으로 넘어가기 전에 아래 두 실측을 닫는다.
+R0→R1→R2→R3이므로, 다음 날 R3 런북으로 넘어가기 전에 아래 세 실측을 닫는다.
 
 **주행 허용 전제 — 하나라도 아니면 모터 명령 금지**:
 
@@ -510,6 +510,45 @@ R0→R1→R2→R3이므로, 다음 날 R3 런북으로 넘어가기 전에 아�
 - R0에서 `/cmd_vel` 단절 뒤 0.5초 안에 정지하는 watchdog을 확인했다.
 - 안전요원 한 명이 E-stop을 잡고 있고, 평평한 바닥의 **양옆 1m 이상**을 비웠다.
 - 펌웨어는 역 PWM 제동을 의도적으로 쓰지 않으므로 **경사·내리막에서는 시험하지 않는다**.
+
+#### 7-c-0. ★ R0 watchdog — 명령 단절 0.5초 안에 실제 정지하는가
+
+이 검사는 zero Twist를 보내서 멈추는 시험이 아니다. publisher가 끝난 뒤 **아무 명령도 없는
+상태**에서 펌웨어 watchdog만으로 정지해야 한다. 바퀴를 공중에 띄우고 E-stop 담당자가 버튼을
+잡는다. 60fps 이상 영상 한 화면에 **publisher 터미널의 마지막 `publishing #N` 표시와 바퀴**가
+함께 보이게 한다. 별도 터미널에서는 교차 증거를 녹화한다.
+
+```bash
+ros2 bag record /cmd_vel /odom /estop/state -o d0_watchdog_$(date +%m%d_%H%M)
+```
+
+아래 명령이 30건을 다 보내고 **자연 종료**하게 둔다. 종료 직후 zero Twist를 보내지 말고 2초
+이상 그대로 관찰한다. 그 2초가 끝난 뒤에만 zero Twist 3회를 보내 시험을 안전하게 닫는다.
+
+```bash
+timeout --signal=INT --kill-after=2s 10s \
+  ros2 topic pub --times 30 -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.05, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+# 여기서 zero Twist 없이 2초 이상 관찰한다.
+timeout --kill-after=2s 12s \
+  ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+```
+
+**PASS는 세 조건을 모두 만족해야 한다.**
+
+1. 마지막 발행 표시 프레임부터 마지막 바퀴 회전 프레임까지 **30프레임 이하**다(60fps 기준
+   0.5초, 더 높은 fps면 `fps×0.5` 프레임 이하).
+2. 그 뒤 2초 동안 바퀴가 다시 돌지 않고, bag의 `/odom.pose` raw encoder 적분값도 더 변하지 않는다.
+3. 영상 fps·센 프레임 수·계산한 초·bag 경로를 아래 D+1 인계표에 기록한다.
+
+`/odom.twist`는 EMA(`α=0.10`)라 PWM이 이미 0이어도 늦게 감쇠한다. 따라서 **twist가 0이 되는
+시각은 합격·불합격 기준이 아니고 보조 관측일 뿐**이다. 반대로 pose가 계속 변하거나 영상이
+0.5초를 넘으면 실제 활주이므로 FAIL이다. FAIL·측정 불능이면 R1의 0.05m/s 지면 명령부터 금지하고
+`FREEZE_MANIFEST.md §6` 조건부 수용을 재개방한다.
+
+TODO(D+0): 확인 — 영상 fps·정지 프레임 수·환산 시간·bag 경로와 PASS/FAIL을
+`D1_FIRST_STEP.md §0-a`에 기록한다. 빈칸이면 바로 아래 R1 대조군으로 진행하지 않는다.
 
 먼저 R1 대조군으로 0.05m/s를 약 5초만 보낸다. `timeout`과 메시지 수가 이 명령의 상한이고,
 끝난 뒤 zero Twist를 3회 보낸다. 움직임·진동·편향이 이상하면 0.12 시험으로 올라가지 않는다.
@@ -600,7 +639,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 ⚠ 그래도 **apt 패키지와 agent 는 복사로 해결되지 않는다.** 그래서 §1 에서 네트워크를
 먼저 확인하라고 한 것이다. 인수 전에 확보하는 것이 유일한 진짜 대비다.
 
-## 9. `TODO(D+0)` 전량 목록 — **10건** (이 문서에서 확인해야 할 것)
+## 9. `TODO(D+0)` 전량 목록 — **11건** (이 문서에서 확인해야 할 것)
 
 착수 전에 이 목록을 한 번 읽고, 확인할 때마다 결과를 **이 문서에 적어** 다음 사람에게 남긴다.
 
@@ -616,6 +655,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b |
 | 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 |
+| 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 60fps 영상 30프레임 이하 + `/odom.pose` 정지 교차 확인 | §7-c-0 |
 
 ## 10. 다음 단계
 

@@ -156,6 +156,8 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("e2e", (
         "tools/lib_e2e.sh", "tools/*e2e.sh", "tools/regression_*.sh",
         "tools/test_harness_guards.sh", "tools/scan_unbounded_cli.py",
+        "src/tunnel_bringup/tunnel_bringup/readiness_gate.py",
+        "src/tunnel_bringup/test/test_readiness_gate*.py",
     )),
     ("judgment", (
         "tools/gate_baseline_scan.py", "tools/handoff_single_check.sh",
@@ -192,11 +194,12 @@ def classify_paths(paths: list[str]) -> tuple[set[str], list[str]]:
     profiles: set[str] = set()
     unknown: list[str] = []
     for path in paths:
+        matched = False
         for profile, patterns in PATH_PROFILES:
             if any(fnmatch.fnmatch(path, pattern) for pattern in patterns):
                 profiles.add(profile)
-                break
-        else:
+                matched = True
+        if not matched:
             unknown.append(path)
     return profiles, unknown
 
@@ -208,8 +211,37 @@ def _heading_number(line: str) -> tuple[int, str] | None:
     if marks == 0 or len(line) <= marks or line[marks] != " ":
         return None
     title = line[marks + 1:].strip()
+    if not title:
+        return None
     token = title.split(maxsplit=1)[0].rstrip(".")
     return marks, token
+
+
+def _fence_after(line: str, fence: tuple[str, int] | None) -> tuple[str, int] | None:
+    """Return Markdown fence state after *line* (backticks and tildes)."""
+    stripped = line.lstrip()
+    match = re.match(r"^(`{3,}|~{3,})(.*)$", stripped.rstrip("\r\n"))
+    if not match:
+        return fence
+    marks, rest = match.groups()
+    if fence is None:
+        return marks[0], len(marks)
+    char, width = fence
+    if marks[0] == char and len(marks) >= width and not rest.strip():
+        return None
+    return fence
+
+
+def _headings_outside_fences(lines: list[str]):
+    """Yield ``(index, heading)`` only for headings outside fenced code."""
+    fence = None
+    for index, line in enumerate(lines):
+        before = fence
+        fence = _fence_after(line, fence)
+        if before is None and fence is None:
+            heading = _heading_number(line)
+            if heading:
+                yield index, heading
 
 
 def read_ref(ref: Ref, *, source_ref: str | None = None) -> tuple[str, int, int, str]:
@@ -224,8 +256,8 @@ def read_ref(ref: Ref, *, source_ref: str | None = None) -> tuple[str, int, int,
 
     start = None
     level = None
-    for index, line in enumerate(lines):
-        heading = _heading_number(line)
+    headings = list(_headings_outside_fences(lines))
+    for index, heading in headings:
         if heading and heading[1] == ref.section:
             start = index
             level = heading[0]
@@ -233,8 +265,9 @@ def read_ref(ref: Ref, *, source_ref: str | None = None) -> tuple[str, int, int,
     if start is None or level is None:
         raise ValueError(f"{ref.path}: §{ref.section} heading not found")
     end = len(lines)
-    for index in range(start + 1, len(lines)):
-        heading = _heading_number(lines[index])
+    for index, heading in headings:
+        if index <= start:
+            continue
         if heading and heading[0] <= level:
             end = index
             break

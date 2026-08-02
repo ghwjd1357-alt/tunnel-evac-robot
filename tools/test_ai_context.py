@@ -8,9 +8,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,13 +37,35 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        missed = []
+        missed, common_leaks = [], []
+        common_refs = (
+            *ai_context.COMMON, ai_context.IMPLEMENT_GATE, ai_context.REVIEW_GATE,
+        )
+        common_text = "\n".join(ai_context.read_ref(ref)[0] for ref in common_refs)
         for row in rows:
             packet = ai_context.build_packet([row["path"]], "implement")
             routed_sources = packet.split("\n## WORKING FILE", 1)[0]
             if row["anchor"] not in routed_sources:
                 missed.append(row["id"])
+            profiles, unknown = ai_context.classify_paths([row["path"]])
+            self.assertEqual([], unknown, row["id"])
+            profile_refs = [
+                ref for profile in sorted(profiles)
+                for ref in ai_context.PROFILE_REFS[profile]
+            ]
+            profile_text = "\n".join(
+                ai_context.read_ref(ref)[0] for ref in profile_refs
+            )
+            if row["anchor"] not in profile_text:
+                missed.append(f'{row["id"]}:profile-only')
+            if row["anchor"] in common_text:
+                common_leaks.append(row["id"])
         self.assertEqual([], missed, f"known P0/P1 routing misses: {missed}")
+        self.assertEqual([], common_leaks, f"anchors masked by common refs: {common_leaks}")
+
+        # Empty profile routing must recover none of the inventory from common refs.
+        recovered = [row["id"] for row in rows if row["anchor"] in common_text]
+        self.assertEqual([], recovered)
 
     def test_02b_history_scan_independently_counts_59_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
@@ -53,7 +77,13 @@ class ContextRouterTest(unittest.TestCase):
             self.skipTest("Desktop review history is unavailable on this machine")
         found = []
         for name in names:
-            for line in (review_dir / name).read_text().splitlines():
+            source = (review_dir / name).read_text()
+            if name == "0801검토현황.md":
+                # The fixed 59-row replay corpus ends at §33. §34 findings have
+                # their own regressions in this file and are not silently folded
+                # into the historical baseline under repair.
+                source = source.split("\n## 34.", 1)[0]
+            for line in source.splitlines():
                 primary_heading = (
                     re.match(r"^### .*P(?:0|1)(?:/P2|·P2|→P1)? .*—", line)
                     or re.match(r"^### .*P1-[①②] .*—", line)
@@ -263,6 +293,66 @@ class ContextRouterTest(unittest.TestCase):
     def test_23_missing_section_heading_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "heading not found"):
             ai_context.read_ref(ai_context.Ref("docs/PROJECT_CONTEXT.md", "999"))
+
+    def test_24_fenced_headings_do_not_truncate_sections(self):
+        fixture = """# title
+## 7. target
+before
+   ```bash
+# 7 fake peer
+## 8 fake peer
+   ```
+~~~text
+# 9 another fake
+~~~
+after
+## 8. real peer
+outside
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "fixture.md").write_text(fixture)
+            with mock.patch.object(ai_context, "ROOT", root):
+                text, _first, _last, _digest = ai_context.read_ref(
+                    ai_context.Ref("fixture.md", "7")
+                )
+        self.assertIn("# 7 fake peer", text)
+        self.assertIn("# 9 another fake", text)
+        self.assertIn("after", text)
+        self.assertNotIn("## 8. real peer", text)
+        self.assertIsNone(ai_context._heading_number("## "))
+
+    def test_25_real_routed_sections_keep_balanced_fences(self):
+        refs = (
+            ai_context.Ref("docs/TEST_GATES.md", "1"),
+            ai_context.Ref("docs/JETSON_SETUP.md", "3"),
+            ai_context.Ref("docs/JETSON_SETUP.md", "7"),
+            ai_context.Ref("docs/D1_FIRST_STEP.md", "2"),
+        )
+        for ref in refs:
+            with self.subTest(ref=ref):
+                text = ai_context.read_ref(ref)[0]
+                fences = sum(
+                    1 for line in text.splitlines()
+                    if re.match(r"^\s*(`{3,}|~{3,})", line)
+                )
+                self.assertEqual(0, fences % 2, f"unbalanced fences in {ref}")
+        packet = ai_context.build_packet(
+            ["src/mission_manager/mission_manager/mission_node.py"], "implement"
+        )
+        self.assertIn("기준선 (**08-02 재갱신 4**", packet)
+
+    def test_26_one_path_unions_every_matching_profile(self):
+        profiles, unknown = ai_context.classify_paths(["docs/JETSON_SETUP.md"])
+        self.assertEqual({"bringup", "docs"}, profiles)
+        self.assertEqual([], unknown)
+        packet = ai_context.build_packet(["docs/JETSON_SETUP.md"], "implement")
+        self.assertIn("profiles=bringup,docs", packet)
+        self.assertIn("SOURCE `docs/PROJECT_CONTEXT.md §8`", packet)
+        self.assertIn("SOURCE `docs/TEST_GATES.md §7`", packet)
+        for ref in ai_context.PROFILE_REFS["bringup"]:
+            suffix = f" §{ref.section}" if ref.section else ""
+            self.assertIn(f"SOURCE `{ref.path}{suffix}`", packet)
 
 
 if __name__ == "__main__":

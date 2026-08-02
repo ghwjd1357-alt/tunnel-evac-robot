@@ -1207,6 +1207,12 @@ def test_unmeasured_periods_are_declared_unmeasured():
         assert gf.SENSOR_PERIODS[key].unmeasured.strip(), f'{key}: 미확보 사유가 비어 있다'
     for plan in gf.SENSOR_PERIODS.values():
         assert plan.basis.strip(), f'{plan.topic}: 주기의 출처가 비어 있다'
+    assert '3차 회신' in gf.SENSOR_PERIODS['odom'].unmeasured
+    assert 'R3' in gf.SENSOR_PERIODS['odom'].unmeasured
+    for key in ('odom', 'imu'):
+        basis = gf.SENSOR_PERIODS[key].basis
+        assert '3차 회신' in basis and '의도적 동결' in basis, \
+            f'{key}: 현 정본과 동결 사유가 출처 표기에 없다: {basis}'
 
 
 # ============================================================

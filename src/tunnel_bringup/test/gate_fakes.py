@@ -86,9 +86,11 @@ BEST_EFFORT = QoSProfile(
 #   아니라 시험 대본이므로 대상이 아니다. (열거를 좁히는 판단은 규약으로 고정한다.)
 # ============================================================
 
-# [/imu/data] BNO055 — 구동부 2차 회신 §11 **실측** (window 295 표본):
+# [/imu/data] BNO055 — R3 전까지 의도적으로 동결한 **구 2차 회신 §11** 요약(window 295):
 #   평균 24.02ms · min 18ms · max 30ms · σ 0.55ms  (= 41.63Hz)
 #   구동부 코드 설정은 20000us(50Hz)인데 실제 루프가 18~30ms 로 도는 상태다.
+#   ★ 현 정본은 3차 회신의 46.4Hz·20~23ms다. 하지만 원자료 시간열이 아니라 새 요약통계라,
+#     이 결정적 하네스는 R3 rosbag 시간열이 올 때 한 번에 교체한다(REAL_ROBOT_VALUES §1).
 #   ⚠ 우리가 받은 것은 이 **5개 요약통계뿐**이고 원자료(타임스탬프 열)는 못 받았다.
 #     따라서 아래 시퀀스는 '그 5통계를 만족하는 한 대표'이지 실차의 실제 시간열이 아니다.
 #     지터의 세부 파형은 **미확보**이며, 원자료를 받으면 이 시퀀스를 통째로 교체한다.
@@ -116,10 +118,10 @@ _IMU_MIN_AT = 197
 SCAN_PERIOD_US = 100_000
 SCAN_UNMEASURED = '실측 미확보 — RPLIDAR C1 사양값. R3 rosbag 에서 실측 후 교체'
 
-# [/odom] 구동부 계약 50Hz (`TEENSY_실차연동_합의사항.md §4.5`). **실측 미확보** —
-#   2차 회신 §10.3 토픽 목록에 `/odom` 이 아직 없어서 주기를 잴 대상 자체가 없었다.
+# [/odom] 구 계약 50Hz를 R3 전까지 의도적으로 동결. 현 3차 회신은 46.5Hz·20~22ms지만
+#   관측 창·원자료 시간열이 없어 결정적 시퀀스로 교체할 근거가 아직 없다.
 ODOM_PERIOD_US = 20_000
-ODOM_UNMEASURED = '실측 미확보 — 합의서 계약값. 인수 항목 1(통합 펌웨어) 수령 후 실측'
+ODOM_UNMEASURED = 'R3 원자료 미확보 — 3차 회신 요약만 있음. R3까지 구 계약 주기로 의도적 동결'
 
 # [/odometry/filtered] EKF 출력 자리 — 게이트 단독 케이스에서 EKF 를 대신한다.
 #   근거는 실측이 아니라 **우리 설정값**이다: `config/ekf_real.yaml` 의 frequency.
@@ -168,9 +170,10 @@ SENSOR_PERIODS = {
     'scan': PeriodPlan('/scan', (SCAN_PERIOD_US,),
                        basis='RPLIDAR C1 사양', unmeasured=SCAN_UNMEASURED),
     'odom': PeriodPlan('/odom', (ODOM_PERIOD_US,),
-                       basis='합의사항 §4.5 계약값', unmeasured=ODOM_UNMEASURED),
+                       basis='구 계약값 — 3차 회신 뒤 R3 시간열까지 의도적 동결',
+                       unmeasured=ODOM_UNMEASURED),
     'imu': PeriodPlan('/imu/data', _build_imu_periods(),
-                      basis='구동부 2차 회신 §11 실측 (window 295)'),
+                      basis='구 2차 회신 요약 — 3차 회신 뒤 R3 시간열까지 의도적 동결'),
     'filtered': PeriodPlan('/odometry/filtered', (int(round(1e6 / EKF_FREQUENCY_HZ)),),
                            basis=f'{EKF_CONFIG_REL} 의 frequency (실측 아님 — 우리 설정값)'),
 }
