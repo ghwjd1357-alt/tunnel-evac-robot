@@ -13,8 +13,12 @@
 #   agent 기동 = docs/JETSON_SETUP.md §5 (micro_ros_agent 확보 2안 + 기동 명령).
 #
 # 사용:
-#   bash tools/d0_check.sh              # 전량 검사 (검사 6은 사람이 바퀴를 굴려야 한다)
-#   bash tools/d0_check.sh --no-sign    # 검사 6 생략 (⚠ 그러면 '전량 통과'가 아니다 — 종료 2)
+#   bash tools/d0_check.sh              # 전량 검사 (검사 5·7 은 사람이 손을 써야 한다)
+#   bash tools/d0_check.sh --no-sign    # 검사 5·7 생략 (⚠ 그러면 '전량 통과'가 아니다 — 종료 2)
+#
+# 검사 목록: [1] 시리얼 [2][3] 발행주기 [4][5] QoS  — 여기까지 자동
+#            [5] 전진 부호(바퀴를 굴린다) [6] 펌웨어 정체 [7] E-stop 배선(버튼을 누른다)
+#   ★ [6][7] 은 **펌웨어 소스를 받은 08-02 에 신설**됐다. 소스가 없으면 쓸 수 없는 검사다.
 #   bash tools/d0_check.sh --secs 15    # 주기 측정 시간(기본 8초)
 #
 # 종료 코드:  0 = 전량 통과 · 1 = 실패 · 2 = 불완전(건너뛴 검사 있음) · 3 = 사용법 오류
@@ -180,8 +184,33 @@ check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  3
 #   yaml 로 고칠 수도 없다(퍼블리셔 3개만 연다). 그래서 조치가 아니라 **검사**로 닫는다.
 #   ⚠ TODO(D+0): 확인 — Jetson 의 apt 버전이 다르면 그 결론이 바뀔 수 있다. 이 검사가
 #     바로 그 재확인이다. 여기서 FAIL 이 나면 config/ekf_real.yaml 의 QoS 절을 다시 읽는다.
-check_qos() {  # $1=토픽 $2=검사 번호
-  local topic="$1" idx="$2" out="$TMP/qos$2.txt" rows npub nsub bad_pub bad_pair
+#
+# ★★ [08-02 정정 — 펌웨어 소스 수령 후] 이 검사의 ⓐ 가 **틀린 계약을 강제하고 있었다.**
+#   회신 PDF §7 은 Durability 만 적고 Reliability 를 비워 뒀고, 우리는 2차 회신의
+#   "IMU QoS = BEST_EFFORT" 를 /odom 까지 확장해 읽었다. **소스가 그 확장을 부정했다:**
+#
+#     rclc_publisher_init_default    (&odomPublisher, ...)        // RELIABLE
+#     rclc_publisher_init_best_effort(&imuPublisher, ...)         // BEST_EFFORT
+#     rclc_publisher_init_default    (&estopStatePublisher, ...)  // RELIABLE
+#     rclc_publisher_init_default    (&firmwareInfoPublisher, ...)// RELIABLE
+#
+#   (소스 주석은 이 블록을 "BEST_EFFORT / VOLATILE sensor publishers" 라고 적어 두었으나
+#    `init_default` 는 rclc 에서 RELIABLE 이다. **주석이 아니라 함수 이름이 사실이다.**)
+#
+#   고치지 않았다면 D+0 에 `/odom 발행자가 계약과 다르다` **오경보**가 떴을 것이고,
+#   런북은 "구동부에게 지금 확인한다"고 지시한다 — 인수 현장에서 가장 비싼 자원(담당자의
+#   현장 시간)을 **없는 고장에** 쓰게 만든다. 오경보는 침묵보다 싸지 않다.
+#
+# ★ 그리고 ⓑ 의 판정 근거도 **발행자에 의존한다** — 이것도 틀려 있었다:
+#     pub RELIABLE    + sub RELIABLE     → 매칭 ✅   ← RELIABLE 구독이 항상 고장은 아니다
+#     pub RELIABLE    + sub BEST_EFFORT  → 매칭 ✅
+#     pub BEST_EFFORT + sub BEST_EFFORT  → 매칭 ✅
+#     pub BEST_EFFORT + sub RELIABLE     → 매칭 ❌   ← 이 조합만 고장이다
+#   그래서 ⓑ 를 **발행자가 BEST_EFFORT 일 때만** 발동하도록 조건화한다.
+#   지금 구독자는 전부 BEST_EFFORT 라 당장 오탐은 없지만, 근거가 틀린 검사는 다음에 틀린다.
+check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliability
+  local topic="$1" idx="$2" expect="${3:-}" out="$TMP/qos$2.txt"
+  local rows npub nsub off_pub be_pub bad_pair
   echo "[$idx] $topic QoS 정합"
   hard_timeout 20 ros2 topic info "$topic" -v >"$out" 2>&1
 
@@ -206,30 +235,38 @@ check_qos() {  # $1=토픽 $2=검사 번호
     echo; return
   fi
 
-  # ⓐ 계약 확인: 발행자는 BEST_EFFORT 여야 한다 (최종합의서 제3부 · 회신 §5).
-  #   다르면 '지금 당장 고장'은 아니지만 **왜 다른지 모르는 상태**다. 구동부가 그 자리에
-  #   있을 때 물어보는 것이 가장 싸다 → 넘기지 않고 FAIL 로 세운다.
-  bad_pub=$(printf '%s\n' "$rows" | awk '$1 == "PUBLISHER" && $3 != "BEST_EFFORT" { print $2 " (" $3 ")" }')
-  if [ -n "$bad_pub" ]; then
-    ng "$topic 발행자가 계약(BEST_EFFORT)과 다르다: $(echo "$bad_pub" | tr '\n' ' ')"
-    ng "  → 구동부에게 지금 확인한다. 데이터는 흐를 수 있지만 계약이 깨진 상태다"
+  # ⓐ 계약 대조: 기대값은 **펌웨어 소스에서 읽은 값**이다(토픽마다 다르다).
+  #   다르면 '지금 당장 고장'은 아니지만 **우리가 읽은 소스와 굽힌 펌웨어가 다르다**는 뜻이라
+  #   그 자체로 큰 신호다 → FAIL 로 세운다. 같으면 조용히 통과시킨다(오경보를 만들지 않는다).
+  off_pub=$(printf '%s\n' "$rows" | awk -v e="$expect" '$1 == "PUBLISHER" && $3 != e { print $2 " (" $3 ")" }')
+  if [ -z "$expect" ]; then
+    warn "$topic 발행자 ${npub}개 — 기대 Reliability 미지정, 대조 생략"
+  elif [ -n "$off_pub" ]; then
+    ng "$topic 발행자가 소스와 다르다 (기대 $expect): $(echo "$off_pub" | tr '\n' ' ')"
+    ng "  → 인수받은 펌웨어가 우리가 읽은 v1.4 소스가 아닐 수 있다."
+    ng "     ros2 topic echo /firmware/info --once  로 정체를 먼저 확인한다"
   else
-    ok "$topic 발행자 ${npub}개 전부 BEST_EFFORT (계약대로)"
+    ok "$topic 발행자 ${npub}개 전부 $expect (소스 v1.4 와 일치)"
   fi
 
-  # ⓑ 진짜 고장: BEST_EFFORT 발행 + RELIABLE 구독 = **매칭 안 됨(조용한 0건)**
+  # ⓑ 진짜 고장: **BEST_EFFORT 발행** + RELIABLE 구독 = 매칭 안 됨(조용한 0건)
+  #   발행자가 RELIABLE 이면 RELIABLE 구독도 정상 매칭이므로 여기서 걸면 오탐이다.
+  be_pub=$(printf '%s\n' "$rows" | awk '$1 == "PUBLISHER" && $3 == "BEST_EFFORT" { print }')
   bad_pair=$(printf '%s\n' "$rows" | awk '$1 == "SUBSCRIPTION" && $3 == "RELIABLE" { print $2 }')
-  if [ -n "$bad_pair" ]; then
+  if [ -n "$be_pub" ] && [ -n "$bad_pair" ]; then
     ng "$topic 에 RELIABLE 구독자가 있다: $(echo "$bad_pair" | tr '\n' ' ')"
-    ng "  → 이 노드들은 **에러 없이 한 건도 못 받는다.** 증상이 안 보이는 고장이다"
+    ng "  → 발행자가 BEST_EFFORT 라 이 노드들은 **에러 없이 한 건도 못 받는다.**"
     ng "  → 해당 노드의 구독 QoS 를 BEST_EFFORT 로 바꿔야 한다"
+  elif [ -n "$bad_pair" ]; then
+    ok "$topic 구독자 중 RELIABLE 있음 — 그러나 발행자도 RELIABLE 이라 **매칭된다**"
   else
     ok "$topic 구독자 ${nsub}개 중 RELIABLE 없음 (전부 매칭됨)"
   fi
   echo
 }
-check_qos "$ODOM_TOPIC" 4
-check_qos "$IMU_TOPIC"  5
+# ★ 기대값 근거 = 펌웨어 소스 v1.4 (sha256 13f929cb…2106) 의 publisher 초기화 함수.
+check_qos "$ODOM_TOPIC" 4 RELIABLE
+check_qos "$IMU_TOPIC"  5 BEST_EFFORT
 
 # ── [5] 전진 부호 ───────────────────────────────────────────────────────────
 # ★ 이 스크립트는 **로봇에 명령을 보내지 않는다.** 사람이 바퀴를 손으로 굴린다.
@@ -273,6 +310,72 @@ else
     *)
       ng "부호 판정 자체가 실패했다: $SIGN" ;;
   esac
+fi
+echo
+
+# ── [6] 펌웨어 정체 ─────────────────────────────────────────────────────────
+# [08-02 신설] 펌웨어 소스를 받고 나서야 가능해진 검사다.
+# `/firmware/info` 는 버전·게인·바퀴 반지름·라이브러리 목록을 한 줄로 방송한다.
+# ⚠ 이 값으로 **버전을 판별할 수는 없다** — 소스 v1.4 인데 FW_VERSION 은 "1.3.0",
+#   FW_SOURCE_PATH 는 v1_3, FW_GIT_SHA 는 0 으로 채워져 있다(소스 36~39행).
+#   그래도 **바퀴 반지름·게인·baud 가 우리가 읽은 소스와 같은지**는 여기서 갈린다.
+# ⚠ 발행 주기가 5초(FW_INFO_PERIOD_MS)라 --once 는 최대 5초를 기다린다. VOLATILE 이라
+#   지나간 것은 못 받는다 — 타임아웃을 넉넉히 준다.
+echo "[6] 펌웨어 정체 (/firmware/info · 5초 주기)"
+FWOUT="$TMP/fw.txt"
+if hard_timeout 12 ros2 topic echo /firmware/info --once >"$FWOUT" 2>&1 && [ -s "$FWOUT" ]; then
+  sed 's/^/       /' "$FWOUT" | head -6
+  if grep -q "wheel_radius=0.05698" "$FWOUT"; then
+    ok "wheel_radius=0.05698 — 소스 v1.4 와 일치"
+  else
+    ng "wheel_radius 가 소스(0.05698)와 다르다 — **다른 펌웨어가 구워져 있다**"
+  fi
+  if grep -q "kp=30.000; ki=5.000" "$FWOUT"; then
+    ok "제어 게인 Kp=30 · Ki=5 — 소스 v1.4 와 일치"
+  else
+    warn "제어 게인이 소스(Kp=30, Ki=5)와 다르다 — 시험 데이터의 전제가 달라진다"
+  fi
+else
+  ng "/firmware/info 를 못 읽었다 (5초 주기 × 12초 대기했다)"
+  ng "  → agent 는 붙었는데 노드가 없다면 **IMU 초기화 실패**를 먼저 의심한다"
+  ng "     (소스: IMU 실패 시 errorLoop() → micro-ROS 노드 자체가 안 뜬다."
+  ng "      Teensy LED 가 100ms 주기로 빠르게 깜빡이면 그 상태다)"
+fi
+echo
+
+# ── [7] E-stop 배선 ─────────────────────────────────────────────────────────
+# [08-02 신설] 최종 회신 PDF 8쪽에는 E-stop 이 한 번도 안 나왔지만 **소스에는 있다**
+#   (ESTOP_PIN=21, INPUT_PULLUP, active-low, 차단 5지점).
+# ★ 이 검사가 필요한 이유: 핀에 아무것도 안 물려 있으면 풀업이 HIGH 로 띄워서
+#   **"안 눌림"으로 읽힌다.** 배선이 없어도 소프트웨어는 아무 이상을 보고하지 않는다.
+#   그래서 '토픽이 온다'로는 아무것도 증명되지 않고, **눌러서 바뀌는지**만이 증거다.
+# ⚠ 발행 주기 1Hz(DIAGNOSTIC_PERIOD_MS) — 합의서의 10Hz 가 아니다. 최대 1초 기다린다.
+echo "[7] E-stop 배선 (/estop/state · 1Hz)"
+if [ "$SKIP_SIGN" = "1" ]; then
+  skip "E-stop 확인 — 사람이 버튼을 눌러야 한다"
+else
+  ESOUT="$TMP/estop_idle.txt"
+  if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT" 2>&1 && [ -s "$ESOUT" ]; then
+    if grep -qi "false" "$ESOUT"; then
+      ok "평상시 /estop/state = false"
+      echo "     ▶ 이제 **E-stop 버튼을 누른 채로** Enter 를 누르세요 (누르지 않았으면 그냥 Enter)"
+      read -r _ || true
+      ESOUT2="$TMP/estop_press.txt"
+      if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT2" 2>&1 \
+         && grep -qi "true" "$ESOUT2"; then
+        ok "누름 → true 전환 확인 — **배선 정상**"
+      else
+        ng "눌러도 false 그대로다 — **E-stop 이 실차에 배선돼 있지 않다**"
+        ng "  → 소프트웨어 정지 수단은 /cmd_vel 0 과 watchdog 뿐이다(둘 다 소프트웨어 경로)"
+        ng "  → 배선 전까지 **R1 이상 지면 주행을 하지 않는다** (인수 후 별도 일정)"
+      fi
+    else
+      ng "평상시부터 /estop/state = true — 버튼이 눌린 채이거나 배선이 반대다"
+      ng "  → 이 상태에서는 모터가 전혀 돌지 않는다(차단 5지점 전부 발동)"
+    fi
+  else
+    ng "/estop/state 를 못 읽었다 — 토픽이 없다면 굽힌 펌웨어가 v1.4 가 아니다"
+  fi
 fi
 echo
 
