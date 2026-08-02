@@ -440,7 +440,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 ⚠ 그래도 **apt 패키지와 agent 는 복사로 해결되지 않는다.** 그래서 §1 에서 네트워크를
 먼저 확인하라고 한 것이다. 인수 전에 확보하는 것이 유일한 진짜 대비다.
 
-## 9. `TODO(D+0)` 전량 목록 (이 문서에서 확인해야 할 것)
+## 9. `TODO(D+0)` 전량 목록 — **10건** (이 문서에서 확인해야 할 것)
 
 착수 전에 이 목록을 한 번 읽고, 확인할 때마다 결과를 **이 문서에 적어** 다음 사람에게 남긴다.
 
@@ -451,9 +451,11 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 3 | private 저장소 인증 수단 | 인수 전에 실제로 한 번 clone | §3 |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 |
-| 6 | **`micro_ros_arduino` 버전** | 구동부에게 묻는다 (인수 전이 더 좋다) | §5-d |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 가 자동 확인 | §7 |
+| 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b |
+| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` 검사 7 (버튼을 눌러야 한다) | §7 |
 
 ## 10. 다음 단계
 
