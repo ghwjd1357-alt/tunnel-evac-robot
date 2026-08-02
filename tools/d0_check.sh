@@ -12,14 +12,31 @@
 #   ① micro-ROS agent 가 떠 있고  ② 로봇 전원이 켜져 있을 때.
 #   agent 기동 = docs/JETSON_SETUP.md §5 (micro_ros_agent 확보 2안 + 기동 명령).
 #
-# 사용:
-#   bash tools/d0_check.sh              # 전량 검사 (검사 5·7 은 사람이 손을 써야 한다)
-#   bash tools/d0_check.sh --no-sign    # 검사 5·7 생략 (⚠ 그러면 '전량 통과'가 아니다 — 종료 2)
+# ★★ 실행 전제 (08-02 검토 §29.3 로 신설) — **EKF 를 먼저 띄워 놓아야 한다.**
+#   이 스크립트의 QoS 검사는 "구독자 쪽 QoS 가 발행자와 맞물리는가"를 본다. 그런데 구판은
+#   agent 만 띄운 상태에서 돌려 **구독자가 0개**였고, 그 0개를 "전부 매칭됨"으로 통과시켰다
+#   (검토자 재현: `npub=1 nsub=0 => target_check_passes=yes`). 아무도 안 보는 것을 보고
+#   "봤다"고 말한 셈이다. 이제 EKF 엔드포인트가 실제로 있어야 통과한다.
+#     별도 터미널:  ros2 run robot_localization ekf_node --ros-args \
+#                     --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml
+#   ⚠ 노드 이름을 바꾸지 말 것 — yaml 최상단 키가 `ekf_filter_node:` 라 이름이 다르면
+#     파라미터가 **에러 없이** 하나도 안 붙는다.
 #
-# 검사 목록: [1] 시리얼 [2][3] 발행주기 [4][5] QoS  — 여기까지 자동
-#            [5] 전진 부호(바퀴를 굴린다) [6] 펌웨어 정체 [7] E-stop 배선(버튼을 누른다)
-#   ★ [6][7] 은 **펌웨어 소스를 받은 08-02 에 신설**됐다. 소스가 없으면 쓸 수 없는 검사다.
-#   bash tools/d0_check.sh --secs 15    # 주기 측정 시간(기본 8초)
+# 사용:
+#   bash tools/d0_check.sh              # 전량 검사 (검사 6·8 은 사람이 손을 써야 한다)
+#   bash tools/d0_check.sh --no-sign    # 검사 6(바퀴 부호)만 생략
+#   bash tools/d0_check.sh --no-estop   # 검사 8(E-stop)만 생략
+#   bash tools/d0_check.sh --no-manual  # 사람이 필요한 6·8 을 함께 생략
+#   bash tools/d0_check.sh --secs 15    # 주기 측정 시간(기본 8초, 허용 3~120)
+#   ⚠ 무엇을 생략하든 '전량 통과'가 아니다 — 종료 2.
+#
+# 검사 목록 (8개):
+#   [1] 시리얼 장치   [2] /odom 주기   [3] /imu/data 주기
+#   [4] /odom QoS     [5] /imu/data QoS                      — 여기까지 자동
+#   [6] 전진 부호(바퀴를 굴린다)  [7] 펌웨어 정체  [8] E-stop 배선(버튼을 누른다)
+#   ★ [7][8] 은 **펌웨어 소스를 받은 08-02 에 신설**됐다. 소스가 없으면 쓸 수 없는 검사다.
+#   ⚠ 번호는 손으로 적지 않는다 — `next_idx()` 가 실행 순서대로 매긴다. 손으로 적었더니
+#     신설 2건이 [6] 을 중복해서 쓰고 문서는 "7검사"라고 적는 드리프트가 실제로 났다.
 #
 # 종료 코드:  0 = 전량 통과 · 1 = 실패 · 2 = 불완전(건너뛴 검사 있음) · 3 = 사용법 오류
 #   ★ 2 를 0 과 구분하는 이유: "검사를 안 한 것"과 "검사해서 통과한 것"은 다르다.
@@ -73,17 +90,31 @@ hard_timeout() {  # $1=상한(초) $2..=실행할 명령
   timeout --kill-after="$D0_KILL_GRACE" "$dur" "$@"
 }
 
+EKF_NODE="ekf_filter_node"         # ★ ekf_real.yaml 최상단 키와 같은 이름이어야 한다
+HZ_SECS_MAX=120                    # 상한. 현장 판정은 유한 시간에 끝나야 한다
+
 SKIP_SIGN=0
+SKIP_ESTOP=0
+# ★ 인자 파서 (08-02 검토 §29.6) — 구판은 `--secs` 뒤에 값이 없어도 `shift 2` 를 불러
+#   shift 실패 → 위치 인자가 그대로 → **같은 옵션을 영원히 다시 처리**했다(무한 루프).
+#   검토자 실측: 종료 3 이 아니라 외부 timeout rc 124. 그래서 shift 전에 개수를 먼저 본다.
 while [ $# -gt 0 ]; do
   case "$1" in
-    --no-sign) SKIP_SIGN=1; shift ;;
-    --secs)    HZ_SECS="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,45p' "$0"; exit 3 ;;
+    --no-sign)   SKIP_SIGN=1;  shift ;;
+    --no-estop)  SKIP_ESTOP=1; shift ;;
+    --no-manual) SKIP_SIGN=1; SKIP_ESTOP=1; shift ;;
+    --secs)
+      [ $# -ge 2 ] || { echo "--secs 에 값이 없다 (예: --secs 8)"; exit 3; }
+      HZ_SECS="$2"; shift 2 ;;
+    -h|--help) sed -n '2,60p' "$0"; exit 3 ;;
     *) echo "알 수 없는 인자: $1  (사용법은 --help)"; exit 3 ;;
   esac
 done
-case "$HZ_SECS" in ''|*[!0-9]*) echo "--secs 는 정수여야 한다: $HZ_SECS"; exit 3 ;; esac
-[ "$HZ_SECS" -lt 3 ] && { echo "--secs 는 3 이상이어야 한다(표본이 너무 적다)"; exit 3; }
+# 음수(`-`)·소수점·문자는 전부 여기서 걸린다. 빈 값도 마찬가지다.
+case "$HZ_SECS" in ''|*[!0-9]*) echo "--secs 는 0 이상의 정수여야 한다: '$HZ_SECS'"; exit 3 ;; esac
+[ "$HZ_SECS" -lt 3 ] && { echo "--secs 는 3 이상이어야 한다(표본이 너무 적다): $HZ_SECS"; exit 3; }
+[ "$HZ_SECS" -gt "$HZ_SECS_MAX" ] && {
+  echo "--secs 는 $HZ_SECS_MAX 이하여야 한다(현장 판정이 끝나지 않는다): $HZ_SECS"; exit 3; }
 
 FAIL=0
 SKIPPED=0
@@ -95,13 +126,22 @@ ng()   { printf '  \033[31mFAIL\033[0m %s\n' "$1"; FAIL=1; }
 warn() { printf '  \033[33m⚠\033[0m    %s\n' "$1"; }
 skip() { printf '  \033[33m--\033[0m   %s (생략)\n' "$1"; SKIPPED=$((SKIPPED+1)); }
 
+# --- 검사 번호는 손으로 적지 않는다 (08-02) ----------------------------------
+# 신설 2건이 손으로 `[6]` 을 적어 **번호가 중복**됐고("검사 6 FAIL" 이 어느 쪽인지 알 수 없다),
+# 문서는 "7검사"라고 적었는데 실제로는 8개였다. 순서를 세는 일을 사람에게서 뺏는다.
+# ⚠ 명령치환 `$(next_idx)` 로 쓰면 **서브셸**이라 증가가 부모로 전파되지 않는다
+#   (08-02 에 실제로 그렇게 짰다가 여덟 검사가 전부 `[1]` 로 찍혔다 — 손으로 적던 중복보다
+#    나빠졌다). 그래서 값을 돌려주지 않고 **전역 IDX 를 올리기만** 하고, 호출자가 $IDX 를 쓴다.
+IDX=0
+next_idx() { IDX=$((IDX + 1)); }
+
 echo "=== D+0 연결 판정 ($(date '+%Y-%m-%d %H:%M:%S')) ==="
 echo "    측정 시간: 주기 ${HZ_SECS}초 × 2회"
 echo
 
 # ── [1] 시리얼 장치 ─────────────────────────────────────────────────────────
 # 여기서 막히면 뒤의 검사는 전부 "안 온다"로만 나와 원인이 안 보인다. 먼저 가른다.
-echo "[1] Teensy 시리얼 장치"
+next_idx; echo "[$IDX] Teensy 시리얼 장치"
 if [ -e "$TEENSY_DEV" ]; then
   ok "$TEENSY_DEV 존재 (udev 규칙이 먹었다)"
 elif [ -e /dev/ttyACM0 ]; then
@@ -122,20 +162,29 @@ echo
 # ⚠ 단, 여기 통과는 상한을 **증명하지 않는다.** 관측 창이 몇 초짜리 하나뿐이기 때문이다
 #   (구동부 회신의 '최대 30ms'·'20~23ms' 가 정확히 그 한계였다 — REAL_ROBOT_VALUES.md §1).
 #   진짜 판정은 R3 rosbag 의 간격 히스토그램이다 (docs/D1_FIRST_STEP.md).
+
+# 숫자 판정에 쓸 값이 **정말 유한한 십진수인가**. `N/A`·`nan`·`inf`·빈 값은 전부 거짓이다.
+# ★ 08-02 검토 §29.4: 구판은 이걸 안 물어서 `max: N/A` 가 awk 곱셈에서 **0.00ms** 가 됐다
+#   — 판독 실패가 '완벽한 간격'으로 둔갑했다. 숫자로 쓸 것은 숫자인지 먼저 묻는다.
+is_finite_num() { printf '%s' "${1:-}" | grep -qE '^[0-9]+(\.[0-9]+)?$'; }
+
 check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
-  local topic="$1" expect="$2" idx="$3" out="$TMP/hz$3.txt" parsed rate gapms
+  local topic="$1" expect="$2" idx="$3" out="$TMP/hz$3.txt"
+  local parsed rate gapms win need
   echo "[$idx] $topic 발행 주기 (기대 약 ${expect}Hz)"
   hard_timeout "$HZ_SECS" ros2 topic hz "$topic" >"$out" 2>&1
 
   # 파서는 fail-closed: 'average rate' 를 한 번도 못 봤으면 통과시키지 않는다.
   #   빈 출력 · 경고문만 · 형식 변경이 전부 여기서 걸린다.
+  #   ★ window(표본 수)도 같이 뽑는다 — 아래 '관측 창' 검사의 근거다.
   parsed=$(awk '
       /average rate:/ { rate=$3 }
       /max:/ { for (i = 1; i <= NF; i++) if ($i == "max:") { m=$(i+1) } }
+      /window:/ { for (i = 1; i <= NF; i++) if ($i == "window:") { w=$(i+1) } }
       END {
-        if (rate == "" || m == "") { exit 3 }
+        if (rate == "" || m == "" || w == "") { exit 3 }
         sub(/s$/, "", m)
-        printf "%s %.2f", rate, m * 1000
+        printf "%s %s %s", rate, m, w
       }' "$out")
   if [ -z "$parsed" ]; then
     ng "$topic 주기를 판독하지 못했다 — '측정값 0' 이 아니라 **판독 실패**다"
@@ -144,8 +193,40 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
     ng "  → 아무것도 안 찍혔다면 발행이 정말 없는 것이다(QoS 탓이 아니다 — 위 전제 ⓐ)"
     echo; return
   fi
-  rate=${parsed% *}
-  gapms=${parsed#* }
+  rate=$(printf '%s' "$parsed" | cut -d' ' -f1)
+  gapms=$(printf '%s' "$parsed" | cut -d' ' -f2)
+  win=$(printf '%s' "$parsed" | cut -d' ' -f3)
+
+  # ── ⓐ 숫자 형식 (판독 실패를 값으로 착각하지 않는다) ────────────────────
+  if ! is_finite_num "$rate" || ! is_finite_num "$gapms" || ! is_finite_num "$win"; then
+    ng "$topic 판독값이 숫자가 아니다 (rate='$rate' max='$gapms' window='$win')"
+    ng "  → **판독 실패**다. 0 으로 취급해 통과시키지 않는다"
+    echo; return
+  fi
+  gapms=$(awk "BEGIN{printf \"%.2f\", $gapms * 1000}")
+
+  # ── ⓑ 관측 창이 실제로 채워졌는가 (★ 08-02 검토 §29.4) ──────────────────
+  # 구판은 마지막 요약만 읽어서, **초반 1초만 정상이고 나머지를 죽어 있어도** 그 옛 요약이
+  # 남아 통과했다. 실측(노트북): 퍼블리셔가 3초에 죽으면 `ros2 topic hz` 는 그 뒤로
+  # **아무것도 안 찍고** 마지막 블록은 `46.475Hz · window 95` 로 멀쩡해 보였다.
+  # → 평균이 아니라 **표본 수**를 본다. 하한 = 하한주기 × (관측시간 − 2초).
+  #   (−2 는 디스커버리 지연 몫. 실측 보정: secs=3→window 48 · 8→330 이라 경계에서도 여유가 있다)
+  need=$(awk "BEGIN{printf \"%d\", $HZ_MIN * ($HZ_SECS - 2)}")
+  if [ "$win" -ge "$need" ]; then
+    ok "$topic 표본 ${win}개 (${HZ_SECS}초 창의 최소 요구 ${need}개 이상)"
+  else
+    ng "$topic 표본이 ${win}개뿐이다 (최소 요구 ${need}개) — **창의 일부만 살아 있었다**"
+    ng "  → 평균값이 정상이어도 믿지 않는다. 센서가 중간에 멎었을 때 정확히 이 모양이 된다"
+  fi
+
+  # ── ⓒ 창 끝에도 살아 있는가 (표본 수와 다른 질문이다) ────────────────────
+  # 표본 수는 '얼마나 많이 왔나'이고, 이건 '지금도 오나'다. 창 **끝 직전**에 죽으면
+  # 표본 수는 통과할 수 있으므로 따로 묻는다.
+  if hard_timeout 3 ros2 topic echo "$topic" --once >/dev/null 2>&1; then
+    ok "$topic 관측 창 종료 시점에도 수신됨"
+  else
+    ng "$topic 이 창 종료 시점에는 오지 않는다 — 측정 도중 끊겼다"
+  fi
 
   if awk "BEGIN{exit !($rate >= $HZ_MIN)}"; then
     ok "$topic 평균 ${rate}Hz (하한 ${HZ_MIN}Hz 이상)"
@@ -164,8 +245,8 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
   fi
   echo
 }
-check_hz "$ODOM_TOPIC" "$HZ_EXPECT_ODOM" 2
-check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  3
+next_idx; check_hz "$ODOM_TOPIC" "$HZ_EXPECT_ODOM" "$IDX"
+next_idx; check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  "$IDX"
 
 # ── [4] QoS 정합 ────────────────────────────────────────────────────────────
 # ★ 이 검사가 이 스크립트에서 가장 중요하다. 여기서 잡는 고장은 **증상이 없다**:
@@ -210,7 +291,7 @@ check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  3
 #   지금 구독자는 전부 BEST_EFFORT 라 당장 오탐은 없지만, 근거가 틀린 검사는 다음에 틀린다.
 check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliability
   local topic="$1" idx="$2" expect="${3:-}" out="$TMP/qos$2.txt"
-  local rows npub nsub off_pub be_pub bad_pair
+  local rows npub nsub off_pub be_pub bad_pair ekf_rel pub_rel
   echo "[$idx] $topic QoS 정합"
   hard_timeout 20 ros2 topic info "$topic" -v >"$out" 2>&1
 
@@ -233,6 +314,36 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   if [ "$npub" -eq 0 ]; then
     ng "$topic 에 발행자가 없다 — agent 가 안 붙었거나 토픽 이름이 다르다"
     echo; return
+  fi
+
+  # ── ★ 소비자가 실제로 있는가 (08-02 검토 §29.3) ─────────────────────────
+  # 구판은 구독자가 **0개여도** "RELIABLE 구독자 없음 = 전부 매칭됨"으로 통과시켰다.
+  # 게다가 런북이 agent 만 띄운 상태에서 이 검사를 돌리게 짜여 있어, 실제로 소비자가
+  # 0개인 것이 정상 경로였다 — **아무도 안 보는 것을 보고 "봤다"고 말한** 셈이다.
+  # 그래서 ① 구독자 0개를 실패로 세우고 ② EKF 를 **이름으로** 요구한다.
+  #   (Nav2 는 D+0 에 띄우지 않으므로 여기서 책임지지 않는다 — 그건 실제 기동 게이트 몫이다)
+  if [ "$nsub" -eq 0 ]; then
+    ng "$topic 에 구독자가 하나도 없다 — QoS 정합을 **판정할 대상이 없다**"
+    ng "  → EKF 를 먼저 띄우고 다시 돌린다 (JETSON_SETUP.md §7):"
+    ng "     ros2 run robot_localization ekf_node --ros-args \\"
+    ng "       --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml"
+    echo; return
+  fi
+  ekf_rel=$(printf '%s\n' "$rows" \
+            | awk -v n="$EKF_NODE" '$1 == "SUBSCRIPTION" && $2 == n { print $3; exit }')
+  if [ -z "$ekf_rel" ]; then
+    ng "$topic 을 구독하는 $EKF_NODE 가 없다 (구독자 ${nsub}개는 전부 다른 노드다)"
+    ng "  → 이 검사의 목적은 **EKF 가 받을 수 있는가**다. EKF 없이는 판정이 성립하지 않는다"
+    ng "  → 노드 이름을 바꿔 띄웠다면 그것도 원인이다 (yaml 키가 $EKF_NODE 다)"
+    echo; return
+  fi
+  # DDS 호환 규칙은 하나뿐이다: **발행 BEST_EFFORT + 구독 RELIABLE 만 매칭 실패.**
+  pub_rel=$(printf '%s\n' "$rows" | awk '$1 == "PUBLISHER" { print $3; exit }')
+  if [ "$pub_rel" = "BEST_EFFORT" ] && [ "$ekf_rel" = "RELIABLE" ]; then
+    ng "$EKF_NODE 가 $topic 을 RELIABLE 로 구독한다 — 발행이 BEST_EFFORT 라 **한 건도 못 받는다**"
+    ng "  → 에러도 경고도 없이 조용히 0건이 되는 그 고장이다"
+  else
+    ok "$EKF_NODE 가 $topic 구독 중 ($ekf_rel) — 발행($pub_rel)과 호환"
   fi
 
   # ⓐ 계약 대조: 기대값은 **펌웨어 소스에서 읽은 값**이다(토픽마다 다르다).
@@ -265,8 +376,8 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   echo
 }
 # ★ 기대값 근거 = 펌웨어 소스 v1.4 (sha256 13f929cb…2106) 의 publisher 초기화 함수.
-check_qos "$ODOM_TOPIC" 4 RELIABLE
-check_qos "$IMU_TOPIC"  5 BEST_EFFORT
+next_idx; check_qos "$ODOM_TOPIC" "$IDX" RELIABLE
+next_idx; check_qos "$IMU_TOPIC"  "$IDX" BEST_EFFORT
 
 # ── [5] 전진 부호 ───────────────────────────────────────────────────────────
 # ★ 이 스크립트는 **로봇에 명령을 보내지 않는다.** 사람이 바퀴를 손으로 굴린다.
@@ -274,7 +385,7 @@ check_qos "$IMU_TOPIC"  5 BEST_EFFORT
 #   순서가 뒤집힌 것이다. 부호는 명령 없이도 확인된다 — 굴리면 /odom 이 반응한다.
 # 왜 부호를 보는가: 반대면 EKF·SLAM·Nav2 가 전부 **거울처럼 뒤집힌 세계**에서 동작한다.
 #   증상은 "지도가 이상하다"로만 나타나서 원인 찾기가 오래 걸린다.
-echo "[6] 전진 시 twist.twist.linear.x 부호"
+next_idx; echo "[$IDX] 전진 시 twist.twist.linear.x 부호"
 if [ "$SKIP_SIGN" = "1" ]; then
   skip "전진 부호 — --no-sign"
 else
@@ -321,7 +432,7 @@ echo
 #   그래도 **바퀴 반지름·게인·baud 가 우리가 읽은 소스와 같은지**는 여기서 갈린다.
 # ⚠ 발행 주기가 5초(FW_INFO_PERIOD_MS)라 --once 는 최대 5초를 기다린다. VOLATILE 이라
 #   지나간 것은 못 받는다 — 타임아웃을 넉넉히 준다.
-echo "[6] 펌웨어 정체 (/firmware/info · 5초 주기)"
+next_idx; echo "[$IDX] 펌웨어 정체 (/firmware/info · 5초 주기)"
 FWOUT="$TMP/fw.txt"
 if hard_timeout 12 ros2 topic echo /firmware/info --once >"$FWOUT" 2>&1 && [ -s "$FWOUT" ]; then
   sed 's/^/       /' "$FWOUT" | head -6
@@ -350,25 +461,41 @@ echo
 #   **"안 눌림"으로 읽힌다.** 배선이 없어도 소프트웨어는 아무 이상을 보고하지 않는다.
 #   그래서 '토픽이 온다'로는 아무것도 증명되지 않고, **눌러서 바뀌는지**만이 증거다.
 # ⚠ 발행 주기 1Hz(DIAGNOSTIC_PERIOD_MS) — 합의서의 10Hz 가 아니다. 최대 1초 기다린다.
-echo "[7] E-stop 배선 (/estop/state · 1Hz)"
-if [ "$SKIP_SIGN" = "1" ]; then
-  skip "E-stop 확인 — 사람이 버튼을 눌러야 한다"
+next_idx; echo "[$IDX] E-stop 배선 (/estop/state · 1Hz)"
+if [ "$SKIP_ESTOP" = "1" ]; then
+  skip "E-stop 배선 — 사람이 버튼을 눌러야 한다 (--no-estop)"
 else
   ESOUT="$TMP/estop_idle.txt"
   if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT" 2>&1 && [ -s "$ESOUT" ]; then
     if grep -qi "false" "$ESOUT"; then
       ok "평상시 /estop/state = false"
-      echo "     ▶ 이제 **E-stop 버튼을 누른 채로** Enter 를 누르세요 (누르지 않았으면 그냥 Enter)"
-      read -r _ || true
-      ESOUT2="$TMP/estop_press.txt"
-      if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT2" 2>&1 \
-         && grep -qi "true" "$ESOUT2"; then
-        ok "누름 → true 전환 확인 — **배선 정상**"
-      else
-        ng "눌러도 false 그대로다 — **E-stop 이 실차에 배선돼 있지 않다**"
-        ng "  → 소프트웨어 정지 수단은 /cmd_vel 0 과 watchdog 뿐이다(둘 다 소프트웨어 경로)"
-        ng "  → 배선 전까지 **R1 이상 지면 주행을 하지 않는다** (인수 후 별도 일정)"
-      fi
+      # ★ 08-02 검토 §29 계열 정정 — 구판은 "누르지 않았으면 그냥 Enter" 라고 안내해 놓고
+      #   안 누르면 **"배선돼 있지 않다"** 로 FAIL 하고 주행 금지까지 지시했다.
+      #   "안 눌렀다"와 "눌렀는데 안 바뀐다"는 **다른 사실**이다 — 관측하지 않은 것을
+      #   결함으로 기록하면 그 기록이 다음 판단을 오염시킨다. 그래서 사람에게 직접 묻는다.
+      echo "     ▶ E-stop 버튼을 **누른 채로** Enter 를 누르세요."
+      echo "       버튼이 없거나 지금 누를 수 없으면  s  + Enter (건너뜁니다)"
+      read -r ES_ANS || ES_ANS=""
+      case "$ES_ANS" in
+        s|S)
+          skip "E-stop 배선 — 사람이 누르지 못했다 (배선 결함과 **구분해서** 기록한다)"
+          warn "  → 눌러 보기 전에는 배선 여부를 알 수 없다. 인수 전에 반드시 확인할 것" ;;
+        *)
+          ESOUT2="$TMP/estop_press.txt"
+          if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT2" 2>&1 \
+             && [ -s "$ESOUT2" ]; then
+            if grep -qi "true" "$ESOUT2"; then
+              ok "누름 → true 전환 확인 — **배선 정상**"
+            else
+              ng "**눌렀다고 했는데** false 그대로다 — E-stop 이 실차에 배선돼 있지 않다"
+              ng "  → 소프트웨어 정지 수단은 /cmd_vel 0 과 watchdog 뿐이다(둘 다 소프트웨어 경로)"
+              ng "  → 배선 전까지 **R1 이상 지면 주행을 하지 않는다** (인수 후 별도 일정)"
+            fi
+          else
+            ng "누른 뒤 /estop/state 를 못 읽었다 — **판독 실패**(배선 없음과 다른 사실이다)"
+            ng "  → agent 연결이 끊겼는지 먼저 본다. 끊겼다면 배선 판정을 하지 않는다"
+          fi ;;
+      esac
     else
       ng "평상시부터 /estop/state = true — 버튼이 눌린 채이거나 배선이 반대다"
       ng "  → 이 상태에서는 모터가 전혀 돌지 않는다(차단 5지점 전부 발동)"
@@ -379,8 +506,27 @@ else
 fi
 echo
 
+# ── 종료 직전 재확인: EKF 가 아직도 살아 있는가 ─────────────────────────────
+# ★ 08-02 검토 §29.3 '전환' 회귀 — *"EKF 가 검사 도중 죽어 endpoint 가 사라지면 최종 판정은
+#   PASS 금지."* QoS 검사는 **순간 스냅샷**이라, 그 순간만 살아 있으면 통과한다.
+#   판정의 전제가 판정 뒤에 사라지면 그 판정은 이미 무효다 → 끝에서 한 번 더 묻는다.
+echo "[재확인] $EKF_NODE 가 아직 두 토픽을 구독 중인가"
+for t in "$ODOM_TOPIC" "$IMU_TOPIC"; do
+  if hard_timeout 20 ros2 topic info "$t" -v 2>/dev/null \
+     | awk '/^Node name:/ { node=$3 } /^Endpoint type:/ { ep=$3 }
+            /Reliability:/ { if (ep == "SUBSCRIPTION") print node; ep="" }' \
+     | grep -qx "$EKF_NODE"; then
+    ok "$t — $EKF_NODE 구독 유지"
+  else
+    ng "$t 을 구독하던 $EKF_NODE 가 사라졌다 — 검사 도중 죽었다"
+    ng "  → 앞선 QoS 통과는 **더 이상 근거가 아니다.** EKF 로그를 보고 다시 돌린다"
+  fi
+done
+echo
+
 # ── 종합 ────────────────────────────────────────────────────────────────────
 echo "=========================================="
+echo "검사 $IDX 개 수행 (문서의 검사 수와 다르면 문서가 낡은 것이다)"
 if [ "$FAIL" != "0" ]; then
   echo "❌ D+0 판정 실패 — 구동부가 자리에 있을 때 위 FAIL 을 함께 본다."
   echo "   (돌아간 뒤에 발견하면 같은 문제에 며칠이 든다)"

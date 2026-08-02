@@ -131,14 +131,49 @@ source ~/.bashrc
 > ⚠ `MASTER_PLAN.md §3` 의 포터빌리티 표에 "sllidar_ros2 = 이미 src/ 에 있음, clone 불필요"
 > 라고 적혀 있던 것은 **노트북 기준**이었다. Jetson 에는 해당되지 않는다.
 
+### 3-c. ⚠ **디렉터리를 미리 만들지 않는다** (08-02 검토 §29.2 로 고침)
+
+구판은 이렇게 적혀 있었고, **확정적으로 실패했다**:
+
 ```bash
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws
+git clone <url> .        # ← fatal: 대상 경로가('.') 이미 있고 빈 디렉터리가 아닙니다 (rc 128)
+```
 
+`git clone <url> .` 은 목적지가 **비어 있을 때만** 허용되는데, 바로 앞 줄이 `src/` 를
+만들어 놓아 절대 비어 있지 않다. 런북의 정상 첫 경로가 100% 막히는 상태였다.
+**`~/ros2_ws` 는 git 이 만들게 둔다.**
+
+```bash
 # ① 우리 저장소 (private — 인증이 필요하다. 아래 ⚠ 참조)
-git clone https://github.com/ghwjd1357-alt/tunnel-evac-robot.git .
+#    ★ 목적지를 인자로 준다. 미리 mkdir 하지 않는다.
+cd ~
+git clone https://github.com/ghwjd1357-alt/tunnel-evac-robot.git ~/ros2_ws
 
 # ② 라이다 드라이버 (별도 저장소 — 위 3-b)
-git clone https://github.com/Slamtec/sllidar_ros2.git src/sllidar_ros2
+git clone https://github.com/Slamtec/sllidar_ros2.git ~/ros2_ws/src/sllidar_ros2
+```
+
+**이미 `~/ros2_ws` 가 있는 경우**(두 번째 시도·부분 실패 후 재개)는 새 설치와 섞지 않는다.
+`.git` 이 있는지로 가른다 — 있으면 갱신, 없으면 **멈추고 사람이 판단**한다:
+
+```bash
+if [ -d ~/ros2_ws/.git ]; then
+  cd ~/ros2_ws && git pull                    # 이미 clone 돼 있다 → 갱신
+elif [ -e ~/ros2_ws ]; then
+  echo "~/ros2_ws 가 있는데 git 저장소가 아니다 — 내용을 확인하고 직접 정리할 것"
+else
+  git clone https://github.com/ghwjd1357-alt/tunnel-evac-robot.git ~/ros2_ws
+fi
+# 라이다는 없을 때만 받는다
+[ -d ~/ros2_ws/src/sllidar_ros2/.git ] \
+  || git clone https://github.com/Slamtec/sllidar_ros2.git ~/ros2_ws/src/sllidar_ros2
+```
+
+확인 — 두 패키지가 **함께** 있어야 다음 절(rosdep)이 성립한다:
+
+```bash
+ls -d ~/ros2_ws/src/tunnel_bringup ~/ros2_ws/src/sllidar_ros2
 ```
 
 ⚠ **private 저장소 인증**: `git clone` 이 아이디·비밀번호를 물으면 GitHub 계정 비밀번호는
@@ -393,24 +428,56 @@ TODO(D+0): 확인 — `idVendor`/`idProduct` 실측값. **추측으로 채우지
 
 여기까지 왔으면 **판정**한다. 사람이 눈으로 보는 것으로 끝내지 않는다.
 
+### 7-a. ★ 먼저 EKF 를 띄운다 (08-02 검토 §29.3 로 신설)
+
+**별도 터미널**에서 — 그대로 켜 둔 채 다음 절로 간다:
+
+```bash
+ros2 run robot_localization ekf_node --ros-args \
+  --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml
+```
+
+**왜 지금 띄우나**: `d0_check.sh` 의 QoS 검사는 *"구독자 쪽 QoS 가 발행자와 맞물리는가"* 를
+본다. 그런데 구판 런북은 agent 만 띄운 상태로 검사를 돌리게 짜여 있어 **구독자가 0개**였고,
+검사는 그 0개를 "전부 매칭됨"으로 통과시켰다. **아무도 안 보는 것을 보고 "봤다"고 말한**
+셈이다 — 이제 EKF 엔드포인트가 없으면 FAIL 한다.
+
+⚠ **노드 이름을 바꾸지 말 것.** yaml 최상단 키가 `ekf_filter_node:` 라, `-r __node:=…` 로
+이름을 바꾸면 파라미터가 **에러 없이** 하나도 안 붙는다.
+⚠ EKF 는 모터를 돌리지 않는다 — `/odom`·`/imu/data` 를 받아 TF 를 내보낼 뿐이다. D+0 에
+띄워도 안전하다.
+
+### 7-b. 판정
+
 ```bash
 cd ~/ros2_ws
 bash tools/d0_check.sh
 ```
 
-무엇을 보는가 (자세한 근거는 스크립트 머리말):
+무엇을 보는가 — **8 검사** (자세한 근거는 스크립트 머리말):
 
 | # | 검사 | 통과 기준 |
 |---|---|---|
 | 1 | 시리얼 장치 | `/dev/teensy_drive` 존재 |
-| 2·3 | `/odom`·`/imu/data` 주기 | 평균 ≥ 30Hz(EKF 주기) **그리고** 최대 간격 ≤ 33.33ms |
-| 4·5 | QoS 정합 | 발행자 BEST_EFFORT · **RELIABLE 구독자 0개** |
+| 2·3 | `/odom`·`/imu/data` 주기 | 평균 ≥ 30Hz · **최대 간격 ≤ 33.33ms** · **표본 수**가 창을 채움 · **창 끝에도 수신** |
+| 4 | `/odom` QoS | 발행자 **RELIABLE**(소스 v1.4) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
+| 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(소스 v1.4) · 위와 동일 |
 | 6 | 전진 부호 | 바퀴를 손으로 앞으로 굴리면 `linear.x > 0` |
+| 7 | 펌웨어 정체 | `/firmware/info` 의 `wheel_radius=0.05698` · `kp=30 ki=5` |
+| 8 | E-stop 배선 | 버튼을 **누르면** `/estop/state` 가 `true` 로 바뀐다 |
+| — | 재확인 | 종료 직전에 `ekf_filter_node` 가 **아직 살아 있는가** |
+
+⚠ **발행자 QoS 는 토픽마다 다르다** — `/odom` 은 RELIABLE, `/imu/*` 만 BEST_EFFORT 다
+(펌웨어 소스 v1.4 의 `rclc_publisher_init_default` vs `_best_effort`). 예전 표에 적혀 있던
+"발행자 BEST_EFFORT" 단일값은 **틀렸다** — 그대로 뒀으면 정상 로봇을 계약 위반으로 읽었다.
 
 - 종료 코드 **0 = 전량 통과** · 1 = 실패 · **2 = 불완전**(건너뛴 검사 있음).
   2 를 통과로 기록하지 않는다.
-- 검사 6 은 **사람이 바퀴를 굴려야** 한다. 스크립트는 **모터에 명령을 보내지 않는다** —
+- 검사 6·8 은 **사람이 손을 써야** 한다. 스크립트는 **모터에 명령을 보내지 않는다** —
   D+0 의 로봇 상태는 R0(바퀴 공중)이고, 검증 안 된 스택이 모터를 돌리는 것은 순서가 뒤집힌 것이다.
+  각각 `--no-sign`·`--no-estop` 으로 따로 끌 수 있고, 끄면 종료 2 다.
+- **E-stop 을 지금 누를 수 없으면 `s` + Enter** 로 건너뛴다. 그러면 "배선 없음"이 아니라
+  **"확인 못 함"** 으로 기록된다 — 안 눌러 본 것을 결함으로 적으면 그 기록이 다음 판단을 오염시킨다.
 - ⚠ 통과해도 **주기의 상한이 증명된 것은 아니다**(관측 창이 짧다). 상한 판정은 R3 rosbag 이다.
 
 ★ **구동부가 자리에 있을 때 돌린다.** 최종합의서에도 "인수 당일 함께 확인" 으로 넣어 뒀다.
@@ -426,7 +493,9 @@ bash tools/d0_check.sh
 | agent 가 안 붙는다 | 장치·권한·버전 | `ls -l /dev/teensy_drive` → `groups`(dialout) → **micro_ros_arduino 버전**(§5-d) |
 | `topic list` 에 `/odom` 이 없다 | agent 세션이 안 열렸다 | agent 터미널 로그를 그대로 읽는다. 케이블·전원부터 |
 | `topic hz` 가 아무것도 안 찍는다 | **QoS 탓이 아니다** | 08-02 실측: `topic hz` 는 기본 인자로 BEST_EFFORT 를 본다. 정말 안 오는 것이다 |
-| 노드는 뜨는데 EKF 만 조용하다 | QoS 불일치 | `d0_check.sh` 검사 4·5 가 이걸 잡는다 |
+| 노드는 뜨는데 EKF 만 조용하다 | QoS 불일치 | `d0_check.sh` 검사 4·5 가 잡는다 — 단 **EKF 를 띄운 상태**여야 한다(§7-a) |
+| `d0_check` 이 "구독자가 하나도 없다" FAIL | EKF 를 안 띄웠다 | §7-a 를 먼저 한다. 이건 로봇 고장이 아니라 순서 문제다 |
+| `d0_check` 이 "표본이 N개뿐" FAIL | 창의 일부만 살아 있었다 | 평균이 정상이어도 믿지 않는다. agent 로그에서 재연결 흔적을 본다 |
 | 인터넷이 없다 | apt·clone·agent 빌드가 전부 막힌다 | ↓ 아래 오프라인 대비 |
 
 **오프라인 대비 (네트워크가 없을 때)** — 소스는 아키텍처와 무관하므로 복사가 통한다:
@@ -453,9 +522,9 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 |
 | 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 |
-| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 가 자동 확인 | §7 |
+| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b |
-| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` 검사 7 (버튼을 눌러야 한다) | §7 |
+| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 |
 
 ## 10. 다음 단계
 

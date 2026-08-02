@@ -132,8 +132,11 @@ ros2 topic info /odom -v | grep -A1 "Endpoint type"   # 구독자 QoS 확인
 ★ `/odom`(입력)이 아니라 **`/odometry/filtered`(출력)** 를 보는 이유: 입력만 보면
 EKF 가 죽어 있어도 통과한다. 출력이 흐르면 EKF 가 살아서 융합 중이라는 뜻이다.
 
-⚠ EKF 가 조용하면 **QoS 를 먼저 의심하지 말 것** — `d0_check.sh` 검사 4·5 가 이미 봤다.
-`ekf_real.yaml` 머리말의 QoS 절(08-02 실측 기록)을 읽고, 그다음 `frame_id` 를 본다.
+⚠ EKF 가 조용하면 QoS 순서를 이렇게 본다 — **어제 `d0_check` 을 EKF 를 띄운 채로
+돌렸다면** 검사 4·5 가 이미 그 조합을 봤으므로 QoS 는 뒤로 미룬다
+(`JETSON_SETUP.md §7-a`. 08-02 검토 §29.3 이전 판은 EKF 없이 돌아 **아무 구독자도 못 봤다** —
+그때의 "QoS 는 확인됨" 은 근거가 없었다).
+그다음 `ekf_real.yaml` 머리말의 QoS 절을 읽고, `frame_id` 를 본다.
 
 ★★ **`frame_id` 3종은 아직 미확인이다** (`REAL_ROBOT_VALUES.md §4`):
 `/odom` 의 `header.frame_id`·`child_frame_id`, `/imu/data` 의 `header.frame_id`.
@@ -184,6 +187,10 @@ python3 tools/bag_gap_report.py ~/r3_bags/r3_XXXX /odom /imu/data /scan
 **왜 평균이 아니라 최대 간격인가**: EKF 는 30Hz(33.33ms)로 돈다. 입력 간격이 한 번이라도
 그보다 길면 그 주기는 **입력 없이** 지나간다. 평균 46Hz 여도 가끔 40ms 가 섞이면 구멍이 난다.
 
+★ **bag 양끝도 간격으로 센다** (08-02 검토 §29.4). 구판은 각 토픽의 *첫~마지막 사이만* 봐서,
+150초 bag 중 토픽이 10초만 살아 있어도 "전 구간 정상" 으로 통과했다. 이제 bag 시작→첫 수신,
+마지막 수신→bag 종료를 간격에 포함하고, 초과하면 **위치(앞 공백/내부/뒤 공백)까지** 찍는다.
+
 | 결과 | 뜻 | 다음 행동 |
 |---|---|---|
 | 33.33ms 초과 **0건** | 현재 조건에서는 EKF 재료로 충분 | R4 로 진행 |
@@ -194,17 +201,24 @@ python3 tools/bag_gap_report.py ~/r3_bags/r3_XXXX /odom /imu/data /scan
 ⚠ 그래도 **이 판정은 이 녹화 구간에 대한 사실**이다. 더 길게·다른 부하에서 다시 볼 수 있다.
 우리가 구동부의 짧은 창을 비판했으므로 우리 창의 한계도 같이 적어 둔다.
 
-### 5-c. 판정 ② — timestamp 단조성
+### 5-c. 판정 ② — `header.stamp` 단조성 (★ 위 명령이 함께 판정한다)
 
-시간이 뒤로 가면 TF·EKF 가 통째로 무너진다(같은 시각의 두 값, 또는 미래 데이터).
+시간이 뒤로 가거나 멈추면 TF·EKF 가 통째로 무너진다. EKF 는 `dt<=0` 을 받으면 시간이
+멈춘 것으로 보고 공분산이 발산한다.
 
-```bash
-ros2 bag info ~/r3_bags/r3_XXXX
-```
+★ **별도 명령이 필요 없다** — `bag_gap_report.py` 가 §5-b 에서 이미 검사한다.
+08-02 검토 §29.4 이전 판은 **수신 시각만** 읽고 메시지 본문을 버려서 이 검사를
+*원리상 할 수 없었다*(동일 stamp·역행 stamp 를 넣어도 녹색이었다). 이제 메시지를
+역직렬화해 `header.stamp` 를 직접 본다.
 
-TODO(D+1): 확인 — 단조성 검사는 아직 도구가 없다. `bag_gap_report.py` 가
-**음수 간격**을 보고하면 그것이 역행 신호다(간격 최소값이 음수로 찍힌다).
-음수가 보이면 그 자리에서 멈추고 원인을 본다 — 넘어가면 R4 에서 원인 불명으로 나타난다.
+- `✅ stamp 엄격 단조` — 통과
+- `❌ stamp 중복 N건` — `dt=0`. 펌웨어가 같은 시각을 두 번 찍었다
+- `❌ stamp 역행 N건` — 시각이 뒤로 갔다
+
+⚠ **이건 우리 yaml 로 못 고친다 — 펌웨어(또는 Jetson 시계) 쪽이다.**
+특히 `JETSON_SETUP.md §1-b` 의 NTP 되돌림이 정확히 이 증상을 만든다:
+Jetson 시각이 뒤로 가면 Teensy stamp 가 **1ns 씩만** 증가해 `dt≈0` 이 된다.
+→ 중복이 대량으로 나오면 **시계를 먼저 의심**하고, 그다음 펌웨어를 본다.
 
 ### 5-d. 판정 ③ — covariance 가 '의미값'인가
 
@@ -241,7 +255,7 @@ TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 �
 | 2 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
 | 3 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
 | 4 | 간격 분포(33.33ms 초과 여부) | `tools/bag_gap_report.py` | §5-b |
-| 5 | timestamp 단조성 | 간격 최소값이 음수인가 | §5-c |
+| 5 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
 | 6 | covariance 실태 | `topic echo --field …covariance` | §5-d |
 | 7 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
 
