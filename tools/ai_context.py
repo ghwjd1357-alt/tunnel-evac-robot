@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Build one lossless, change-surface-aware context packet for an AI turn.
+
+The packet reduces repeated model reads; it never replaces the source documents.
+Unknown paths fail closed by including every safety document.  Review packets also
+carry the complete diff (no line or byte truncation), so saving context cannot
+silently narrow the review surface.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import hashlib
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class Ref:
+    path: str
+    section: str | None = None
+
+
+COMMON = (Ref("docs/CURRENT_HANDOFF.md"),)
+REVIEW_GATE = Ref("docs/TEST_GATES.md", "7")
+IMPLEMENT_GATE = Ref("docs/TEST_GATES.md", "1")
+
+PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
+    "process": (
+        Ref("docs/AI_CONTEXT.md"),
+        Ref("docs/TEST_GATES.md", "7"),
+    ),
+    "docs": (
+        Ref("docs/PROJECT_CONTEXT.md", "8"),
+        Ref("docs/TEST_GATES.md", "7"),
+    ),
+    "mission": (
+        Ref("docs/PROJECT_CONTEXT.md", "4"),
+        Ref("docs/PROJECT_CONTEXT.md", "6"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/PITFALLS.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md"),
+    ),
+    "bringup": (
+        Ref("docs/PROJECT_CONTEXT.md", "3"),
+        Ref("docs/PROJECT_CONTEXT.md", "4"),
+        Ref("docs/PROJECT_CONTEXT.md", "5"),
+        Ref("docs/PROJECT_CONTEXT.md", "6"),
+        Ref("docs/MASTER_PLAN.md", "3"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/PITFALLS.md", "1"),
+        Ref("docs/PITFALLS.md", "2"),
+        Ref("docs/PITFALLS.md", "3"),
+        Ref("docs/PITFALLS.md", "5"),
+        Ref("docs/PITFALLS.md", "6"),
+        Ref("docs/PITFALLS.md", "7"),
+        Ref("docs/REAL_ROBOT_VALUES.md"),
+        Ref("docs/FREEZE_MANIFEST.md"),
+    ),
+    "nav2": (
+        Ref("docs/PROJECT_CONTEXT.md", "5"),
+        Ref("docs/PROJECT_CONTEXT.md", "6"),
+        Ref("docs/MASTER_PLAN.md", "3"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/PITFALLS.md", "3"),
+        Ref("docs/PITFALLS.md", "5"),
+        Ref("docs/PITFALLS.md", "6"),
+        Ref("docs/PITFALLS.md", "7"),
+        Ref("docs/REAL_ROBOT_VALUES.md"),
+        Ref("docs/FREEZE_MANIFEST.md"),
+    ),
+    "e2e": (
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/TEST_GATES.md", "2"),
+        Ref("docs/TEST_GATES.md", "5"),
+        Ref("docs/PITFALLS.md", "1"),
+        Ref("docs/PITFALLS.md", "2"),
+        Ref("docs/PITFALLS.md", "4"),
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "7"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+    ),
+    "judgment": (
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/TEST_GATES.md", "5"),
+        Ref("docs/PITFALLS.md", "1"),
+        Ref("docs/PITFALLS.md", "2"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
+    ),
+    "map": (
+        Ref("docs/PROJECT_CONTEXT.md", "6"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/TEST_GATES.md", "2"),
+        Ref("docs/TEST_GATES.md", "4"),
+        Ref("docs/PITFALLS.md", "4"),
+        Ref("docs/PITFALLS.md", "7"),
+        Ref("docs/FREEZE_MANIFEST.md"),
+    ),
+    "perception": (
+        Ref("docs/PROJECT_CONTEXT.md", "2"),
+        Ref("docs/PROJECT_CONTEXT.md", "4"),
+        Ref("docs/MASTER_PLAN.md", "1"),
+        Ref("docs/MASTER_PLAN.md", "4"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+    ),
+    "accuracy": (
+        Ref("docs/PROJECT_CONTEXT.md", "7"),
+        Ref("docs/MASTER_PLAN.md", "8"),
+        Ref("docs/TEST_GATES.md", "6"),
+        Ref("docs/PITFALLS.md", "4"),
+        Ref("docs/PITFALLS.md", "6"),
+        Ref("docs/PITFALLS.md", "7"),
+        Ref("docs/FREEZE_MANIFEST.md"),
+    ),
+}
+
+FULL_SAFETY_DOCS = tuple(
+    Ref(path)
+    for path in (
+        "docs/PROJECT_CONTEXT.md",
+        "docs/MASTER_PLAN.md",
+        "docs/TEST_GATES.md",
+        "docs/PITFALLS.md",
+        "docs/FREEZE_MANIFEST.md",
+        "docs/REAL_ROBOT_VALUES.md",
+    )
+)
+
+PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("process", (
+        "AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md",
+        "docs/AI_CONTEXT.md", "tools/ai_context.py", "tools/test_ai_context.py",
+        "tools/ai_known_p0_p1.json", "tools/local_token_count.js",
+    )),
+    ("mission", ("src/mission_manager/**",)),
+    ("bringup", (
+        "src/tunnel_bringup/**", "docs/JETSON_SETUP.md", "docs/D1_FIRST_STEP.md",
+        "tools/d0_check.sh", "tools/bag_gap_report.py", "tools/todo_d0_scan.py",
+    )),
+    ("nav2", (
+        "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",
+        "src/tunnel_sim/launch/nav2.launch.py",
+    )),
+    ("map", (
+        "maps/**", "tools/map_promote.sh", "tools/make_map.sh",
+        "tools/test_map_promote.sh",
+    )),
+    ("accuracy", ("tools/accuracy_*",)),
+    ("e2e", (
+        "tools/lib_e2e.sh", "tools/*e2e.sh", "tools/regression_*.sh",
+        "tools/test_harness_guards.sh", "tools/scan_unbounded_cli.py",
+    )),
+    ("judgment", (
+        "tools/gate_baseline_scan.py", "tools/handoff_single_check.sh",
+        "tools/doc_check.sh",
+    )),
+    ("perception", (
+        "src/tunnel_interfaces/**", "**/*detection*", "**/*perception*",
+        "console/**",
+    )),
+    ("docs", ("docs/*.md",)),
+)
+
+
+def _git(*args: str, check: bool = True) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=ROOT, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, check=False,
+    )
+    if check and result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
+    return result.stdout
+
+
+def resolve_commit(revision: str) -> str:
+    commit = _git(
+        "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"
+    ).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError(f"not a commit: {revision}")
+    return commit
+
+
+def classify_paths(paths: list[str]) -> tuple[set[str], list[str]]:
+    profiles: set[str] = set()
+    unknown: list[str] = []
+    for path in paths:
+        for profile, patterns in PATH_PROFILES:
+            if any(fnmatch.fnmatch(path, pattern) for pattern in patterns):
+                profiles.add(profile)
+                break
+        else:
+            unknown.append(path)
+    return profiles, unknown
+
+
+def _heading_number(line: str) -> tuple[int, str] | None:
+    if not line.startswith("#"):
+        return None
+    marks = len(line) - len(line.lstrip("#"))
+    if marks == 0 or len(line) <= marks or line[marks] != " ":
+        return None
+    title = line[marks + 1:].strip()
+    token = title.split(maxsplit=1)[0].rstrip(".")
+    return marks, token
+
+
+def read_ref(ref: Ref, *, source_ref: str | None = None) -> tuple[str, int, int, str]:
+    if source_ref:
+        raw = _git("show", f"{source_ref}:{ref.path}")
+    else:
+        raw = (ROOT / ref.path).read_text(encoding="utf-8")
+    lines = raw.splitlines(keepends=True)
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
+    if ref.section is None:
+        return raw, 1, len(lines), digest
+
+    start = None
+    level = None
+    for index, line in enumerate(lines):
+        heading = _heading_number(line)
+        if heading and heading[1] == ref.section:
+            start = index
+            level = heading[0]
+            break
+    if start is None or level is None:
+        raise ValueError(f"{ref.path}: §{ref.section} heading not found")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        heading = _heading_number(lines[index])
+        if heading and heading[0] <= level:
+            end = index
+            break
+    return "".join(lines[start:end]), start + 1, end, digest
+
+
+def refs_for(profiles: set[str], unknown: list[str], role: str) -> list[Ref]:
+    refs = list(COMMON)
+    refs.append(REVIEW_GATE if role == "review" else IMPLEMENT_GATE)
+    if unknown:
+        refs.extend(FULL_SAFETY_DOCS)
+    else:
+        for profile in sorted(profiles):
+            refs.extend(PROFILE_REFS[profile])
+    full_paths = {ref.path for ref in refs if ref.section is None}
+    seen: set[Ref] = set()
+    return [
+        ref for ref in refs
+        if not (ref.section is not None and ref.path in full_paths)
+        and not (ref in seen or seen.add(ref))
+    ]
+
+
+def safe_worktree_path(path: str) -> Path:
+    rel = Path(path)
+    if rel.is_absolute() or ".." in rel.parts:
+        raise ValueError(f"path must stay inside the repository: {path}")
+    resolved = (ROOT / rel).resolve()
+    if resolved != ROOT and ROOT not in resolved.parents:
+        raise ValueError(f"path escapes the repository: {path}")
+    return resolved
+
+
+def build_packet(paths: list[str], role: str, *, base: str | None = None,
+                 target: str = "HEAD", source_ref: str | None = None) -> str:
+    profiles, unknown = classify_paths(paths)
+    refs = refs_for(profiles, unknown, role)
+    out = [
+        "# AI CONTEXT PACKET v1\n",
+        "> Generated, read-only view. Source documents remain authoritative.\n",
+        f"> role={role} profiles={','.join(sorted(profiles)) or 'none'} "
+        f"unknown={','.join(unknown) or 'none'}\n",
+        "> If unknown is not 'none', full safety docs are intentionally included "
+        "(fail-closed).\n\n",
+        "## Changed / intended paths\n\n",
+        *(f"- `{path}`\n" for path in paths),
+    ]
+    for ref in refs:
+        text, first, last, digest = read_ref(ref, source_ref=source_ref)
+        suffix = f" §{ref.section}" if ref.section else ""
+        out.extend((
+            f"\n## SOURCE `{ref.path}{suffix}` (lines {first}-{last}, sha256={digest})\n\n",
+            text,
+            "\n" if not text.endswith("\n") else "",
+        ))
+    if role == "implement":
+        routed_paths = {ref.path for ref in refs}
+        for path in paths:
+            target_path = safe_worktree_path(path)
+            if path in routed_paths or not target_path.is_file():
+                continue
+            try:
+                text = target_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                out.append(f"\n## WORKING FILE `{path}` — binary; text packet omitted\n")
+                continue
+            digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+            line_count = len(text.splitlines())
+            out.extend((
+                f"\n## WORKING FILE `{path}` (lines 1-{line_count}, "
+                f"sha256={digest})\n\n",
+                text,
+                "\n" if not text.endswith("\n") else "",
+            ))
+    if role == "review":
+        if not base:
+            raise ValueError("review packet requires --base")
+        base_commit = resolve_commit(base)
+        target_commit = resolve_commit(target)
+        diff = _git(
+            "diff", "--find-renames", "--find-copies", "--no-ext-diff",
+            base_commit, target_commit, "--",
+        )
+        out.extend((
+            "\n## COMPLETE DIFF — NOT TRUNCATED\n\n",
+            "```diff\n", diff, "\n" if not diff.endswith("\n") else "", "```\n",
+        ))
+    return "".join(out)
+
+
+def changed_paths(base: str, target: str) -> list[str]:
+    base_commit = resolve_commit(base)
+    target_commit = resolve_commit(target)
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "--find-renames", "--find-copies",
+         base_commit, target_commit, "--"],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.decode(errors="replace").strip())
+    return [item.decode(errors="surrogateescape")
+            for item in result.stdout.split(b"\0") if item]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    review = sub.add_parser("review", help="packet for an independent commit review")
+    review.add_argument("--base", required=True, help="base commit (exclusive)")
+    review.add_argument("--target", default="HEAD", help="target commit (default: HEAD)")
+    implement = sub.add_parser("implement", help="packet for an implementation surface")
+    implement.add_argument("paths", nargs="+", help="intended files or representative paths")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        if args.command == "review":
+            paths = changed_paths(args.base, args.target)
+            if not paths:
+                raise ValueError("review range has no changed paths")
+            packet = build_packet(paths, "review", base=args.base, target=args.target)
+        else:
+            packet = build_packet(args.paths, "implement")
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"FAIL ai_context: {exc}", file=sys.stderr)
+        return 2
+    sys.stdout.write(packet)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

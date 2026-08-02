@@ -84,6 +84,7 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 
 **repo 정본 (`~/ros2_ws/`)**: `AGENTS.md`(공통 규칙) · `CLAUDE.md`(Claude 진입점) ·
 `docs/{PROJECT_CONTEXT, MASTER_PLAN, CURRENT_HANDOFF, TEST_GATES, PITFALLS, REAL_ROBOT_VALUES}.md` ·
+`docs/AI_CONTEXT.md`(AI 입력 라우팅·품질/토큰 측정 계약) ·
 **`docs/FREEZE_MANIFEST.md`**(동결 증거 — 해시·게이트 수치·조건부 위험·검토 결과. 07-24 신설) ·
 `docs/legacy/CLAUDE_pre-restructure_0720.md`(개편 전 CLAUDE.md 백업, git `8042464`와 동일).
 

@@ -25,7 +25,12 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
 
 1. 이 파일 (공통 규칙)
 2. **`docs/CURRENT_HANDOFF.md` — 지금 할 한 묶음. 작업 시작 전 반드시 읽는다.**
-3. 작업에 필요한 절만 선택해 읽는다:
+3. 위 두 파일을 읽은 뒤에는 원문을 여러 번 따로 열기 전에 **문맥 패킷을 한 번 생성한다**:
+   - 구현: `python3 tools/ai_context.py implement <의도한 파일...>`
+   - 검토: `python3 tools/ai_context.py review --base <대상^> --target <대상>`
+   패킷은 원문 정본을 대체하지 않으며 실패·미지 경로면 아래 수동 순서로 fail-closed 복귀한다.
+   계약·측정·검증 상한 = `docs/AI_CONTEXT.md`.
+4. 작업에 필요한 절만 선택해 읽는다:
    - `docs/PROJECT_CONTEXT.md` — 구조·계약·버전 고정값·문서 맵
    - `docs/MASTER_PLAN.md` — 단계 순서·동결 게이트·실차 사다리·유효 결정 색인
    - `docs/TEST_GATES.md` — 테스트·런치 실행법·PASS 기준
@@ -33,7 +38,7 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
    - `docs/FREEZE_MANIFEST.md` — 동결 증거(해시·게이트 수치·조건부 위험·검토 결과). **platform-core 를 건드리기 전 필수**
    - `docs/REAL_ROBOT_VALUES.md` — 구동부 실측값 정본·실차 반영 지점 (실차 작업 시)
 
-**검토자(Codex)도 같은 순서로 진입한다** — 핸드오프가 직전 완료 묶음과 그 기록 절을
+**검토자(Codex)도 같은 순서로 진입한다** — 패킷과 핸드오프가 직전 완료 묶음과 그 기록 절을
 가리키므로 별도 요청문이 필요 없다. 요청은 **대상 커밋 해시만** 주면 된다.
 실행 범위 = `docs/TEST_GATES.md §7` (전량 아님), 결과 기록 위치 = 아래 §5.
 
