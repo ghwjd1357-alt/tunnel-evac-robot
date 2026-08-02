@@ -44,13 +44,15 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md
 
 ## ★ 이번 회차 최우선 확인 사항 — 현장 실행
 
-1. 사용자가 `docs/JETSON_SETUP.md §1`부터 순서대로 실행하고 출력을 붙여넣는다. AI는 결과를
+1. **D+0 착수 전에** `JETSON_SETUP.md §3`의 HTTPS+PAT private clone을 실제 Jetson에서 통과한다.
+   노트북 clone 성공은 Jetson 인증 증거가 아니다. 실패하면 USB 소스 복사 경로를 준비한다.
+2. 사용자가 `docs/JETSON_SETUP.md §1`부터 순서대로 실행하고 출력을 붙여넣는다. AI는 결과를
    해석하고 코드/인프라를 분류한다. Jetson SSH 비밀번호는 AI가 입력하지 않는다.
-2. `TODO(D+0)`를 만나면 넘기지 말고 실측값을 그 자리에 기록한다. 전량 목록은
+3. `TODO(D+0)`를 만나면 넘기지 말고 실측값을 그 자리에 기록한다. 전량 목록은
    `JETSON_SETUP.md §9`의 10건이다.
-3. EKF를 먼저 띄운 뒤 구동부가 있는 자리에서 `bash tools/d0_check.sh`를 실행한다.
-4. 런북 순서·NTP·agent 먼저 기동 후 Teensy reset·부팅 뒤 8.7초 정지 조건을 지킨다.
-5. 네트워크, `micro_ros_arduino` 라이브러리 폴더, 전원·충전, E-stop 인계를 현장에서 확인한다.
+4. EKF를 먼저 띄운 뒤 구동부가 있는 자리에서 `bash tools/d0_check.sh`를 실행한다.
+5. 런북 순서·NTP·agent 먼저 기동 후 Teensy reset·부팅 뒤 8.7초 정지 조건을 지킨다.
+6. 네트워크, `micro_ros_arduino` 라이브러리 폴더, 전원·충전, E-stop 인계를 현장에서 확인한다.
 
 ## 사용자 결정 — 유지
 

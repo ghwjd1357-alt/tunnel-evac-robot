@@ -176,16 +176,26 @@ fi
 ls -d ~/ros2_ws/src/tunnel_bringup ~/ros2_ws/src/sllidar_ros2
 ```
 
-⚠ **private 저장소 인증**: `git clone` 이 아이디·비밀번호를 물으면 GitHub 계정 비밀번호는
-안 통한다(2021년에 막혔다). 셋 중 하나로 한다 — **인수 전에 정해 둘 것**:
+🔴 **인수 전 선행 게이트 — private 저장소 인증**: `git clone` 이 아이디·비밀번호를 물으면
+GitHub 계정 비밀번호는 안 통한다(2021년에 막혔다). **1차 경로는 HTTPS + PAT(classic, `repo`),
+비상 경로는 USB 소스 복사**로 확정한다. SSH 키는 PAT를 쓰지 않기로 바꿀 때의 대안이다.
 
 | 방법 | 준비 | 비고 |
 |---|---|---|
-| **Personal Access Token** | GitHub → Settings → Developer settings → PAT(classic, `repo` 권한) | 비밀번호 자리에 토큰을 붙여넣는다. 가장 빠르다 |
+| **Personal Access Token — 1차** | GitHub → Settings → Developer settings → PAT(classic, `repo` 권한) | 비밀번호 프롬프트에 토큰을 붙여넣는다. 가장 빠르다 |
 | **SSH 키** | Jetson 에서 `ssh-keygen` → 공개키를 GitHub 에 등록 | `git@github.com:…` 주소로 clone |
-| **USB 복사** | 노트북에서 소스만 복사 (§8) | 네트워크 없을 때의 유일한 길 |
+| **USB 복사 — 비상** | 노트북에서 소스만 복사 (§8) | 네트워크 없을 때의 유일한 길 |
 
-TODO(D+0): 확인 — 위 셋 중 무엇을 쓸지. 확인 방법 = 인수 전에 실제로 한 번 clone 해 본다.
+⚠ PAT를 URL(`https://TOKEN@…`)이나 명령 인자에 넣지 않는다. shell history·로그·문서에 남는다.
+위의 평범한 HTTPS `git clone`을 실행하고, Username에는 GitHub ID, Password 프롬프트에는 PAT를
+붙여넣는다(화면에 표시되지 않는 것이 정상). `gh auth status`와 Git HTTPS 자격증명은 별개이므로
+`gh` 로그인 여부로 clone 성공을 대신 판정하지 않는다.
+
+TODO(D+0): 확인 — **실제 Jetson에서** 위 HTTPS 명령으로 private 저장소를 한 번 clone하고
+`git -C ~/ros2_ws rev-parse HEAD`가 원격 `main`과 같은 40자 SHA를 출력해야 이 게이트가 닫힌다.
+인수 전에 못 하면 D+0 첫 작업으로 넘기는 것이 아니라 **D+0 착수 차단 상태**로 기록하고 USB
+비상 경로를 준비한다. 2026-08-03 노트북에서는 HTTPS private clone을 실제 통과했지만, 노트북의
+자격증명이 Jetson에 이전되는 것은 아니므로 Jetson 통과 증거로 승격하지 않는다.
 
 ## 4. 의존성 설치 → COLCON_IGNORE → 빌드
 
@@ -524,7 +534,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 |---|---|---|---|
 | 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 |
 | 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 |
-| 3 | private 저장소 인증 수단 | 인수 전에 실제로 한 번 clone | §3 |
+| 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 |
 | 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d |
