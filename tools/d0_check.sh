@@ -72,10 +72,10 @@
 #     echo --field(부호)| 관측 창 | 124/137  | rc 무시       | 결론 방향별로 분기(아래 [6] 주석)
 #     echo /firmware  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
 #     echo /estop ×2  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
-#     topic info(재확인)| 스냅샷 | 0        | 파이프 끝 grep| 유지 — 잘리면 grep 이 실패해 FAIL
+#     topic info(재확인)| 스냅샷 | 0        | 파이프 끝 grep| rc 0 확인 후 판독 (08-03 P2 보완)
 #
-#   ⚠ 마지막 자리(재확인)만 rc 를 직접 안 본다. 파이프라인이라 `$?` 는 마지막 `grep` 것이고,
-#     출력이 잘리면 그 grep 이 실패해 **fail-closed 방향으로** 떨어진다. 숨기지 않고 적어 둔다.
+#   마지막 자리도 원 명령 rc를 먼저 확인한다. rc 0이 아닌 잘린 스냅샷은 EKF 행이 보여도
+#   유지 판정에 사용하지 않는다.
 #
 # ⚠ 이 스크립트는 tools/lib_e2e.sh 를 **일부러 source 하지 않는다.**
 #   그쪽 `cleanup()` 은 nav2·slam·gzserver 를 **이름으로 전역 kill** 한다 — 전용 시뮬 PC
@@ -605,10 +605,18 @@ echo
 #   판정의 전제가 판정 뒤에 사라지면 그 판정은 이미 무효다 → 끝에서 한 번 더 묻는다.
 echo "[재확인] $EKF_NODE 가 아직 두 토픽을 구독 중인가"
 for t in "$ODOM_TOPIC" "$IMU_TOPIC"; do
-  if hard_timeout 20 ros2 topic info "$t" -v 2>/dev/null \
-     | awk '/^Node name:/ { node=$3 } /^Endpoint type:/ { ep=$3 }
+  RECHECK_OUT="$TMP/recheck${t//\//_}.txt"
+  hard_timeout 20 ros2 topic info "$t" -v >"$RECHECK_OUT" 2>/dev/null
+  RECHECK_RC=$?
+  if [ "$RECHECK_RC" != "0" ]; then
+    ng "$t 의 최종 topic info 가 rc=$RECHECK_RC 로 끝났다 — **판독 실패**"
+    ng "  → EKF 행이 일부 출력됐어도 스냅샷이 완주하지 않았으므로 유지 판정하지 않는다"
+    head -3 "$RECHECK_OUT" | sed 's/^/       /'
+    continue
+  fi
+  if awk '/^Node name:/ { node=$3 } /^Endpoint type:/ { ep=$3 }
             /Reliability:/ { if (ep == "SUBSCRIPTION") print node; ep="" }' \
-     | grep -qx "$EKF_NODE"; then
+       "$RECHECK_OUT" | grep -qx "$EKF_NODE"; then
     ok "$t — $EKF_NODE 구독 유지"
   else
     ng "$t 을 구독하던 $EKF_NODE 가 사라졌다 — 검사 도중 죽었다"
