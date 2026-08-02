@@ -1,0 +1,61 @@
+# 99-teensy-drive.rules — Teensy(구동부) 시리얼 장치에 고정 이름을 붙인다 (S6-3, 2026-08-02)
+# =============================================================================
+# 무엇을 해결하는가:
+#   리눅스는 USB 시리얼 장치에 꽂힌 순서대로 /dev/ttyACM0, /dev/ttyACM1 … 을 준다.
+#   그래서 재부팅하거나 케이블을 다시 꽂으면 **번호가 바뀐다.** 런치 파일은
+#   `serial_dev` 기본값으로 /dev/teensy_drive 를 쓰는데(launch/real_bringup.launch.py),
+#   그 이름을 만들어 주는 것이 이 규칙이다.
+#   ⚠ 없으면 D+0 에 "어제는 됐는데 오늘은 안 된다"가 일어난다. 원인이 눈에 안 보인다.
+#
+# 누가 만들기로 했나:
+#   구동부에 물었더니 "현재 없음" 회신 → **역할 A 가 작성**한다
+#   (docs/REAL_ROBOT_VALUES.md §5 항목 5).
+#
+# =============================================================================
+# ⚠⚠ 이 파일은 아직 **완성되지 않았다.** 아래 두 값은 Teensy 를 실제로 꽂아 봐야 안다.
+#     추측으로 채우지 않는다 — 틀린 값을 넣으면 규칙이 조용히 아무 일도 안 하고,
+#     "규칙을 넣었는데 왜 안 되지"로 D+0 오전을 쓴다 (docs/PITFALLS.md 의 반복 패턴).
+#
+#   TODO(D+0): 확인 — idVendor / idProduct 를 실측해 아래 XXXX / YYYY 를 바꾼다.
+#
+#   [확인 방법] Teensy 를 Jetson USB 에 꽂은 뒤 (장치 번호는 ttyACM1 일 수도 있다):
+#
+#     ls /dev/ttyACM*
+#     udevadm info -q property -n /dev/ttyACM0 | grep -E '^ID_VENDOR_ID=|^ID_MODEL_ID=|^ID_SERIAL_SHORT='
+#
+#   출력 예시(값은 실제와 다를 수 있다 — 이건 '형식'을 보여주는 것이지 정답이 아니다):
+#     ID_VENDOR_ID=16c0
+#     ID_MODEL_ID=0483
+#     ID_SERIAL_SHORT=1234567
+#
+#   그 세 값을 아래 규칙의 XXXX(=ID_VENDOR_ID) · YYYY(=ID_MODEL_ID) 자리에 넣는다.
+#
+#   [속성 전체를 보고 싶을 때] 위 명령으로 안 나오면 아래로 장치 트리를 거슬러 본다:
+#     udevadm info -a -n /dev/ttyACM0 | head -40
+#   여기서 처음 나오는 ATTRS{idVendor} / ATTRS{idProduct} 를 쓴다.
+#   (-a 는 부모 장치까지 훑기 때문에 같은 이름이 여러 번 나온다 — **처음 것**이 이 장치다)
+#
+# =============================================================================
+# [설치 방법] — Jetson 에서 (sudo 필요. Claude 는 SSH 비번을 못 치므로 사용자가 실행한다)
+#
+#   sudo cp ~/ros2_ws/tools/udev/99-teensy-drive.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   # USB 를 뽑았다 다시 꽂는 것이 가장 확실하다
+#   ls -l /dev/teensy_drive          # → /dev/ttyACM0 을 가리키는 심볼릭 링크가 보이면 성공
+#
+# [권한] micro_ros_agent 가 이 장치를 열려면 읽기·쓰기 권한이 필요하다.
+#   아래 규칙은 MODE="0666" 으로 모두에게 열어 준다(개발 장비 기준).
+#   더 좁히려면 MODE 를 지우고 GROUP="dialout" 만 두고, 계정을 그 그룹에 넣는다:
+#     sudo usermod -aG dialout $USER      # ★ 로그아웃/로그인 해야 반영된다
+#
+# ⚠ 라이다(/dev/ttyUSB0)는 이 규칙과 무관하다 — 칩이 달라 VID/PID 가 다르다.
+#   라이다까지 고정하려면 같은 방법으로 규칙을 하나 더 만든다(TODO: R0 이후).
+# ⚠ Teensy 를 두 개 이상 꽂게 되면 VID/PID 만으로는 구분이 안 된다 —
+#   그때는 ATTRS{serial}=="…"(위 ID_SERIAL_SHORT)를 조건에 추가한다.
+# =============================================================================
+
+# 아래 한 줄이 실제 규칙이다. XXXX / YYYY 를 바꾸기 전에는 **아무 것도 하지 않는다**
+# (존재하지 않는 VID/PID 라 매칭이 안 된다 = 조용히 무효). 그래서 안 바꾸고 설치하면
+# tools/d0_check.sh 의 검사 [1] 이 "/dev/teensy_drive 없음" 으로 잡아 준다.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="YYYY", SYMLINK+="teensy_drive", MODE="0666"

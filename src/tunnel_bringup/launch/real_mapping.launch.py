@@ -73,8 +73,11 @@ def generate_launch_description():
             'serial_dev', default_value='/dev/teensy_drive',
             description='Teensy 시리얼 장치 (TEENSY 합의사항 §4.5 udev 링크)'),
         DeclareLaunchArgument(
-            'serial_baud', default_value='921600',
-            description='micro-ROS 전송 속도 (합의사항 §4.5 임시 기준)'),
+            'serial_baud', default_value='115200',
+            description='micro-ROS 전송 속도. 08-02 확정 = 115200 (구동부 3차 회신 §1, '
+                        '구값 921600 은 07-24 임시 기준이었다). Teensy 4.x USB CDC 는 '
+                        '이 값이 명목값이고 실제 속도는 USB 가 정한다 — 산술상 115200bps '
+                        '(≈11.5KB/s)로는 실측 46.5Hz 발행량(≈51KB/s)이 나올 수 없다'),
     ]
 
     banner = LogInfo(

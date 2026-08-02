@@ -105,13 +105,13 @@ S6-5(D+1 런북)의 **시작 조건**이 된다.
 
 | # | 준비물 | 상태 | **작성순** | **D+0 실행순** | 왜 필요한가 |
 |---|---|---|:---:|:---:|---|
-| S6-1 | Jetson 셋업 런북 | ❌ | 5 | **1** | apt·rosdep 목록 + 빌드 순서. D+0 오전을 여기서 날리지 않기 위함 |
-| S6-2 | `micro_ros_agent` 확보 2안 | ❌ | **2** | 3 | **apt 바이너리가 없다** — 소스 빌드 절차 + Docker `microros/micro-ros-agent:humble`(arm64) 백업안. **D+0 최대 시간 소모 구간** |
-| S6-3 | udev 규칙 `/dev/teensy_drive` | ❌ | 4 | 4 | 합의서 §4.5 에 장치명만 있고 **작성 주체가 정해진 적이 없다**. 없으면 `/dev/ttyACM*` 번호가 매번 바뀐다 |
-| S6-4 | 3줄 검증 스크립트 | ❌ | **3** | 5 | D+0 통과 판정용 — `topic hz /odom`·`/imu/data` + 전진 시 twist 부호 (+ **QoS 확인 1줄** — 예약 19 ①) |
-| S6-5 | D+1 첫 스텝 런북 | ❌ | 6 | 6 | agent 연결 → TF 트리 → EKF 기동 → R3 rosbag |
+| S6-1 | Jetson 셋업 런북 | ✅ **08-02 완료** | 5 | **1** | `docs/JETSON_SETUP.md`. apt·rosdep + `COLCON_IGNORE` + 소스 빌드. ★ 작성 중 **`sllidar_ros2` 가 저장소에 없다**는 D+0 즉발 함정을 발견해 §3-b 로 넣었다(아래 포터빌리티 표도 정정) |
+| S6-2 | `micro_ros_agent` 확보 2안 | ✅ **08-02 완료** | **2** | 3 | `JETSON_SETUP.md §5`. **apt 부재를 실측 확인**(대조군 `micro-ros-msgs` 는 후보 있음). 안 A = 소스 빌드(`micro_ros_setup` humble 3.1.3), 안 B = Docker — **`linux/arm64` 지원을 Docker Hub manifest 로 확인**. ⚠ 둘 다 **네트워크 필요**가 잔여 위험 |
+| S6-3 | udev 규칙 `/dev/teensy_drive` | ✅ **08-02 완료** | 4 | 4 | `tools/udev/99-teensy-drive.rules`. VID/PID 는 실측 필요라 `TODO(D+0)` + `udevadm info -q property` 확인 명령까지 (함정 S6-e) |
+| S6-4 | 검증 스크립트 (3줄 → **6검사**) | ✅ **08-02 완료** | **3** | 5 | `tools/d0_check.sh`. 장치·`hz`×2(평균+**최대 간격**)·QoS 정합×2·전진 부호. **가짜 `ros2` 로 10 시나리오 실행 검증**(판독 실패·부호 반대·RELIABLE 구독자 등). 종료 0/1/**2(불완전)** 구분 |
+| S6-5 | D+1 첫 스텝 런북 | ✅ **08-02 완료** | 6 | 6 | `docs/D1_FIRST_STEP.md` + **`tools/bag_gap_report.py`**(실제 bag 으로 검증). agent → 라이다 장착·측정 → TF 트리 → EKF → R3 rosbag **분석까지** |
 | S6-6 | 구동부 회신 확정값 **문서 정본** 반영 | ✅ **08-02 완료** | — | — | 3차 회신(08-01)까지 전부 반영: PPR **2641.1**·체배 ×4 / IMU **46.4Hz** / odom 46.5Hz / 반지름 **3종 분리** / 좌우간격 **물리·실효 분리**. 대상 = `REAL_ROBOT_VALUES.md §1`·`§4`·`§5` · `PROJECT_CONTEXT.md`. 계약 정본 = `~/Desktop/TEENSY_실차연동_최종합의서_0802.md` |
-| S6-7 | 구동부 회신 확정값 **코드 반영** = **예약 19** | ✅ **08-02 승인 · 착수 대기** | **1** | 사전 | `src/tunnel_bringup/**` **동결 예외 4회차**(`FREEZE_MANIFEST.md §10.4`). 대상 5건 = `MASTER_PLAN.md §7` **예약 19**. ⚠ ①EKF QoS·②Nav2 속도상한은 **D+0 즉발** |
+| S6-7 | 구동부 회신 확정값 **코드 반영** = **예약 19** | ✅ **08-02 완료** | **1** | 사전 | `src/tunnel_bringup/**` **동결 예외 4회차**(`FREEZE_MANIFEST.md §10.4`). 대상 5건 = `MASTER_PLAN.md §7` **예약 19**. ⚠ ①EKF QoS·②Nav2 속도상한은 **D+0 즉발** |
 
 **★ D+0 에 반드시 필요한 한 줄** (모르고 시작하면 오전을 통째로 쓴다):
 
@@ -129,7 +129,7 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
 | 절대경로 (`/home/...`) | **0건** ✅ |
 | `setup.py` data_files (launch·config·urdf → share 복사) | **정상** ✅ (`PITFALLS.md §3` 함정 회피) |
 | `tunnel_bringup` 언어 | **순수 Python** — 컴파일 없음, 빌드 수 초 ✅ |
-| `sllidar_ros2` | 이미 `src/` 에 있음 — clone 불필요 ✅ |
+| `sllidar_ros2` | 🔴 **정정(08-02)** — 이 줄은 **노트북 기준이었고 Jetson 에는 틀리다.** `.gitignore` 가 `src/sllidar_ros2/` 를 제외하므로 **새로 clone 한 Jetson 에는 없다**(추적 파일 0건 확인). 그런데 `tunnel_bringup/package.xml` 이 의존으로 선언 → **빌드가 실패한다.** 별도 clone 필요 = `JETSON_SETUP.md §3-b` |
 | `tunnel_sim` | 🔴 Gazebo 의존 → **`COLCON_IGNORE` 필요** |
 
 ## 4. 최종 시나리오 확정 회의 안건 — 사람 탐색 정책 8문항 (순서 8에서)
@@ -468,7 +468,7 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
      감시한다 — 어느 쪽이 바뀌어 관계가 뒤집히면 FAIL 한다. 상세 = `REAL_ROBOT_VALUES.md §1`.
    - **미확보 공개**: `/scan`·`/odom` 은 실측이 없어 **'미확보'로 선언**했다(추정으로 채우지 않음).
 
-19. **구동부 3차 회신 확정값 — `src/tunnel_bringup/**` 코드 반영** ✅ **08-02 사용자 승인 · 착수 대기**
+19. **구동부 3차 회신 확정값 — `src/tunnel_bringup/**` 코드 반영** ✅ **08-02 완료** (승인·구현 같은 날)
    (08-02 신설·같은 날 승인. `MASTER_PLAN.md §3 S6-7` 과 한 쌍 — 그쪽은 준비물 표·순서,
    여기는 대상 목록. 동결 예외 기록 = `docs/FREEZE_MANIFEST.md §10.4`.)
 
@@ -491,13 +491,56 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    - **재개방 조건**: 인수 후 flake 를 규명하면 **그때 이 변경을 게이트로 재판정**한다.
      규명 전까지 "게이트가 통과했으니 안전하다"고 쓰지 않는다.
 
-   | # | 파일 | 현재 값 | 반영할 값 | 급 |
-   |---|---|---|---|---|
-   | ① | `config/ekf_real.yaml` | QoS 오버라이드 **없음**(기본 RELIABLE) | `/odom`·`/imu/data` 구독을 **BEST_EFFORT** 로 | 🔴 |
-   | ② | `config/nav2_params_real.yaml` | `max_velocity: [0.30, 0.0, 0.80]` | **`[0.12, 0.0, 0.50]`** (펌웨어 상한) | 🔴 |
-   | ③ | `urdf/robot_real.urdf` | `base_footprint→base_link` `z=0.065` | **`z=0.053`** (실측 축높이) | 🔴 |
-   | ④ | `urdf/robot_real.urdf` | `imu_link` `xyz="0 0 0" rpy="0 0 0"` TODO | **`xyz="0 0 0.339" rpy="0 0 -1.5708"`** | 🟠 |
-   | ⑤ | `config/ekf_real.yaml` 주석 · `launch/*.launch.py` | IMU 41.63Hz·max 30ms · `serial_baud 921600` | **46.4Hz·20~23ms** · **115200** | 🟡 |
+   | # | 파일 | 현재 값 | 반영할 값 | 급 | 결과 |
+   |---|---|---|---|---|---|
+   | ① | `config/ekf_real.yaml` | QoS 오버라이드 **없음**(기본 RELIABLE) | `/odom`·`/imu/data` 구독을 **BEST_EFFORT** 로 | 🔴 | ⊘ **전제가 틀렸다 — 아래 ★** |
+   | ② | `config/nav2_params_real.yaml` | `max_velocity: [0.30, 0.0, 0.80]` | **`[0.12, 0.0, 0.50]`** (펌웨어 상한) | 🔴 | ✅ (`min_velocity` 도 함께) |
+   | ③ | `urdf/robot_real.urdf` | `base_footprint→base_link` `z=0.065` | **`z=0.053`** (실측 축높이) | 🔴 | ✅ |
+   | ④ | `urdf/robot_real.urdf` | `imu_link` `xyz="0 0 0" rpy="0 0 0"` TODO | **`xyz="0 0 0.339" rpy="0 0 -1.5708"`** | 🟠 | ✅ |
+   | ⑤ | `config/ekf_real.yaml` 주석 · `launch/*.launch.py` | IMU 41.63Hz·max 30ms · `serial_baud 921600` | **46.4Hz·20~23ms** · **115200** | 🟡 | ✅ (런치 2파일) |
+
+   ★★ **①은 "고쳤다"가 아니라 "고칠 것이 없었고, 고칠 수단도 없었다"** (08-02 실측으로 판명).
+   착수 전에 **기억이 아니라 기계에** 물었더니 등록 당시의 전제 두 가지가 다 뒤집혔다
+   (`AGENTS.md §3-10` — 근거는 `grep`·공식 문법표·실측이어야 한다).
+
+   | 등록 시 전제 | 실측 결과 (노트북 x86_64 · `ros-humble-robot-localization` 3.5.4-1jammy) |
+   |---|---|
+   | EKF 구독이 기본 **RELIABLE** 이다 | ❌ **이미 BEST_EFFORT 다.** `ros2 topic info /odom -v` → `Reliability: BEST_EFFORT` |
+   | yaml 에 QoS 오버라이드를 **넣을 수 있다** | ❌ **파라미터가 없다.** `qos_overrides.*` 는 **퍼블리셔 3개**(`/odometry/filtered`·`/tf`·`/parameter_events`)뿐이고 **구독 오버라이드는 선언되지 않는다** → 적어도 조용히 무시된다 |
+
+   ⚠ 그대로 반영했다면 **아무 효과 없는 한 줄을 넣고 "D+0 즉발을 막았다"고 기록**할 뻔했다.
+   이 저장소가 반복해 당한 *'조용한 통과'* 의 새 얼굴이다(예약 4 · §18 커버리지 폐포).
+
+   ★ **같은 클래스를 전수로 셌다** — "그럼 RELIABLE 로 굶는 구독자가 정말 하나도 없나?"
+   실차 소비자를 노트북에 전부 띄워 `ros2 topic info -v` 로 측정했다:
+
+   | 토픽 | 구독자 (실측) | 신뢰성 |
+   |---|---|---|
+   | `/odom` | `ekf_filter_node` · `bt_navigator` · `controller_server` | **전부 BEST_EFFORT** |
+   | `/odom` | `velocity_smoother` | **구독 자체를 안 한다** (`feedback: OPEN_LOOP`) |
+   | `/imu/data` | `ekf_filter_node` | **BEST_EFFORT** |
+   | `/scan` | `mission_node`(`qos_profile_sensor_data`) · `readiness_gate`(명시 BEST_EFFORT) | 발행자 `sllidar_node` 가 **RELIABLE** 이라 어느 쪽이든 매칭 |
+
+   → 위험은 **지금 아는 목록에 없다.** 그래서 조치가 아니라 **검사**로 닫았다:
+   `tools/d0_check.sh` 검사 4·5 가 *"BEST_EFFORT 발행 + RELIABLE 구독"* 을 **토픽 전체를 훑어**
+   잡는다. 목록을 손으로 적지 않았으므로 **새 노드가 붙어도 검사가 안 부서진다**
+   (`AGENTS.md §3-10 ②` 열거를 검사기 안으로). Jetson 의 apt 버전이 달라 결론이 바뀌는
+   경우도 이 검사가 **D+0 에 자동으로 재확인**한다.
+
+   **실제 변경 = 5파일** (경계 밖 diff 0 — `FREEZE_MANIFEST.md §10.4`):
+   `config/ekf_real.yaml`(⑤ + ① 실측 기록 주석) · `config/nav2_params_real.yaml`(②) ·
+   `urdf/robot_real.urdf`(③④) · `launch/real_bringup.launch.py`·`launch/real_mapping.launch.py`(⑤).
+
+   **관측으로 확인한 것** (주장이 아니라 실행 결과):
+   - `robot_state_publisher` + `tf2_echo` 로 **`base_footprint→imu_link` = 0.392 m · yaw −90°**.
+     구동부가 준 **바닥 기준 실측 392mm 와 정확히 일치** → ③④의 기준면 뺄셈(0.392−0.053)이 닫혔다.
+   - `base_footprint→base_link` = **0.053**.
+   - pytest **182** · colcon **245**(0e·0f·3s) 기준선 유지.
+
+   ⚠ **덤으로 드러난 것 (닫지 않고 공개한다)**: ② 반영으로 `desired_linear_vel` 0.12 와
+   `rotate_to_heading_angular_vel` 0.5 가 **상한과 같아졌다** — 곡선에서 선속도·각속도가
+   동시에 걸리면 바깥 바퀴가 펌웨어 상한을 넘어 **잘린다(잘림은 Nav2 에 보고되지 않는다)**.
+   실측이 없어 값을 임의로 낮추지 않았고, yaml 주석에 R6 판정 항목으로 남겼다.
 
    ★ **①②는 D+0 에 바로 터진다.** ①은 publisher BEST_EFFORT ↔ subscriber RELIABLE 불일치라
    `ros2 topic hz` 는 정상인데 **EKF 만 조용히 아무것도 못 받는다**(합의서 §4.5 가 이미 경고한
@@ -535,6 +578,31 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    ★ **교훈**: 소스를 문자열로 훑는 검사는 "무엇을 세는가"가 아니라 **"세는 것이 실행되는
    것인가"** 를 물어야 한다. `AGENTS.md §3-10 ②`("열거를 검사기 안으로")를 지켰지만
    **검사기 자신이 의미론이 아니라 표기를 봤다** — §21~§23 에서 세 번 배운 것과 같은 실패다.
+
+21. **`d0_check.sh`·`bag_gap_report.py` 판정 논리를 회귀 하네스에 편입** ❌ **미착수 · 비차단**
+   (08-02 신설 — S6-4·S6-5 산출과 함께 등록.)
+
+   등록 사유: 두 도구의 판정 논리(주기 파서 · QoS 정합 규칙 · 부호 판정 · 간격 분포)는
+   **이번 세션에 실제로 실행 검증했다** — 가짜 `ros2` 를 PATH 에 놓고 10 시나리오
+   (정상 · RELIABLE 구독자 · RELIABLE 발행자 · 빈 출력 · 경고문만 · 간격 초과 · 저주기 ·
+   부호 반대 · 무반응 · 판독 실패)를 돌려 종료 코드 0/1/2 계약까지 확인했고,
+   `bag_gap_report.py` 는 **실제로 녹화한 bag** 으로 정상·판독실패 두 경로를 확인했다.
+   **그러나 그 검증은 세션 안에만 남아 있고 저장소의 회귀가 아니다** — 다음 사람이 이
+   도구를 고치면 아무도 안 잡는다.
+
+   | 항목 | 내용 |
+   |---|---|
+   | 완료판정 | "가짜 `ros2` 픽스처로 위 10 시나리오를 돌려 **판정과 종료 코드가 계약대로**임을 회귀가 확인하고, 판독 실패가 통과로 새면 FAIL 한다" |
+   | 보완 방향 | `tools/test_harness_guards.sh` 에 케이스를 얹는다. 픽스처 생성기는 세션 산출물을 그대로 옮기면 된다 |
+   | 필수 부정 회귀 | 주기 파서에서 `average rate` 판독 실패를 **통과**로 바꾸면 FAIL · QoS 검사에서 RELIABLE 구독자 조건을 지우면 FAIL · 종료 2(불완전)를 0 으로 바꾸면 FAIL |
+   | 역회귀 | 정상 시나리오는 그대로 종료 0 |
+
+   ⚠ **왜 이번에 안 했나 (닫지 않고 공개한다)**: 하네스 케이스를 늘리면 기준선
+   **harness 24** 가 바뀌고, 그 수치는 `tools/gate_baseline_scan.py` 가 **전수 대조**하므로
+   `GATES` 등록 수와 문서 여러 자리를 함께 고쳐야 한다(§19 가 "자리 수도 계약"이라고
+   판정한 그 규칙이다). **인수 전날에 기준선을 흔드는 대신** 예약으로 분리했다.
+   ⏸ **재개 시점**: 인수 후 `test_gate_regression` 간헐 실패(§24.5a) 규명과 **같은 묶음**에서
+   처리한다 — 둘 다 회귀 하네스를 여는 작업이라 기준선을 한 번만 흔든다.
 
 ## 8. 유효 결정 색인 (한 줄씩 — 상세 근거는 링크 절. 100줄 초과 시 별도 파일로 분리)
 

@@ -32,11 +32,19 @@ ekf_filter_node:
     # ★ 실차 = 실제 시계. 시뮬 전용 시계를 쓰면 stamp 가 전부 어긋나 TF 가 폭주한다.
     use_sim_time: false
 
-    frequency: 30.0             # 융합 결과 발행 주기(Hz). 입력(odom 계약 50Hz · IMU 실측
-                                #   41.63Hz)보다 낮게. ⚠ 08-01: IMU **최대 간격 30ms** 와
-                                #   이 주기 33.33ms 의 여유가 3.33ms 뿐이다 — 이 값을
-                                #   33.33Hz 위로 올리면 EKF 한 주기가 IMU 없이 지나갈 수
-                                #   있다. 회귀가 그 관계를 감시한다(test_gate_fakes_periods).
+    frequency: 30.0             # 융합 결과 발행 주기(Hz). 입력(구동부 3차 회신 실측 —
+                                #   /odom 46.5Hz(20~22ms) · /imu/data 46.4Hz(20~23ms))보다
+                                #   낮게. 이 주기 33.33ms 와의 여유는 약 10.3ms 다.
+                                #   ⚠ 08-02 갱신: 구값 '41.63Hz · 최대 30ms · 여유 3.33ms'
+                                #     (2차 회신)는 폐기됐다. 정본 = REAL_ROBOT_VALUES.md §1.
+                                #   ⚠ **23ms 를 상한으로 쓰지 않는다** — 3차 회신에도 관측
+                                #     창 크기·표본 수가 없다(2차 회신 'max 30ms' 와 같은 형태).
+                                #     R3 rosbag 간격 히스토그램에서 33.33ms 초과가 나오면
+                                #     이 값을 다시 판단한다.
+                                #   ⚠ 이 값을 33.33Hz 위로 올리면 EKF 한 주기가 IMU 없이
+                                #     지나갈 수 있다. 회귀가 그 관계를 감시한다
+                                #     (test_gate_fakes_periods — 하네스 주기는 아직 구값이고
+                                #      R3 rosbag 때 한 번에 교체한다. TEST_GATES.md §2).
                                 # TODO: R4 실측 후 확정 — Jetson CPU 여유와 Nav2 제어주기
                                 #   20Hz 를 함께 보고 조정한다.
     two_d_mode: true            # 평면 주행(터널 바닥): z·roll·pitch 를 0 으로 강제.
@@ -47,6 +55,34 @@ ekf_filter_node:
     odom_frame: odom
     base_link_frame: base_footprint   # URDF 의 root link, slam_params 의 base_frame 과 동일
     world_frame: odom                 # "odom 기준 위치를 추정" = odom→base TF 를 만든다는 뜻
+
+    # ===== ★ QoS 정합 — 여기에 오버라이드를 쓰지 않는 이유 (08-02 실측) =====
+    # 배경: micro-ROS(Teensy)는 /odom·/imu/data 를 **BEST_EFFORT / VOLATILE** 로 발행한다
+    #   (최종합의서 §5). 그런데 BEST_EFFORT 퍼블리셔 + RELIABLE 구독자는 **매칭되지 않고**,
+    #   증상이 "에러 없이 조용히 0건" 이라 `ros2 topic hz /odom` 은 정상인데 EKF 만
+    #   아무것도 못 받는 형태로 나타난다. 그래서 예약 19 ①은 여기에 구독 QoS 오버라이드를
+    #   넣을 계획이었다.
+    #
+    # ★ 실측 결과 그 계획은 **전제가 틀렸다** — 두 가지가 함께 확인됐다.
+    #   ⓐ robot_localization 의 입력 구독은 **이미 BEST_EFFORT 다.** 고칠 것이 없다.
+    #   ⓑ robot_localization 이 파라미터로 여는 QoS 오버라이드는 **퍼블리셔 3개뿐**이다
+    #      (`qos_overrides./odometry/filtered.publisher.*` · `/tf` · `/parameter_events`).
+    #      **구독 오버라이드 파라미터는 존재하지 않는다** → 여기에 적으면 아무 효과 없이
+    #      조용히 무시되고, "우리가 조치해 뒀다"는 거짓 안심만 남는다. **적지 말 것.**
+    #
+    # 실측 환경: 2026-08-02 · 노트북 x86_64 · ros-humble-robot-localization 3.5.4-1jammy
+    #   재현(로봇 없이 됨 — 퍼블리셔가 0이어도 구독자 QoS 는 보인다):
+    #     ros2 run robot_localization ekf_node --ros-args --params-file <이 파일>
+    #     ros2 param list /ekf_filter_node | grep qos     # publisher 3개만 나온다
+    #     ros2 topic info /odom -v                        # Reliability: BEST_EFFORT
+    #     ros2 topic info /imu/data -v                    # Reliability: BEST_EFFORT
+    #   같은 방법으로 Nav2 소비자도 확인했다: bt_navigator·controller_server 의 /odom 구독도
+    #   BEST_EFFORT, velocity_smoother 는 (feedback: OPEN_LOOP 라) /odom 을 아예 구독하지 않는다.
+    #
+    # ⚠ TODO(D+0): 확인 — Jetson 의 apt 가 주는 robot_localization 버전이 다를 수 있다.
+    #   버전이 바뀌면 위 ⓐ 가 바뀔 수 있으므로 **값을 믿지 말고 위 명령을 다시 돌린다.**
+    #   이 확인은 tools/d0_check.sh 의 [4] 가 자동으로 한다 — 그쪽이 정본 검사다.
+    #   ⓑ(오버라이드 파라미터 없음)가 뒤집히는 경우에도 조치는 '여기에 추가'가 맞다.
 
     # ===== 입력 ① 휠 오도메트리 /odom (Teensy) =====
     # 속도(vx, vy, vyaw)만 융합한다. 위치(x,y)를 그대로 믿으면 누적 드리프트까지

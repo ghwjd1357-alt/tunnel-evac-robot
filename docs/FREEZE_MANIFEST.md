@@ -417,3 +417,42 @@ FAIL 한다 — 사람이 목록을 보고 옮겨 적는 자리를 없앤 것이
 - **실행은 하되** 결과는 **참고 기록**으로만 남긴다
 - **재개방 조건**: 인수 후 flake 를 규명하면 **그때 이 변경을 게이트로 재판정**한다.
   규명 전까지 "게이트가 통과했으니 안전하다"고 **쓰지 않는다**
+
+#### 10.4.1 실제 변경 기록 (2026-08-02 구현 완료)
+
+| 항목 | 값 |
+|---|---|
+| 실제 변경 | **5파일** — `config/ekf_real.yaml` · `config/nav2_params_real.yaml` · `urdf/robot_real.urdf` · `launch/real_bringup.launch.py` · `launch/real_mapping.launch.py` |
+| 변경 안 함 (확인) | `src/tunnel_sim/**` · `src/mission_manager/**` · `src/tunnel_bringup/tunnel_bringup/**` · `src/tunnel_bringup/test/**` → `git diff --stat` **0줄**. **`gate_fakes.py` 무변경** |
+| 회귀 | pytest **182 passed** · colcon **245 tests, 0 errors, 0 failures, 3 skipped** — 기준선 유지 |
+| 참고 기록 (판정 근거 아님) | `test_gate_regression` — 위 '판정 근거에서 제외' 항목대로 실행하되 결과를 판정에 쓰지 않았다 |
+
+**자리별 기록** (개수가 아니라 **자리**로 남긴다 — §10.1 검토가 요구한 형식)
+
+| # | 자리 | 성격 |
+|---|---|---|
+| 1 | `nav2_params_real.yaml` — `velocity_smoother.max_velocity`/`min_velocity` | **동작** (0.30/0.80 → 0.12/0.50, 음수 쪽 포함) |
+| 2 | `nav2_params_real.yaml` — RPP `desired_linear_vel`·`rotate_to_heading_angular_vel` 주석 | 주석 (근거 갱신 + 여유 소실 경고) |
+| 3 | `robot_real.urdf` — `base_joint` origin z | **동작** (0.065 → 0.053) |
+| 4 | `robot_real.urdf` — `imu_joint` origin | **동작** (`0 0 0`/`0 0 0` → `0 0 0.339`/`0 0 -1.5708`) |
+| 5 | `robot_real.urdf` — 머리말·차고·바퀴 그림 주석 | 주석 (3종 분리 · 지상고 20mm · TODO 목록 정리) |
+| 6 | `real_bringup.launch.py`·`real_mapping.launch.py` — `serial_baud` 기본값 | **동작** (921600 → 115200) |
+| 7 | `ekf_real.yaml` — `frequency` 주석 | 주석 (41.63Hz/30ms → 46.4Hz/20~23ms, 여유 10.3ms) |
+| 8 | `ekf_real.yaml` — QoS 절 **신설** | 주석 (①의 실측 결과와 재확인 방법) |
+
+★ **①은 코드 변경이 없다 — 전제가 실측으로 뒤집혔다.** 상세 = `MASTER_PLAN.md §7` 예약 19.
+요약: EKF 구독은 **이미 BEST_EFFORT** 였고, `robot_localization` 3.5.4 는 **구독 QoS
+오버라이드 파라미터 자체를 제공하지 않는다**(퍼블리셔 3개만). 계획대로 yaml 에 한 줄을
+넣었다면 **아무 효과 없이 무시되면서 "막았다"는 기록만** 남았을 것이다.
+→ 조치 대신 **검사**로 닫았다: `tools/d0_check.sh` 가 *"BEST_EFFORT 발행 + RELIABLE 구독"* 을
+토픽 전체를 훑어 잡는다(목록을 손으로 적지 않았다). Jetson 의 버전 차이도 이 검사가 D+0 에 재확인한다.
+
+★ **관측으로 닫은 것** (구현자 주장이 아니라 실행 결과):
+`robot_state_publisher` + `tf2_echo` 실행에서 **`base_footprint→imu_link` = 0.392 m · yaw −90°** —
+구동부가 준 **바닥 기준 실측 392mm 와 일치**했다. 기준면 뺄셈(0.392 − 0.053)이 왕복으로 닫혔다.
+`base_footprint→base_link` = **0.053**.
+
+⚠ **공개하는 잔여 위험**: ② 반영으로 `desired_linear_vel`(0.12)·`rotate_to_heading_angular_vel`(0.5)이
+**펌웨어 상한과 같아졌다.** 곡선에서 두 성분이 동시에 걸리면 바깥 바퀴가 상한을 넘어 잘리고,
+**잘림은 Nav2 에 보고되지 않는다.** 실측이 없어 값을 임의로 낮추지 않았다 — R6 판정 항목이다.
+

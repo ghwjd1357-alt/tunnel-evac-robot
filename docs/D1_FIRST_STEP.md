@@ -1,0 +1,252 @@
+# D1_FIRST_STEP.md — 인수 다음 날(D+1) 첫 스텝 런북: R3 rosbag (2026-08-02 신설, S6-5)
+
+> **시작 조건**: `bash tools/d0_check.sh` 가 **종료 0**(전량 통과). 종료 2(불완전)는
+> 시작 조건이 아니다 — 건너뛴 검사를 먼저 채운다. 셋업 전체는 `JETSON_SETUP.md`.
+>
+> **끝 조건**: R3 통과 = *"odom/imu/scan 의 주기·timestamp 단조·covariance 가 EKF 재료로
+> 쓸 만한가"* 를 **녹화된 데이터로** 판정했다 (`MASTER_PLAN.md §3`).
+>
+> ⚠ 이 문서도 **장비 없이 썼다.** 확인 못 한 것은 `TODO(D+1): 확인` 으로 남기고 확인
+> 방법을 같이 적었다. 다만 아래 **§5 의 분석 도구는 노트북에서 실제 bag 으로 검증**했다.
+
+## 0. 오늘 하는 일 한 장 요약
+
+```
+① agent 기동      → /odom · /imu/data 가 흐른다
+② 라이다 기동      → /scan 이 흐른다          ★ 장착·측정이 선행 (§2)
+③ TF 트리 확인     → base_footprint → lidar_link · imu_link 가 이어진다
+④ EKF 기동        → odom → base_footprint TF 를 EKF 가 만든다
+⑤ R3 rosbag 녹화  → 그리고 **분석해서 판정**한다 (녹화만 하는 것이 아니다)
+```
+
+★ **순서를 바꾸지 않는다.** 각 단계는 앞 단계가 만든 것을 소비한다. 예를 들어 EKF 를
+먼저 띄우면 입력이 없어 "EKF 가 이상하다"로 보이는데, 실제 원인은 agent 다.
+
+★ **오늘은 로봇을 주행시키지 않는다.** R3 는 **센서 재료 수집**이다. 주행은 R6 부터고,
+그 전에 R4(EKF 단독)·R5(지도)가 있다. 순서를 건너뛰면 무엇이 틀렸는지 못 가른다.
+
+## 1. agent 기동 (터미널 A — 계속 띄워 둔다)
+
+```bash
+ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/teensy_drive -b 115200
+```
+
+Docker 로 갔다면 `JETSON_SETUP.md §5-d` 의 두 번째 명령을 쓴다.
+확인(터미널 B):
+
+```bash
+ros2 topic list | grep -E "odom|imu"
+```
+
+## 2. ★ 라이다 — 장착과 측정이 **먼저**다 (오늘의 가장 큰 미결)
+
+⚠ **라이다 스캔면 높이는 아직 없다.** 5번 요청해도 안 온 이유가 **라이다 미장착**으로
+확인됐고, 08-02 에 **장착·측정을 역할 A 가 흡수**하기로 방침이 바뀌었다
+(`REAL_ROBOT_VALUES.md §4`). 즉 **오늘 우리가 달고 우리가 잰다.**
+
+**지켜야 할 제약** (`PITFALLS.md §7` · 합의사항 §6.1):
+
+- 스캔 평면은 **몸통 최상면과 모든 고정 구조물보다 위**여야 한다. 같은 높이면 레이저가
+  자기 몸통 모서리를 상시 타격해(시뮬에서 ±90° 0.20m 고정 히트 실측) 지나간 자리마다
+  **유령 장애물**을 그리고 경로가 막힌다. 임시 기준 = 몸통 최상면 **+0.05 m 이상**.
+- 회전 중심(정중앙 x=0, y=0)에 맞춘다 — x/y 는 이미 정중앙으로 받았다.
+
+**측정과 반영**:
+
+```bash
+# ① 바닥에서 스캔 평면까지 줄자로 잰다 (단위 m)
+# ② URDF 의 lidar_joint 에 넣을 값 = (잰 높이) − 0.053    ← 0.053 = 바퀴축 높이
+#    ⚠ base_link 의 부모가 바퀴축이라 기준면을 옮겨야 한다. IMU 때와 같은 뺄셈이다.
+nano ~/ros2_ws/src/tunnel_bringup/urdf/robot_real.urdf     # lidar_joint 의 origin xyz
+cd ~/ros2_ws && colcon build --symlink-install --packages-select tunnel_bringup
+```
+
+⚠ **`z=0` 인 채로 R5(지도 제작)를 하면 지도가 통째로 못 쓰게 된다.** 지금 URDF 의 `0` 은
+측정값이 아니라 **"아직 안 쟀다"는 표시**다(그럴듯한 숫자를 넣지 않은 이유가 이것이다).
+R3 녹화 자체는 z 가 틀려도 되지만(스캔 원본은 그대로다), **잰 김에 오늘 채운다.**
+
+TODO(D+1): 확인 — 잰 높이와 URDF 에 넣은 값을 `REAL_ROBOT_VALUES.md §2` 3-a 에 기록한다.
+
+라이다 기동(터미널 C) — 런치 전체를 띄우기 전에 드라이버만 먼저 본다:
+
+```bash
+ros2 run sllidar_ros2 sllidar_node --ros-args \
+  -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=460800 \
+  -p frame_id:=lidar_link -p angle_compensate:=true -p scan_mode:=Standard
+```
+
+```bash
+ros2 topic hz /scan          # 확인
+```
+
+TODO(D+1): 확인 — 라이다 포트가 `/dev/ttyUSB0` 이 맞는지(`ls /dev/ttyUSB*`).
+번호가 바뀌면 Teensy 때와 같은 문제다 → udev 규칙을 하나 더 만든다.
+
+## 3. TF 트리 확인 — "스캔이 로봇 어디에 붙어 있는가"
+
+```bash
+ros2 run robot_state_publisher robot_state_publisher \
+  ~/ros2_ws/src/tunnel_bringup/urdf/robot_real.urdf
+```
+
+```bash
+ros2 run tf2_tools view_frames      # frames.pdf 를 만든다
+ros2 run tf2_ros tf2_echo base_footprint lidar_link
+ros2 run tf2_ros tf2_echo base_footprint imu_link
+```
+
+**기대값** (08-02 노트북에서 URDF 로 실제 확인한 값):
+
+| 변환 | 기대 | 근거 |
+|---|---|---|
+| `base_footprint → base_link` | z = **0.053** | 3차 회신 §10 실측 축높이 |
+| `base_footprint → imu_link` | z = **0.392**, yaw **−90°** | 3차 회신 §10 (바닥기준) — 0.339 + 0.053 |
+| `base_footprint → lidar_link` | z = **§2 에서 잰 값** | 오늘 측정 |
+
+★ `base_footprint → imu_link` 가 **0.392** 로 나오는지 꼭 본다. 이 값이 구동부가 준
+바닥 기준 실측과 **같아야** 뺄셈이 맞은 것이다. 다르면 URDF 의 두 자리(축높이·IMU) 중
+하나가 틀렸다.
+
+⚠ 이 시점에 `odom → base_footprint` 는 **아직 없다.** 그건 EKF 가 만든다(다음 절).
+"TF 트리가 끊겼다"는 경고가 보이면 정상이다.
+
+## 4. EKF 기동
+
+```bash
+ros2 run robot_localization ekf_node --ros-args \
+  --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml
+```
+
+⚠ **노드 이름을 바꾸지 않는다.** yaml 최상단 키가 `ekf_filter_node:` 라서, `-r __node:=…`
+로 이름을 바꾸면 **파라미터가 하나도 안 붙는다**(에러 없이 조용히 기본값으로 뜬다).
+08-02 에 노트북에서 실제로 밟은 함정이다.
+
+확인:
+
+```bash
+ros2 topic hz /odometry/filtered            # EKF 출력이 흐르는가 (= 융합 중)
+ros2 run tf2_ros tf2_echo odom base_footprint
+ros2 topic info /odom -v | grep -A1 "Endpoint type"   # 구독자 QoS 확인
+```
+
+★ `/odom`(입력)이 아니라 **`/odometry/filtered`(출력)** 를 보는 이유: 입력만 보면
+EKF 가 죽어 있어도 통과한다. 출력이 흐르면 EKF 가 살아서 융합 중이라는 뜻이다.
+
+⚠ EKF 가 조용하면 **QoS 를 먼저 의심하지 말 것** — `d0_check.sh` 검사 4·5 가 이미 봤다.
+`ekf_real.yaml` 머리말의 QoS 절(08-02 실측 기록)을 읽고, 그다음 `frame_id` 를 본다.
+
+★★ **`frame_id` 3종은 아직 미확인이다** (`REAL_ROBOT_VALUES.md §4`):
+`/odom` 의 `header.frame_id`·`child_frame_id`, `/imu/data` 의 `header.frame_id`.
+**틀리면 오류 없이 조용히 실패한다** — TF 가 안 이어져 스캔이 지도에 안 붙는다.
+
+```bash
+ros2 topic echo /odom --field header.frame_id --once        # 기대: odom
+ros2 topic echo /odom --field child_frame_id --once         # 기대: base_footprint
+ros2 topic echo /imu/data --field header.frame_id --once    # 기대: imu_link
+```
+
+TODO(D+1): 확인 — 셋 중 하나라도 다르면 **구동부 펌웨어 쪽을 고쳐야 한다.**
+우리 쪽에서 remap 으로 덮으면 나중에 두 곳이 어긋난 채로 굳는다. 결과를
+`REAL_ROBOT_VALUES.md §4` 에 기록한다.
+
+## 5. R3 rosbag — 녹화하고 **판정한다**
+
+### 5-a. 무엇을 녹화하나
+
+```bash
+mkdir -p ~/r3_bags && cd ~/r3_bags
+ros2 bag record /odom /imu/data /scan /tf /tf_static -o r3_$(date +%m%d_%H%M)
+```
+
+**녹화 대본** (한 판에 다 담는다 — 나중에 나눠 뜨면 조건이 달라진다):
+
+| 구간 | 시간 | 무엇을 보려고 |
+|---|---|---|
+| 정지 | **60초** | 드리프트 — 안 움직이는데 EKF 가 움직인다고 하면 그게 드리프트다 |
+| 손으로 앞뒤 굴리기 | 30초 | 속도 부호·스케일 |
+| 손으로 좌우 회전 | 30초 | yaw 부호·스케일 (좌회전 `angular_velocity.z` 양수) |
+| 정지 | 30초 | 다시 잠잠해지는가 |
+
+⚠ **모터로 주행하지 않는다** — 오늘은 R3 다. 바퀴는 공중(R0 상태)에서 손으로 돌린다.
+
+⚠ **`/tf` 를 녹화했으므로 재생할 때 주의**: bag 안의 `/tf` 를 그대로 재생하면 EKF 가
+발행하는 `odom→base_footprint` 와 **충돌한다**(같은 변환을 둘이 쏜다 = 위치 널뜀).
+R4 에서 재생할 때는 `--topics` 로 골라 재생하거나 EKF 의 `publish_tf` 를 끈다
+(`config/ekf_real.yaml` 머리말에 같은 경고가 있다).
+
+### 5-b. 판정 ① — 주기·간격 분포 (★ 이게 오늘의 핵심 숫자다)
+
+```bash
+cd ~/ros2_ws
+python3 tools/bag_gap_report.py ~/r3_bags/r3_XXXX /odom /imu/data /scan
+```
+
+**왜 평균이 아니라 최대 간격인가**: EKF 는 30Hz(33.33ms)로 돈다. 입력 간격이 한 번이라도
+그보다 길면 그 주기는 **입력 없이** 지나간다. 평균 46Hz 여도 가끔 40ms 가 섞이면 구멍이 난다.
+
+| 결과 | 뜻 | 다음 행동 |
+|---|---|---|
+| 33.33ms 초과 **0건** | 현재 조건에서는 EKF 재료로 충분 | R4 로 진행 |
+| 초과 **있음** | **IMU 주기 재개방 조건이 걸렸다** | `REAL_ROBOT_VALUES.md §1` 과 `src/tunnel_bringup/test/gate_fakes.py` 의 주기 정본을 **함께** 다시 판단 |
+
+★ 구동부 회신의 "20~23ms" 를 우리가 상한으로 쓰지 않은 이유가 여기서 해소된다 —
+회신에는 관측 창 크기·표본 수가 없었고, 이 bag 에는 있다.
+⚠ 그래도 **이 판정은 이 녹화 구간에 대한 사실**이다. 더 길게·다른 부하에서 다시 볼 수 있다.
+우리가 구동부의 짧은 창을 비판했으므로 우리 창의 한계도 같이 적어 둔다.
+
+### 5-c. 판정 ② — timestamp 단조성
+
+시간이 뒤로 가면 TF·EKF 가 통째로 무너진다(같은 시각의 두 값, 또는 미래 데이터).
+
+```bash
+ros2 bag info ~/r3_bags/r3_XXXX
+```
+
+TODO(D+1): 확인 — 단조성 검사는 아직 도구가 없다. `bag_gap_report.py` 가
+**음수 간격**을 보고하면 그것이 역행 신호다(간격 최소값이 음수로 찍힌다).
+음수가 보이면 그 자리에서 멈추고 원인을 본다 — 넘어가면 R4 에서 원인 불명으로 나타난다.
+
+### 5-d. 판정 ③ — covariance 가 '의미값'인가
+
+```bash
+ros2 topic echo /odom --field twist.covariance --once
+ros2 topic echo /imu/data --field angular_velocity_covariance --once
+```
+
+**보는 법**: 전부 `0.0` 이면 "불확실성이 0" 이라는 뜻이 되어 EKF 가 그 값을 **절대 신뢰**한다
+— 실제로는 "구동부가 안 채웠다"는 뜻일 가능성이 높다. 전부 `-1` 이면 "이 값 없음" 규약이다.
+
+TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 으로 차 있으면
+구동부에 확인한다. 이건 우리가 yaml 로 못 고친다(메시지 안의 값이다).
+
+## 6. 오늘 끝나면
+
+1. **bag 을 노트북으로 백업**한다. R4(EKF 단독 검증)는 이 bag 을 재생해서 한다 —
+   로봇이 없어도 되는 단계라 노트북에서 돌릴 수 있다.
+2. 아래를 **문서에 기록**한다 (다음 사람이 아니라 **일주일 뒤의 나**를 위해서다):
+   - `REAL_ROBOT_VALUES.md §2` — 라이다 z 실측값
+   - `REAL_ROBOT_VALUES.md §4` — frame_id 3종 · covariance 실태
+   - `REAL_ROBOT_VALUES.md §1` — 간격 분포 결과(재개방 조건이 걸렸는지)
+   - `CURRENT_HANDOFF.md` — 다음 묶음
+3. **R0 의 미결 하나를 잊지 말 것**: `cmd_vel` 단절 0.5초 내 정지(watchdog) 실측.
+   그 결과를 받는 즉시 `FREEZE_MANIFEST.md §6` 의 조건부 수용을 **확정 또는 재개방**한다.
+   구동부 3차 회신으로 **정지 시간(0.010/0.002/0.134s)은 충족**됐지만
+   **재연결 후 자동 재가동 금지**는 아직 확인 전이다.
+
+## 7. `TODO(D+1)` 전량 목록
+
+| # | 무엇 | 확인 방법 | 절 |
+|---|---|---|---|
+| 1 | 라이다 스캔면 높이 | 줄자 실측 → URDF `lidar_joint` | §2 |
+| 2 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
+| 3 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
+| 4 | 간격 분포(33.33ms 초과 여부) | `tools/bag_gap_report.py` | §5-b |
+| 5 | timestamp 단조성 | 간격 최소값이 음수인가 | §5-c |
+| 6 | covariance 실태 | `topic echo --field …covariance` | §5-d |
+| 7 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
+
+## 근거 문서
+
+`MASTER_PLAN.md §3` · `REAL_ROBOT_VALUES.md §1` · `REAL_ROBOT_VALUES.md §2` ·
+`REAL_ROBOT_VALUES.md §4` · `JETSON_SETUP.md §5` · `JETSON_SETUP.md §7` ·
+`FREEZE_MANIFEST.md §6` · `PITFALLS.md §7` · `TEST_GATES.md §2`
