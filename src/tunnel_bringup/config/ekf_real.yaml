@@ -57,8 +57,8 @@ ekf_filter_node:
     world_frame: odom                 # "odom 기준 위치를 추정" = odom→base TF 를 만든다는 뜻
 
     # ===== ★ QoS 정합 — 여기에 오버라이드를 쓰지 않는 이유 (08-02 실측) =====
-    # 배경: micro-ROS(Teensy)는 /odom·/imu/data 를 **BEST_EFFORT / VOLATILE** 로 발행한다
-    #   (최종합의서 §5). 그런데 BEST_EFFORT 퍼블리셔 + RELIABLE 구독자는 **매칭되지 않고**,
+    # 배경: 소스 v1.4 실계약은 /odom=RELIABLE, /imu/data=BEST_EFFORT 다
+    #   (REAL_ROBOT_VALUES §1-d). BEST_EFFORT 퍼블리셔 + RELIABLE 구독자는 **매칭되지 않고**,
     #   증상이 "에러 없이 조용히 0건" 이라 `ros2 topic hz /odom` 은 정상인데 EKF 만
     #   아무것도 못 받는 형태로 나타난다. 그래서 예약 19 ①은 여기에 구독 QoS 오버라이드를
     #   넣을 계획이었다.
@@ -74,8 +74,8 @@ ekf_filter_node:
     #   재현(로봇 없이 됨 — 퍼블리셔가 0이어도 구독자 QoS 는 보인다):
     #     ros2 run robot_localization ekf_node --ros-args --params-file <이 파일>
     #     ros2 param list /ekf_filter_node | grep qos     # publisher 3개만 나온다
-    #     ros2 topic info /odom -v                        # Reliability: BEST_EFFORT
-    #     ros2 topic info /imu/data -v                    # Reliability: BEST_EFFORT
+    #     ros2 topic info /odom -v                        # EKF 구독: BEST_EFFORT
+    #     ros2 topic info /imu/data -v                    # EKF 구독: BEST_EFFORT
     #   같은 방법으로 Nav2 소비자도 확인했다: bt_navigator·controller_server 의 /odom 구독도
     #   BEST_EFFORT, velocity_smoother 는 (feedback: OPEN_LOOP 라) /odom 을 아예 구독하지 않는다.
     #

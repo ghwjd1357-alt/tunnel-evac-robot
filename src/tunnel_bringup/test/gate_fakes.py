@@ -31,9 +31,10 @@ gate_fakes.py — `readiness_gate` 회귀용 '가짜 조건' 발생기 (로봇·
   action     : 액션 서버를 그래프에 올려 둔다 (goal 은 전부 거절 — 존재만 흉내).
 
 [QoS 를 일부러 BEST_EFFORT 로 발행하는 이유]
-  실차 /odom·/imu/data 는 micro-ROS 쪽이 BEST_EFFORT 예정이다(TEENSY 합의사항 §4.5).
-  게이트가 RELIABLE 로 구독하면 매칭이 안 돼 '센서가 죽은 것처럼' 보인다.
-  여기서 BEST_EFFORT 로 쏘면, 게이트 구독 QoS 가 잘못 바뀌는 순간 회귀가 실패한다.
+  소스 v1.4 실계약은 /odom=RELIABLE, /imu/data=BEST_EFFORT 다.
+  페이크는 실차 /odom 의 직접 복제가 아니라, 더 약한 BEST_EFFORT
+  발행자와도 매칭해야 하는 게이트 구독 QoS 회귀를 검사한다.
+  게이트가 RELIABLE 로 바뀌는 순간 /imu/data 호환 계약이 깨져 회귀가 실패한다.
 
 [실행 — 하네스(tools/test_gate_regression.sh)가 부른다]
   python3 gate_fakes.py sensors --messages 0

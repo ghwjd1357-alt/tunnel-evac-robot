@@ -220,9 +220,9 @@ class ReadinessGate(Node):
             # ★ QoS 는 BEST_EFFORT 로 구독한다.
             #   RELIABLE 퍼블리셔  + BEST_EFFORT 구독자 = 매칭됨
             #   BEST_EFFORT 퍼블리셔 + RELIABLE 구독자  = 매칭 안 됨(조용히 0Hz)
-            #   실차 /odom·/imu/data 는 micro-ROS 쪽이 BEST_EFFORT 예정이라
-            #   (TEENSY 합의사항 §4.5) 게이트가 RELIABLE 을 요구하면 '센서가 죽은 것처럼'
-            #   보인다. 넓게 받는 쪽으로 고정한다.
+            #   소스 v1.4 실계약은 /odom=RELIABLE, /imu/data=BEST_EFFORT 다.
+            #   BEST_EFFORT 구독은 두 발행자와 모두 호환되며, RELIABLE 로
+            #   올리면 /imu/data 가 '센서가 죽은 것처럼' 보인다. 넓게 받는 쪽으로 고정한다.
             if topic in self.latched:
                 # 래치 토픽(/map 등)은 과거 1건을 받아 와야 하므로 신뢰성도 함께 올린다
                 # (TRANSIENT_LOCAL 은 RELIABLE 과 짝으로 쓰는 것이 관례이고,
