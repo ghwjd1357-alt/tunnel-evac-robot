@@ -1,6 +1,7 @@
 # D1_FIRST_STEP.md — 인수 다음 날(D+1) 첫 스텝 런북: R3 rosbag (2026-08-02 신설, S6-5)
 
-> **시작 조건**: `bash tools/d0_check.sh` 가 **종료 0**(전량 통과). 종료 2(불완전)는
+> **시작 조건**: `bash tools/d0_check.sh` 가 **종료 0**(전량 통과)이고,
+> `JETSON_SETUP.md §7-c`의 R1·R2 사전 실측 결과가 아래 §0-a에 기록돼 있다. 종료 2(불완전)는
 > 시작 조건이 아니다 — 건너뛴 검사를 먼저 채운다. 셋업 전체는 `JETSON_SETUP.md`.
 >
 > **끝 조건**: R3 통과 = *"odom/imu/scan 의 주기·timestamp 단조·covariance 가 EKF 재료로
@@ -22,8 +23,25 @@
 ★ **순서를 바꾸지 않는다.** 각 단계는 앞 단계가 만든 것을 소비한다. 예를 들어 EKF 를
 먼저 띄우면 입력이 없어 "EKF 가 이상하다"로 보이는데, 실제 원인은 agent 다.
 
-★ **오늘은 로봇을 주행시키지 않는다.** R3 는 **센서 재료 수집**이다. 주행은 R6 부터고,
-그 전에 R4(EKF 단독)·R5(지도)가 있다. 순서를 건너뛰면 무엇이 틀렸는지 못 가른다.
+★ **R3 녹화 중에는 로봇을 모터로 주행시키지 않는다.** R1·R2의 지면 주행은 R3보다 먼저
+`JETSON_SETUP.md §7-c`에서 끝낸다. R6는 *최초 주행*이 아니라 **최초 Nav2 자율주행**이다.
+R0→R1→R2→R3 순서를 건너뛰면 무엇이 틀렸는지 못 가른다.
+
+### 0-a. ★ 펌웨어 소스 발견 5건 — R3 시작 전 인계 대조
+
+아래는 참고 메모가 아니라 **R3 입력의 전제**다. 결과가 비어 있으면 §1로 가지 말고
+`JETSON_SETUP.md §7-c`로 돌아간다.
+
+| 항목 | 실차 전제·판정 | D0/R1·R2 결과 |
+|---|---|---|
+| 첫 직진 안전 공간 | 오픈루프 횡편차를 모르므로 평지에서 **양옆 1m 이상** 확보 | `TODO(D+1): 확인` |
+| 최고속 0.12m/s | 3m 실주행의 `/odom.header.stamp` 차로 평균속도 계산. PWM 천장 때문에 미달 가능 | `TODO(D+1): 확인` |
+| 우회전 각속도 | `angular.z=-0.12` 10초 뒤 `/imu/yaw_deg` 변화: 약 −69°=회신 오기, 약 −112°=실제 과속 | `TODO(D+1): 확인` |
+| odom 의미 | pose는 raw encoder 적분, twist는 EMA(`α=0.10`, 시정수 약 0.2초). EKF는 **twist** 소비 | R3 가감속·covariance 판정에 반영 |
+| 감속 능력 | 역 PWM을 의도적으로 쓰지 않아 능동 제동 없음. 경사 하강 자유주행 가능 | R6 경사 시험 전 별도 안전판정 |
+
+⚠ 3m 거리로 확인한 pose 정확도를 곧바로 EKF twist 정확도로 승격하지 않는다. 등속 평균은
+보존되지만 가감속 구간에는 약 0.2초 지연이 있으므로 §5의 bag과 R4 잔차에서 따로 본다.
 
 ## 1. agent 기동 (터미널 A — 계속 띄워 둔다)
 
@@ -257,7 +275,7 @@ TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 �
    로봇이 없어도 되는 단계라 노트북에서 돌릴 수 있다.
 2. 아래를 **문서에 기록**한다 (다음 사람이 아니라 **일주일 뒤의 나**를 위해서다):
    - `REAL_ROBOT_VALUES.md §2` — 라이다 z 실측값
-   - `REAL_ROBOT_VALUES.md §4` — frame_id 3종 · covariance 실태
+   - `REAL_ROBOT_VALUES.md §4` — 0.12m/s·우회전·횡편차 결과 · frame_id 3종 · covariance 실태
    - `REAL_ROBOT_VALUES.md §1` — 간격 분포 결과(재개방 조건이 걸렸는지)
    - `CURRENT_HANDOFF.md` — 다음 묶음
 3. **R0 의 미결 하나를 잊지 말 것**: `cmd_vel` 단절 0.5초 내 정지(watchdog) 실측.
@@ -265,17 +283,20 @@ TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 �
    구동부 3차 회신으로 **정지 시간(0.010/0.002/0.134s)은 충족**됐지만
    **재연결 후 자동 재가동 금지**는 아직 확인 전이다.
 
-## 7. `TODO(D+1)` 전량 목록
+## 7. `TODO(D+1)` 전량 목록 — **10건**
 
 | # | 무엇 | 확인 방법 | 절 |
 |---|---|---|---|
-| 1 | 라이다 스캔면 높이 | 줄자 실측 → URDF `lidar_joint` | §2 |
-| 2 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
-| 3 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
-| 4 | 간격 분포(토픽별 `TOPIC_POLICY` 계약) | `tools/bag_gap_report.py` | §5-b |
-| 5 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
-| 6 | covariance 실태 | `topic echo --field …covariance` | §5-d |
-| 7 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
+| 1 | 첫 직진 안전 공간 | 평지·양옆 1m 이상을 눈으로 확인 | §0-a · `JETSON_SETUP §7-c` |
+| 2 | 0.12m/s 3m 실측 | `/odom.header.stamp` 두 값으로 평균속도 계산 | §0-a · `JETSON_SETUP §7-c-1` |
+| 3 | 우회전 각속도 | `angular.z=-0.12` 10초와 `/imu/yaw_deg` 변화 | §0-a · `JETSON_SETUP §7-c-2` |
+| 4 | 라이다 스캔면 높이 | 줄자 실측 → URDF `lidar_joint` | §2 |
+| 5 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
+| 6 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
+| 7 | 간격 분포(토픽별 `TOPIC_POLICY` 계약) | `tools/bag_gap_report.py` | §5-b |
+| 8 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
+| 9 | covariance 실태 | `topic echo --field …covariance` | §5-d |
+| 10 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
 
 ## 근거 문서
 

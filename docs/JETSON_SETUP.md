@@ -499,6 +499,80 @@ bash tools/d0_check.sh
 ★ **구동부가 자리에 있을 때 돌린다.** 최종합의서에도 "인수 당일 함께 확인" 으로 넣어 뒀다.
 실패를 그 자리에서 보면 10분이고, 돌아간 뒤에 보면 며칠이다.
 
+### 7-c. ★ `d0_check` 통과 뒤 R1·R2 사전 실측 — R3보다 먼저
+
+`d0_check.sh` 종료 0은 **연결·입력 안전 게이트**다. `MASTER_PLAN.md §3`의 순서는
+R0→R1→R2→R3이므로, 다음 날 R3 런북으로 넘어가기 전에 아래 두 실측을 닫는다.
+
+**주행 허용 전제 — 하나라도 아니면 모터 명령 금지**:
+
+- 검사 8에서 E-stop `false→true` 전환을 실제로 확인했다.
+- R0에서 `/cmd_vel` 단절 뒤 0.5초 안에 정지하는 watchdog을 확인했다.
+- 안전요원 한 명이 E-stop을 잡고 있고, 평평한 바닥의 **양옆 1m 이상**을 비웠다.
+- 펌웨어는 역 PWM 제동을 의도적으로 쓰지 않으므로 **경사·내리막에서는 시험하지 않는다**.
+
+먼저 R1 대조군으로 0.05m/s를 약 5초만 보낸다. `timeout`과 메시지 수가 이 명령의 상한이고,
+끝난 뒤 zero Twist를 3회 보낸다. 움직임·진동·편향이 이상하면 0.12 시험으로 올라가지 않는다.
+
+```bash
+timeout --signal=INT --kill-after=2s 15s \
+  ros2 topic pub --times 50 -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.05, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+timeout --kill-after=2s 12s \
+  ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+```
+
+#### 7-c-1. 0.12m/s가 실제로 나오는가 — 3m 지면 실측
+
+펌웨어의 `FEEDFORWARD_MAX_PWM=145`·`MAX_CONTROL_PWM=160` 천장 때문에 명령 0.12m/s에
+도달하지 못할 수 있다. 바닥에 시작·종료선을 정확히 3m 간격으로 표시하고 별도 터미널에서
+증거를 녹화한다.
+
+```bash
+ros2 bag record /odom /imu/yaw_deg /cmd_vel /estop/state -o d0_drive_$(date +%m%d_%H%M)
+```
+
+시작선에서 `/odom.header.stamp`를 기록한 뒤 0.12m/s를 보낸다. 로봇 선단의 같은 기준점이
+종료선에 닿으면 `Ctrl+C`로 publisher를 끝내고 즉시 zero Twist를 보낸 뒤 끝 stamp를 기록한다.
+35초 상한이 먼저 끝나도 시험은 실패가 아니라 **0.12 도달 불확실**로 기록하고 원인을 본다.
+
+```bash
+ros2 topic echo /odom --field header.stamp --once
+timeout --signal=INT --kill-after=2s 35s \
+  ros2 topic pub -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.12, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+timeout --kill-after=2s 12s \
+  ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+ros2 topic echo /odom --field header.stamp --once
+```
+
+`elapsed = (끝 sec−시작 sec) + (끝 nanosec−시작 nanosec)/1e9`,
+`실측 평균속도 = 3.0/elapsed`로 계산한다. **벽시계 대신 같은 `/odom`의 header stamp 두 개**를
+쓰므로 NTP 역행·stamp 정체도 함께 드러난다. 결과와 bag 경로를 `REAL_ROBOT_VALUES.md §4`에
+기록한다. 0.12m/s 미달이면 예약 22의 `max_vel_x`·`desired_linear_vel` 하향 판단이 열린다.
+
+#### 7-c-2. 우회전 명령 오기인가 실제 과속인가
+
+최종 회신은 `angular.z=-0.12`인데 360°/32.13초는 실제 약 −0.196rad/s다. E-stop 안전요원이
+있는 같은 평지에서 10초만 재현한다. 시작·끝 `/imu/yaw_deg`의 wrap을 보정한 변화가 약 −69°면
+회신 기록 오기, 약 −112°면 실제 우회전 과속이다.
+
+```bash
+ros2 topic echo /imu/yaw_deg --field data --once
+timeout --signal=INT --kill-after=2s 20s \
+  ros2 topic pub --times 100 -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: -0.12}}'
+timeout --kill-after=2s 12s \
+  ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+ros2 topic echo /imu/yaw_deg --field data --once
+```
+
+두 실측은 `D1_FIRST_STEP.md §0-a`의 시작 대조표에 결과를 옮긴다. 추측값이나 구동부 회신값으로
+칸을 닫지 않는다.
+
 ## 8. 막힐 자리와 대처 (미리 읽어 둘 것)
 
 | 증상 | 먼저 볼 것 | 대처 |
@@ -545,8 +619,9 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 ## 10. 다음 단계
 
-`d0_check.sh` 가 **종료 0** 이면 D+0 는 끝이다. 다음은 **`docs/D1_FIRST_STEP.md`** —
-agent → TF 트리 → EKF → **R3 rosbag** 순서로 간다.
+`d0_check.sh` 가 **종료 0** 이면 연결 게이트를 통과한 것이다. 이어서 §7-c의 R1·R2 사전
+실측을 안전조건 아래 닫고 결과를 **`docs/D1_FIRST_STEP.md §0-a`**에 옮긴다. 그다음
+agent → TF 트리 → EKF → **R3 rosbag** 순서로 간다. R0→R1→R2를 건너뛰고 R3로 가지 않는다.
 
 ## 근거 문서
 
