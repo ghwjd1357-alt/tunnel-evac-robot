@@ -191,10 +191,30 @@ python3 tools/bag_gap_report.py ~/r3_bags/r3_XXXX /odom /imu/data /scan
 150초 bag 중 토픽이 10초만 살아 있어도 "전 구간 정상" 으로 통과했다. 이제 bag 시작→첫 수신,
 마지막 수신→bag 종료를 간격에 포함하고, 초과하면 **위치(앞 공백/내부/뒤 공백)까지** 찍는다.
 
+★★ **33.33ms 는 `/scan` 의 계약이 아니다** (08-03 검토 §30.2). 그 값은 *EKF 한 주기*이고
+EKF 입력은 `/odom`·`/imu/data` 둘뿐이다. `/scan` 은 RPLIDAR C1 **사양 10Hz = 100ms** 라
+구판처럼 하나의 상수로 재면 **정상 스캔이 전부 초과**로 찍힌다(검토자 실측: 정상 10Hz
+scan 11개 → "초과 10건 · 최대 100.00ms"). 멀쩡한 라이다 데이터를 IMU 결함으로 읽고
+동결된 주기 정본을 헛되이 재개방시킬 뻔한 자리다. 계약은 토픽마다 다르다:
+
+| 토픽 | 무엇을 보는가 | 한계 | 근거 |
+|---|---|---|---|
+| `/odom`·`/imu/data` | **간격 계약** | **33.33ms** | EKF 한 주기 (`config/ekf_real.yaml` `frequency: 30.0`) |
+| `/scan` | **liveness 만** (끊겼는가) | 200ms = 사양 100ms × 2 | 실측 미확보 — **R3 가 정본을 만든다.** 분포는 관측값으로만 보고 |
+
+★ 계약의 **단일 출처는 `tools/bag_gap_report.py` 의 `TOPIC_POLICY` 표 하나**다. 이 문서는
+그 표를 옮겨 적은 것이 아니라 가리킨다 — 도구가 실행할 때 자기 계약을 한 줄로 찍어 준다
+(`계약  간격 상한 33.33ms — …`). 두 곳에 숫자를 적으면 반드시 갈라진다.
+
+★ liveness 한계가 왜 "× 2" 인가: bag 의 시작·끝은 토픽의 발행 위상과 안 맞으므로
+**건강한 토픽도 양끝에서 한 주기까지는 비는 것이 정상**이다. 두 주기가 통째로 비면
+그건 위상이 아니라 결측이다.
+
 | 결과 | 뜻 | 다음 행동 |
 |---|---|---|
-| 33.33ms 초과 **0건** | 현재 조건에서는 EKF 재료로 충분 | R4 로 진행 |
-| 초과 **있음** | **IMU 주기 재개방 조건이 걸렸다** | `REAL_ROBOT_VALUES.md §1` 과 `src/tunnel_bringup/test/gate_fakes.py` 의 주기 정본을 **함께** 다시 판단 |
+| 전 토픽 **자기 계약 안** | 현재 조건에서는 EKF 재료로 충분 | R4 로 진행 |
+| `/odom`·`/imu/data` 가 **33.33ms 초과** | **IMU 주기 재개방 조건이 걸렸다** | `REAL_ROBOT_VALUES.md §1` 과 `src/tunnel_bringup/test/gate_fakes.py` 의 주기 정본을 **함께** 다시 판단 |
+| `/scan` 이 **liveness 위반** | 재개방 조건이 **아니다** — 그 구간에 스캔이 없었다 | 라이다 드라이버가 늦게 떴는지·도중에 죽었는지 본다. 녹화를 다시 하면 된다 |
 
 ★ 구동부 회신의 "20~23ms" 를 우리가 상한으로 쓰지 않은 이유가 여기서 해소된다 —
 회신에는 관측 창 크기·표본 수가 없었고, 이 bag 에는 있다.
@@ -254,7 +274,7 @@ TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 �
 | 1 | 라이다 스캔면 높이 | 줄자 실측 → URDF `lidar_joint` | §2 |
 | 2 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
 | 3 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
-| 4 | 간격 분포(33.33ms 초과 여부) | `tools/bag_gap_report.py` | §5-b |
+| 4 | 간격 분포(토픽별 계약 — odom·imu 33.33ms / scan liveness) | `tools/bag_gap_report.py` | §5-b |
 | 5 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
 | 6 | covariance 실태 | `topic echo --field …covariance` | §5-d |
 | 7 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |

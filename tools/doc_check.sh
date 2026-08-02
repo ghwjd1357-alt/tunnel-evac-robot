@@ -160,6 +160,26 @@ else
     done <<< "$HS_OUT"
 fi
 
+# ── 2d. `TODO(D+0)` 목록 개수 계약 (08-03 · 검토 §30.4) ───────────────────
+# ★ 왜 필요했나: `JETSON_SETUP §9` 의 목록은 10건인데 핸드오프 완료조건 네 자리가 8건이라고
+#   적은 채 `--strict` 가 PASS 했다. 현장 작업자가 8건만 채우면 NTP·E-stop 이 통째로 빠진다.
+#   개수는 사람이 지키는 약속이 아니라 **기계가 세는 사실**이어야 한다.
+#   ⚠ 드리프트 자리 하나는 `TODO(D+0)` 와 `8건` 이 **다른 줄**에 있었다 — 그래서 줄 단위가
+#     아니라 공백 정규화 + 근접 창으로 본다(아래 §9 검사가 같은 이유로 쓰는 방식).
+#   규칙·검증 상한 전량 = `tools/todo_d0_scan.py` 머리말 (픽스처로 부정 회귀를 걸 수 있게 분리).
+TD_OUT=$(python3 tools/todo_d0_scan.py 2>&1)
+if [ -z "$TD_OUT" ]; then
+    bad "todo_d0_scan 이 아무 출력도 못 냈다 — 검사 자체가 죽었다(fail-closed)"
+else
+    while IFS= read -r td_line; do
+        case "$td_line" in
+            "OK   "*) ok  "${td_line#OK   }" ;;
+            "FAIL "*) bad "${td_line#FAIL }" ;;
+            *)        bad "todo_d0_scan: $td_line" ;;
+        esac
+    done <<< "$TD_OUT"
+fi
+
 # ── 3. '현재 위치' 단일 출처: MASTER_PLAN 이 현재를 가리키면 안 됨 ────────
 # 07-20 실사고 재발 방지 — 현재 단계는 CURRENT_HANDOFF 한 곳에만 존재해야 한다.
 if grep -q "◀ *현재" docs/MASTER_PLAN.md; then

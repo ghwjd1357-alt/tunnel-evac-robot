@@ -59,6 +59,24 @@
 #   ⓒ `ros2 topic echo --field twist.twist.linear.x --once` 도 기본 인자로 관측된다.
 #   ⓓ `ros2 topic info -v` 는 퍼블리셔·구독자 **각각의 Reliability** 를 찍어 준다.
 #
+# [08-03 검토 §30.3 보완 — `hard_timeout` 8자리 전수 대조]
+#   지적받은 곳은 `topic hz` **한 자리**였지만, 같은 클래스(외부 CLI 의 종료 상태를 묻는가)를
+#   `grep -n "hard_timeout " tools/d0_check.sh` 로 전수 열거하고 **한 줄씩** 대조했다
+#   (`AGENTS.md §3-10 ①`). 열거를 세는 데서 끝내지 않고 각 자리가 덮이는지 적어 둔다:
+#
+#     자리            | 종류     | 정상 rc  | 구판          | 지금
+#     ----------------|----------|----------|---------------|--------------------------------
+#     topic hz        | 관측 창  | 124/137  | rc 무시 ★결함 | rc + 벽시계 둘 다 (검토 §30.3)
+#     echo --once(ⓒ)  | 스냅샷   | 0        | if 로 사용 ✅ | 유지 (보조 증거로 격하 명시)
+#     topic info -v   | 스냅샷   | 0        | rc 무시       | rc 0 아니면 판독 실패
+#     echo --field(부호)| 관측 창 | 124/137  | rc 무시       | 결론 방향별로 분기(아래 [6] 주석)
+#     echo /firmware  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
+#     echo /estop ×2  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
+#     topic info(재확인)| 스냅샷 | 0        | 파이프 끝 grep| 유지 — 잘리면 grep 이 실패해 FAIL
+#
+#   ⚠ 마지막 자리(재확인)만 rc 를 직접 안 본다. 파이프라인이라 `$?` 는 마지막 `grep` 것이고,
+#     출력이 잘리면 그 grep 이 실패해 **fail-closed 방향으로** 떨어진다. 숨기지 않고 적어 둔다.
+#
 # ⚠ 이 스크립트는 tools/lib_e2e.sh 를 **일부러 source 하지 않는다.**
 #   그쪽 `cleanup()` 은 nav2·slam·gzserver 를 **이름으로 전역 kill** 한다 — 전용 시뮬 PC
 #   전용이고, 실차 Jetson 에서 돌면 살아 있는 스택을 통째로 죽인다. 여기서 필요한 것은
@@ -88,6 +106,24 @@ D0_KILL_GRACE=2                    # SIGTERM 뒤 SIGKILL 까지 유예(초)
 hard_timeout() {  # $1=상한(초) $2..=실행할 명령
   local dur=$1; shift
   timeout --kill-after="$D0_KILL_GRACE" "$dur" "$@"
+}
+
+# --- ★ 08-03 검토 §30.3 — 상한을 씌우는 것과 **결과를 묻는 것**은 다른 일이다 ---------
+# 구판은 `hard_timeout` 으로 상한만 씌우고 **종료 상태를 한 번도 보지 않았다.** 그래서
+# `ros2 topic hz` 가 4초 만에 rc 42 로 죽어도, 죽기 전에 찍어 둔 요약 한 덩어리가 남아
+# "8초 창을 관측했다"로 승격됐다(검토자 실측: `simulated_topic_hz_rc=42 / check_fail=0`).
+# 8초를 한 번도 기다리지 않고 8초 판정을 낸 것이다.
+#
+# ⚠ 여기서 rc 의 **정상값이 두 종류**라는 점이 함정이다. 용도에 따라 정반대다:
+#   ① 관측 창(`topic hz`·`topic echo` 를 N초 동안 돌리는 것) — 대상은 스스로 끝나지 않는다.
+#      → **우리가 건 상한이 발동해서 끝나는 것이 정상**이다. rc 124(SIGTERM) 또는
+#        137(=128+9, TERM 을 씹어 SIGKILL 까지 간 경우). **rc 0 은 비정상**이다
+#        ("일찍 끝났다" = 창을 안 채웠다).
+#   ② 스냅샷(`topic info -v`·`echo --once`) — 대상이 스스로 끝난다.
+#      → **rc 0 이 정상**이고 124/137 은 매달렸다는 뜻이다.
+# GNU timeout 규약: 상한 발동 시 124, SIGKILL 까지 갔으면 128+9=137 (`--preserve-status` 미사용).
+window_completed() {  # $1=rc — 관측 창이 '상한 발동으로' 끝났는가
+  [ "$1" = "124" ] || [ "$1" = "137" ]
 }
 
 EKF_NODE="ekf_filter_node"         # ★ ekf_real.yaml 최상단 키와 같은 이름이어야 한다
@@ -171,8 +207,35 @@ is_finite_num() { printf '%s' "${1:-}" | grep -qE '^[0-9]+(\.[0-9]+)?$'; }
 check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
   local topic="$1" expect="$2" idx="$3" out="$TMP/hz$3.txt"
   local parsed rate gapms win need
+  local hz_rc t0 t1 elapsed_ms need_ms
   echo "[$idx] $topic 발행 주기 (기대 약 ${expect}Hz)"
+  t0=$(date +%s%N)
   hard_timeout "$HZ_SECS" ros2 topic hz "$topic" >"$out" 2>&1
+  hz_rc=$?                                   # ★ 바로 다음 줄에서 받는다(뒤로 미루면 덮인다)
+  t1=$(date +%s%N)
+  elapsed_ms=$(( (t1 - t0) / 1000000 ))
+  need_ms=$(( HZ_SECS * 1000 ))
+
+  # ── ⓪ 같은 관측자가 창을 **끝까지** 살아서 채웠는가 (★ 08-03 검토 §30.3) ─
+  # 이 검사가 ⓐ~ⓒ 보다 **먼저** 와야 한다. 창이 성립하지 않았는데 그 안의 표본·간격을
+  # 판정하면, 과거 세대의 요약을 현재 세대의 근거로 승격시키게 된다.
+  #   근거 2개를 **함께** 본다 — 하나만으로는 속는다:
+  #     · 종료 상태: 우리가 건 상한이 발동했는가(124/137). rc 0·rc 42 는 조기 종료다.
+  #     · 벽시계   : 정말 그 시간을 썼는가. rc 만 보면 즉시 124 를 뱉는 상대에게 속는다.
+  if ! window_completed "$hz_rc"; then
+    ng "$topic 관측자가 ${elapsed_ms}ms 만에 rc=$hz_rc 로 **먼저 끝났다** — 창이 성립하지 않았다"
+    ng "  → 요약이 정상 모양이어도 쓰지 않는다. 그 표본은 창의 일부에서만 모인 것이다"
+    ng "  → 상한 발동(rc 124/137)만 완전한 창이다. rc 0 은 CLI 가 스스로 끝난 것,"
+    ng "     그 밖의 값은 CLI 오류·신호 종료다. 원문 앞 3줄:"
+    head -3 "$out" | sed 's/^/       /'
+    echo; return
+  fi
+  if [ "$elapsed_ms" -lt "$need_ms" ]; then
+    ng "$topic 관측이 ${elapsed_ms}ms 만에 끝났다 (요구 ${need_ms}ms) — **창을 다 안 썼다**"
+    ng "  → 종료 상태는 상한 발동인데 벽시계가 모자라다. 시스템 시각 또는 CLI 를 의심한다"
+    echo; return
+  fi
+  ok "$topic 관측 창 ${elapsed_ms}ms 완주 (${HZ_SECS}초 상한이 발동 rc=$hz_rc)"
 
   # 파서는 fail-closed: 'average rate' 를 한 번도 못 봤으면 통과시키지 않는다.
   #   빈 출력 · 경고문만 · 형식 변경이 전부 여기서 걸린다.
@@ -222,6 +285,11 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
   # ── ⓒ 창 끝에도 살아 있는가 (표본 수와 다른 질문이다) ────────────────────
   # 표본 수는 '얼마나 많이 왔나'이고, 이건 '지금도 오나'다. 창 **끝 직전**에 죽으면
   # 표본 수는 통과할 수 있으므로 따로 묻는다.
+  # ⚠ 08-03 검토 §30.3 — 이건 **생존 보조 증거일 뿐**이다. 이 echo 가 성공한다고 해서
+  #   앞의 요약이 완전한 창이 되지는 않는다(그 승격을 막는 것은 위 ⓪ 하나뿐이다).
+  #   관측자가 죽은 뒤 센서가 이 echo 때만 복구돼도 ⓪ 에서 이미 FAIL 이라 여기 오지 않는다.
+  # ⚠ 여기 rc 는 위 ⓪ 과 **정상값이 반대**다 — `--once` 는 스스로 끝나므로 rc 0 이 정상이고,
+  #   상한 발동(124/137)은 '3초 안에 한 건도 안 왔다'는 뜻이라 실패다.
   if hard_timeout 3 ros2 topic echo "$topic" --once >/dev/null 2>&1; then
     ok "$topic 관측 창 종료 시점에도 수신됨"
   else
@@ -291,9 +359,19 @@ next_idx; check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  "$IDX"
 #   지금 구독자는 전부 BEST_EFFORT 라 당장 오탐은 없지만, 근거가 틀린 검사는 다음에 틀린다.
 check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliability
   local topic="$1" idx="$2" expect="${3:-}" out="$TMP/qos$2.txt"
-  local rows npub nsub off_pub be_pub bad_pair ekf_rel pub_rel
+  local rows npub nsub off_pub be_pub bad_pair ekf_rel pub_rel info_rc
   echo "[$idx] $topic QoS 정합"
   hard_timeout 20 ros2 topic info "$topic" -v >"$out" 2>&1
+  info_rc=$?
+  # ★ 08-03 검토 §30.3 계열 — 여기는 **스냅샷**이라 rc 0 이 정상이다(위 window_completed 와 반대).
+  #   상한이 발동했다면 daemon 이 매달린 것이고, 그때 남은 출력은 **잘린 목록**이다.
+  #   잘린 목록으로 "RELIABLE 구독자 없음" 을 말하면 그건 안 본 것을 봤다고 하는 것이다.
+  if [ "$info_rc" != "0" ]; then
+    ng "$topic 의 topic info 가 rc=$info_rc 로 끝났다 (20초 상한 발동 = 124) — **판독 실패**"
+    ng "  → 엔드포인트 목록이 잘렸을 수 있다. 잘린 목록으로 QoS 를 판정하지 않는다"
+    head -3 "$out" | sed 's/^/       /'
+    echo; return
+  fi
 
   # 한 엔드포인트 = "종류 노드이름 신뢰성" 한 줄로 접는다.
   #   출력 순서가 (Node name → Endpoint type → QoS profile → Reliability) 이라
@@ -394,6 +472,7 @@ else
   read -r _ || true
   hard_timeout "$HZ_SECS" ros2 topic echo "$ODOM_TOPIC" \
       --field twist.twist.linear.x >"$TMP/sign.txt" 2>&1
+  SIGN_RC=$?
 
   # 숫자로 읽히는 줄만 채택한다(`---` 구분선·경고문 제외). 한 줄도 없으면 판독 실패.
   SIGN=$(awk -v lo="$SIGN_MIN" '
@@ -406,18 +485,32 @@ else
         else if (mn <= -lo)     { printf "REVERSED %.4f %d", mn, n }
         else                    { printf "STILL %.4f %d", mx, n }
       }' "$TMP/sign.txt")
+  # ★ 08-03 검토 §30.3 계열 — 여기도 **관측 창**이라 상한 발동(124/137)이 정상 종료다.
+  #   ⚠ 단 결론의 방향에 따라 조기 종료의 의미가 다르다. 그래서 일괄로 죽이지 않는다:
+  #     · '움직였다'(OK/REVERSED) = **관측된 사실**이라 창이 짧아도 여전히 참이다.
+  #     · '안 움직였다'(STILL/READFAIL) = **못 본 것**이다. 창이 안 채워졌으면 그건
+  #       "안 움직였다"가 아니라 **판독 실패**다. 안 본 것을 결함으로 적으면 그 기록이
+  #       다음 판단을 오염시킨다(§29 의 E-stop 과 같은 종류의 잘못이다).
   case "$SIGN" in
-    READFAIL)
-      ng "/odom 값을 한 줄도 못 읽었다 — **판독 실패**(값이 0 이었다는 뜻이 아니다)"
-      head -3 "$TMP/sign.txt" | sed 's/^/       /' ;;
     OK*)
-      ok "앞으로 굴릴 때 linear.x 최대 $(echo "$SIGN" | cut -d' ' -f2) m/s > 0 (부호 정상)" ;;
+      ok "앞으로 굴릴 때 linear.x 최대 $(echo "$SIGN" | cut -d' ' -f2) m/s > 0 (부호 정상)"
+      window_completed "$SIGN_RC" \
+        || warn "  ⚠ 관측자는 rc=$SIGN_RC 로 일찍 끝났다 — 부호는 관측된 사실이라 유효하다" ;;
     REVERSED*)
       ng "부호가 **반대**다 — 앞으로 굴렸는데 linear.x 최소 $(echo "$SIGN" | cut -d' ' -f2) m/s"
       ng "  → 펌웨어의 좌우/전후 부호를 구동부와 지금 맞춘다. URDF 로 덮지 말 것" ;;
-    STILL*)
-      ng "움직임이 관측되지 않았다 (최댓값 $(echo "$SIGN" | cut -d' ' -f2) m/s)"
-      ng "  → 바퀴를 굴리는 동안 측정됐는지, 엔코더가 붙어 있는지 확인한다" ;;
+    READFAIL|STILL*)
+      if ! window_completed "$SIGN_RC"; then
+        ng "/odom 관측자가 rc=$SIGN_RC 로 **먼저 끝났다** — 판독 실패다"
+        ng "  → '안 움직였다'가 아니라 **못 봤다**. 다시 돌린다(agent 연결부터 확인)"
+        head -3 "$TMP/sign.txt" | sed 's/^/       /'
+      elif [ "$SIGN" = "READFAIL" ]; then
+        ng "/odom 값을 한 줄도 못 읽었다 — **판독 실패**(값이 0 이었다는 뜻이 아니다)"
+        head -3 "$TMP/sign.txt" | sed 's/^/       /'
+      else
+        ng "움직임이 관측되지 않았다 (최댓값 $(echo "$SIGN" | cut -d' ' -f2) m/s)"
+        ng "  → 바퀴를 굴리는 동안 측정됐는지, 엔코더가 붙어 있는지 확인한다"
+      fi ;;
     *)
       ng "부호 판정 자체가 실패했다: $SIGN" ;;
   esac

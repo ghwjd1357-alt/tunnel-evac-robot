@@ -502,7 +502,120 @@ FAIL 한다 — 사람이 목록을 보고 옮겨 적는 자리를 없앤 것이
 **같은 날 내가 어겼다.** 고친 뒤 번호 `[1]`~`[8]` 과 `검사 8 개 수행` 을 출력으로 확인했다.
 
 **게이트**: pytest **182** · colcon **245**(0e·0f·3s) · `doc_check --strict` PASS ·
-`bash -n` PASS · `scan_unbounded_cli` 0건 · flake8 PASS. `src/**` diff **0**.
+`bash -n` PASS · `scan_unbounded_cli` 0건 · ~~flake8 PASS~~. `src/**` diff **0**.
+
+⚠ **08-03 정정 (검토 §30.5 P2)** — 위의 `flake8 PASS` 는 **독립 실행으로 재현되지 않았다.**
+검토자가 `python3 -m flake8 tools/bag_gap_report.py` 를 돌리자 E501 **9건**으로 종료 1이었다.
+명령을 안 적고 결과만 적었기 때문에 무엇을 돌렸는지 다시 알 수 없다 — **취소선으로 남기고**
+지운다. 이 저장소의 실제 lint 계약과 그 정확한 명령은 아래 §10.6 에 적었다.
+★ 교훈: **증거에는 결과가 아니라 명령을 적는다.** 결과만 적힌 증거는 다음 사람이 재현할 수
+없고, 재현할 수 없는 증거는 없는 것과 같다(그 자리에서 이번 P1 하나가 실제로 숨었다).
 
 ⚠ **여전히 실차에서 못 돌려 봤다.** 위 검증은 전부 가짜 입력이다 — 실제 Jetson·Teensy·
 rosbag 으로는 D+0/D+1 에 처음 돌아간다. 회귀를 저장소에 박는 일은 **예약 21** 이다.
+
+### 10.6 검토 §30 보완 — 토픽별 계약·관측 창 완주 (2026-08-03, **동결 예외 아님**)
+
+★ **이 절도 동결 예외 기록이 아니다.** `src/**` 를 한 글자도 열지 않았다(`tools/`·`docs/` 전용).
+§10.5 의 보완물을 검토가 다시 불승인했으므로 그 근거를 같은 자리에서 이어 간다.
+
+**대상 판정** = `6dacd19` 독립 검토 **불승인 (P0 0 · P1 2 · P2 2)**
+(전문 = `~/Desktop/개발현황/CODEX 현황/0801검토현황.md §30`).
+§29 에서 닫힌 clone·QoS·bag 양끝·stamp·`--secs` 경계는 **수용**됐고, 다시 설계하지 않았다.
+
+| 지적 | 무엇이 틀렸나 | 보완 |
+|---|---|---|
+| §30.2 P1 | `bag_gap_report.py` 가 **33.33ms 하나를 모든 토픽에** 적용 → 사양 10Hz 인 정상 `/scan` 이 반드시 FAIL (검토자 실측: 초과 10건·최대 100.00ms). 멀쩡한 라이다를 IMU 결함으로 읽고 **동결된 주기 정본을 헛되이 재개방**시킬 뻔했다 | 토픽별 계약을 `TOPIC_POLICY` **한 표**로 두고 판정기·런북이 같은 표를 소비. EKF 입력(`/odom`·`/imu/data`)만 33.33ms 계약, `/scan` 은 **liveness(사양 100ms×2)+stamp** 만 판정하고 분포는 관측값으로 보고 |
+| §30.3 P1 | `check_hz` 가 `topic hz` 의 **종료 상태를 안 봤다** → 4초 만에 rc 42 로 죽어도 죽기 전 요약이 "8초 창"으로 승격 (검토자 실측: `rc=42 / check_fail=0`) | **종료 상태 + 벽시계 경과시간**을 함께 판정. 상한 발동(124/137)만 완전한 창으로 인정하고, 그 판정을 **표본·간격 판정보다 먼저** 두어 실패 시 조기 반환. 별도 `echo` 는 **보조 증거로 격하**(승격 근거 아님을 코드·주석에 명시) |
+| §30.4 P2 | `JETSON_SETUP §9` 는 10건인데 핸드오프 네 자리가 **8건** — `doc_check --strict` 가 PASS | 네 자리를 10 으로 정정 + **`tools/todo_d0_scan.py` 신설**: 목록 행을 직접 세어 모든 개수 주장과 대조하고 `doc_check` 에 편입 |
+| §30.5 P2 | `flake8 PASS` 가 **독립 실행으로 재현 불가**(E501 9건) | 위 §10.5 의 주장을 취소선으로 정정하고, 이 저장소의 실제 계약과 **정확한 명령**을 아래에 남긴다 |
+
+**★ 클래스 전수 열거 → 항목별 대조** (`AGENTS.md §3-10` — 지적받은 그 자리만 고치면 다음
+회차에 바로 옆이 지적된다. 근거는 기억이 아니라 `grep` 이다)
+
+| 클래스 | 열거 명령 | 나온 자리 | 각 자리가 덮이는가 |
+|---|---|---|---|
+| A. 판정 상수를 여러 토픽에 일괄 적용 | `grep -rnE "GAP_LIMIT_MS\|GAP_MAX_MS\|HZ_MIN" tools/*.py tools/*.sh` | `bag_gap_report.py` 7행 · `d0_check.sh` 8행 | ✅ 전자는 토픽별 표로 분리. **후자는 결함이 아니다** — 대상이 EKF 입력 2종뿐이라 33.33ms/30Hz 가 둘 다 맞다. `/scan` 을 나중에 넣으면 같은 함정이므로 **그 사실을 주석에 못 박았다** |
+| B. 외부 CLI 종료 상태를 안 묻는 자리 | `grep -n "hard_timeout " tools/d0_check.sh` | 호출 **8자리** | ✅ 8/8 대조표를 `d0_check.sh` 머리말에 넣었다. 지적은 1자리였는데 **같은 클래스에서 2자리(`topic info`·부호 관측)가 더 나왔다.** ⚠ 마지막 1자리(재확인)는 파이프라인이라 rc 를 직접 안 보고 fail-closed 방향으로만 떨어진다 — **숨기지 않고 공개** |
+| C. 개수 계약이 문서에 손으로 적힌 자리 | `grep -rn "TODO(D+0)" docs/*.md` + 공백 정규화 근접 창 | **5자리** (핸드오프 4 · 런북 1) | ✅ 5/5 를 기계가 훑는다. ⚠ 줄 단위 grep 은 그중 **한 자리를 못 봤다**(`TODO(D+0)` 와 `8건` 이 다른 줄) — 그래서 검사기는 파일을 정규화해서 본다 |
+| D. 명령 없이 결과만 적은 증거 | `grep -rn "flake8\|bash -n\|scan_unbounded_cli" docs/*MANIFEST*.md` | 1자리 | ✅ 그 자리를 정정하고, 이 절의 증거는 **전부 명령을 그대로** 적는다 |
+
+★ **B 클래스에서 배운 것 — 같은 `rc` 인데 정상값이 정반대다.** 관측 창(`topic hz` 를 N초
+돌리는 것)은 **우리가 건 상한이 발동해야**(124/137) 정상이고, 스냅샷(`topic info`·`echo --once`)은
+**rc 0** 이 정상이다. 한쪽 규칙으로 다른 쪽을 재면 조용히 뚫린다. 이 구분을 `window_completed()`
+라는 이름으로 코드에 박아 두 용도가 섞이지 않게 했다.
+
+**★ 검토가 준 완료판정·회귀 목록과 구현의 대조** (`AGENTS.md §3-10 ④`)
+
+| 검토가 요구한 것 | 어떻게 관측했나 | 결과 |
+|---|---|---|
+| 역회귀: bag 전 구간 10Hz `/scan` + 정상 odom·imu → PASS | 합성 bag `normal` | ✅ 종료 0 (구판은 종료 1) |
+| 부정: `/scan` 늦은 시작·이른 종료 → FAIL | `scan_late`(앞 250ms) · `scan_early_end`(뒤 250ms) | ✅ 둘 다 FAIL |
+| 부정: `/scan` 동일·역행 stamp → FAIL | `scan_dup_stamp` · `scan_back_stamp` | ✅ 둘 다 FAIL |
+| 부정: odom 또는 imu 내부 40ms → `/scan` 정상 여부와 무관하게 FAIL | `odom_gap40` · `imu_gap40` (scan 정상) | ✅ 둘 다 FAIL |
+| 경계: scan 계약과 odom·imu 33.33ms 의 **바로 안/밖** | `odom_edge_in/out`(33.32/33.34ms) · `scan_edge_in/out`(199.9/200.1ms) | ✅ 안 2/2 PASS · 밖 2/2 FAIL |
+| 부정: 정상 모양 요약 뒤 rc 0·rc 42 조기 종료 → 둘 다 FAIL | 가짜 `ros2` `early0`·`early42` | ✅ 둘 다 FAIL |
+| 전환: 충분한 표본 뒤 관측자가 죽고 별도 echo 때만 복구 → FAIL | `early42` (echo 는 항상 성공하게 둠) | ✅ FAIL |
+| 부정: 의도한 timeout 이 아닌 신호/CLI 오류 종료 → FAIL | `signal`(rc 130) | ✅ FAIL |
+| 역회귀: 동일 관측자가 요구 시간 전체를 채움 → PASS | `full`(rc 124, 3002ms) | ✅ PASS |
+| 부정: TODO 목록 10→9 · 10→11 → 문서 검사 실패 | 픽스처 6종 | ✅ 6/6 FAIL, 현 10건은 PASS |
+| flake8: 기록한 **정확한 명령**이 종료 0 | 아래 게이트 줄 | ✅ rc 0 |
+
+★ **검토가 안 준 경계를 스스로 하나 더 걸었다**: rc 만 보면 **즉시 124 를 뱉는 상대**에게
+속는다(`insta124` — rc 는 상한 발동인데 벽시계 0ms). 그래서 rc 와 경과시간을 **함께** 본다.
+그리고 `kill9`(TERM 을 씹어 SIGKILL 까지 간 rc 137)도 완전한 창으로 인정되는지 따로 확인했다.
+
+★★ **이 보완이 실패하는 단 하나의 방식을 먼저 반증했다** (`AGENTS.md §3-4`).
+"상한 발동 = 124" 가 틀리면 **D+0 에서 매번 거짓 FAIL** 이 난다 — `ros2` CLI 는 파이썬이라
+SIGTERM 을 잡아 **정상 종료(exit 0)** 할 수 있고, 그러면 rc 가 0 으로 보일 수 있다.
+가짜가 아니라 **GNU `timeout` 규약과 진짜 CLI** 에 직접 물었다:
+
+```text
+timeout --kill-after=2 2 bash -c 'trap "exit 0" TERM; sleep 30'   → rc 124   (자식이 0 이어도 124)
+timeout --kill-after=2 2 bash -c 'trap "exit 7" TERM; sleep 30'   → rc 124
+timeout --kill-after=2 3 ros2 topic hz /__nonexistent_probe       → rc 124 · 3223ms  ← 진짜 CLI
+```
+
+`--preserve-status` 를 쓰지 않는 한 timeout 은 **자식의 종료 상태와 무관하게 124** 를 준다.
+마지막 줄이 핵심이다 — 이 판정의 전제를 **가짜 `ros2` 가 아니라 실제 `ros2 topic hz`** 로 확인했다.
+
+**★ 실행 증거 — 명령 그대로** (결과만 적지 않는다. 이번 P2-2 가 정확히 그 실패였다)
+
+```bash
+python3 -m flake8 --max-line-length=99 tools/bag_gap_report.py tools/todo_d0_scan.py   # rc 0
+bash -n tools/d0_check.sh && bash -n tools/doc_check.sh                                # rc 0
+python3 -m py_compile tools/bag_gap_report.py tools/todo_d0_scan.py                    # rc 0
+python3 tools/scan_unbounded_cli.py tools/d0_check.sh                                  # 0건 · rc 0
+python3 tools/todo_d0_scan.py                                                          # 목록 10건 = 5자리 · rc 0
+python3 -m pytest src/mission_manager/test/ -q                                         # 182 passed
+colcon test && colcon test-result            # 245 tests, 0 errors, 0 failures, 3 skipped
+bash tools/doc_check.sh --strict                                                       # PASS
+```
+
+⚠ **`--max-line-length=99` 는 골대를 옮긴 것이 아니다.** 이 저장소의 실제 lint 게이트는
+`colcon test` 안의 `ament_flake8` 이고, 그 설정이 99열이다
+(`/opt/ros/humble/lib/python3.10/site-packages/ament_flake8/configuration/ament_flake8.ini:4`
+→ `max-line-length = 99`). **기본 79열로 재면 지금도 15건이 남는다** — 그 사실을 여기 적어 둔다.
+그리고 이 명령은 **이번에 만진 2파일만** 검사한다. 저장소 전체는 99열에서도 통과하지 않는다
+(`tools/scan_unbounded_cli.py` E702·W605 등). **전 저장소 lint 를 통과했다고 주장하지 않는다.**
+
+**게이트**: pytest **182** · colcon **245**(0e·0f·3s) · `doc_check --strict` PASS ·
+`bash -n` PASS · `scan_unbounded_cli` 0건 · flake8(99열, 2파일) rc 0. `src/**` diff **0**.
+
+⚠ **검증 상한 (닫지 않고 공개한다)**
+- **여전히 실차가 없다.** bag 은 우리가 만든 합성 sqlite3 이고 `ros2` 는 가짜다.
+  실제 RPLIDAR C1 의 `/scan` 주기 분포는 **R3 에서 처음 본다** — 그래서 `/scan` 에 간격
+  '계약'을 두지 않고 liveness 만 걸었다. **없는 실측을 숫자로 발명하지 않기 위해서다.**
+- `/scan` liveness 한계 **200ms = 사양 100ms × 2** 의 근거는 *"녹화 양끝은 발행 위상과
+  안 맞으므로 건강한 토픽도 한 주기까지는 빈다"* 이다. **R3 실측이 오면 이 값과 함께
+  간격 계약 자체를 다시 정한다** (`TOPIC_POLICY` 한 곳만 고치면 된다).
+- 이번 회귀는 **저장소에 박히지 않았다**(합성 bag·가짜 `ros2` 는 스크래치패드에서 실행).
+  하네스 편입은 **예약 21** 이고 인수 후 한 묶음에서 기준선을 한 번만 흔들며 처리한다.
+- **경과시간은 벽시계(`date +%s%N`)다 — 단조 시계가 아니다.** 관측 창 도중 NTP 가 시각을
+  **뒤로** 되돌리면 경과시간이 모자라 보여 거짓 FAIL 이 날 수 있다. 방향은 fail-closed 이고
+  메시지도 *"시스템 시각 또는 CLI 를 의심한다"* 로 안내한다 — 그리고 그 상황은 애초에
+  `JETSON_SETUP.md §1-b` 가 경고하는 **EKF 를 멈추는 조건**이라 FAIL 이 맞다. 그래도
+  *"이 검사는 시계가 단조라는 가정 위에 있다"* 는 사실은 여기 적어 둔다.
+- `todo_d0_scan.py` 는 `docs/*.md` 만 본다. `FREEZE_MANIFEST.md`·`legacy/`·'직전 완료' 블록은
+  그 시점 기록이라 제외한다(`gate_baseline_scan.py` 와 같은 규약). 근접 창(±100자)보다
+  멀리 떨어뜨려 쓰면 못 본다 — **표현을 바꿔 우회하는 것까지 막지는 못한다.**
