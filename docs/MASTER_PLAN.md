@@ -164,9 +164,14 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
 
 ## 7. SpeedManager 이후 예약 항목 (비차단 보류 — 지금 손대지 않음)
 
-1. `map_promote.sh` 는 best-effort transaction — 다음 정기 지도 제작 때 release evidence 3종(staging 로드 로그·FAIL 시 정본 hash 불변·PASS 후 manifest 일치) 실전 확인.
+1. **`map_promote.sh` release evidence 실전 확인** ⏸ **미실행 · 다음 정기 지도 제작 때** —
+   best-effort transaction의 evidence 3종(staging 로드 로그·FAIL 시 정본 hash 불변·PASS 후
+   manifest 일치)을 실제 지도 승격에서 확인한다. `make_map.sh` 실런은 사용자 명시 승인 전 금지다.
 2. ~~readiness 문구·deadline 통일 → E2E 하네스 추출 때 (§2-3).~~ ✅ 07-24 완료 (`tools/lib_e2e.sh` · `0723_현황.md §10`).
-3. 마스터플랜 §3.3 "동일 바이너리" 표현 → "동일 소스·아키텍처별 빌드"로 다음 문서 정리 때.
+3. ~~마스터플랜 §3.3 "동일 바이너리" 표현 정정~~ ✅ **08-03 종결 — 대상 문구 0건**.
+   대상 문자열을 `docs/MASTER_PLAN.md`에서 전수 검색한 유일한 결과가 이 역사 행 자체이고, 현행 §3은
+   Jetson/노트북의 아키텍처별 빌드·`COLCON_IGNORE` 절차를 이미 분리한다. 존재하지 않는 대상을
+   미완료로 계속 세지 않는다.
 4. ~~**`abort_e2e` 진단 강화**~~ ✅ **07-30 완료** — 실정지 단언(⑦)이 깨지면 `fail()` **전에**
    `/cmd_vel` 을 수집해 **코드 결함(취소 경로) vs 잔류 명령/시뮬 특성**을 갈라 FAIL 메시지에
    담는다. 구판은 `fail()` 이 즉시 cleanup+exit 해(`tools/lib_e2e.sh:51`) ⑧ 이 실행조차 안 되고
@@ -192,7 +197,7 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    수집은 명시 `geometry_msgs/msg/Twist` + Humble `--csv`(한 메시지=고정 6열), 판독은 모든
    줄의 6개 유한 실수만 승인한다. 침묵 근거도 **Twist 타입 + 발행자≥1**로 조였다.
    회귀 수는 17 유지, 케이스 17을 부모 공격·열 부족/초과·임의 꼬리·타입 불일치 계약으로 교체.
-5. **시뮬 diff_drive 와 실차 watchdog 의 정합성** — `libgazebo_ros_diff_drive` 는 command timeout 이
+5. **시뮬 diff_drive 와 실차 watchdog 의 정합성** ⏸ **R0 실측 대기** — `libgazebo_ros_diff_drive` 는 command timeout 이
    없어 cmd_vel 이 끊기면 마지막 속도를 무한 유지한다. 실차는 R0 통과조건에 watchdog(단절 0.5s 내
    정지)이 있으나 **아직 실측 전** — R0 실측 결과를 받은 뒤 시뮬 쪽 정합을 결정한다.
    ⚠ 동결의 §6 수용은 이 R0 실측 통과를 전제로 한 **조건부** 수용이다 (`docs/FREEZE_MANIFEST.md §6`).
@@ -219,9 +224,10 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    단위 **20** + lint 3 편입. colcon 기준선 **165 → 181 → 188**(0f·3s, `docs/TEST_GATES.md §1`).
    같은 묶음에서 **Codex P1 보완**(아래 §8 '게이트 술어 = live' 항목 갱신)과 **예약 12** 처리.
    ★ 그 커밋(`ce06228`)은 2차 재검토에서 **불승인** → 예약 14 로 이어짐.
-11. **라이다 장착 높이 재전달 요청** (07-29 재확인) — `TEENSY_실차연동_합의사항.md §8` 에서
-   **미수령**이고, 이것 없이는 R5 지도 제작 자체가 무의미하다(스캔이 로봇 엉뚱한 자리에 붙는다).
-   기구·센서 담당에게 재요청이 필요한 **사용자 액션**이며, 역할 A 가 코드로 우회할 수 없다.
+11. ~~**라이다 장착 높이 재전달 요청**~~ ✅ **08-02 요청 종결 · D+0 직접 측정으로 이관** —
+   다섯 번 미수령한 원인은 라이다가 아직 장착되지 않아 상대가 줄 값 자체가 없었기 때문이다.
+   역할 A가 장착 뒤 스캔면 높이를 재고 `base_link→lidar_link`를 반영한다. 실행 TODO의 정본은
+   `REAL_ROBOT_VALUES.md §3-a`·`§4`이며, “상대 재요청” 예약으로는 더 세지 않는다.
 12. ~~**게이트 토픽 술어의 '한 번 관측 = 통과' 약점**~~ ✅ **07-30 완료** (07-30 등록·같은 날 해소).
    등록 사유: Codex P1(lifecycle)과 **같은 결함 계열**이 `_topics_ok` 에도 있었다 — 마지막 수신이
    `topic_fresh`(2s) 안이기만 하면 통과하므로, 퍼블리셔가 **1건만 보내고 죽어도**(실차 USB
@@ -579,7 +585,8 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    것인가"** 를 물어야 한다. `AGENTS.md §3-10 ②`("열거를 검사기 안으로")를 지켰지만
    **검사기 자신이 의미론이 아니라 표기를 봤다** — §21~§23 에서 세 번 배운 것과 같은 실패다.
 
-21. **`d0_check.sh`·`bag_gap_report.py` 판정 논리를 회귀 하네스에 편입** ❌ **미착수 · 비차단**
+21. **D0/R3 판정기 회귀 편입 + `test_gate_regression` DDS/Nav2 간헐성 규명**
+   ❌ **미착수 · 비차단**
    (08-02 신설 — S6-4·S6-5 산출과 함께 등록.)
 
    등록 사유: 두 도구의 판정 논리(주기 파서 · QoS 정합 규칙 · 부호 판정 · 간격 분포)는
@@ -601,8 +608,9 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    **harness 24** 가 바뀌고, 그 수치는 `tools/gate_baseline_scan.py` 가 **전수 대조**하므로
    `GATES` 등록 수와 문서 여러 자리를 함께 고쳐야 한다(§19 가 "자리 수도 계약"이라고
    판정한 그 규칙이다). **인수 전날에 기준선을 흔드는 대신** 예약으로 분리했다.
-   ⏸ **재개 시점**: 인수 후 `test_gate_regression` 간헐 실패(§24.5a) 규명과 **같은 묶음**에서
-   처리한다 — 둘 다 회귀 하네스를 여는 작업이라 기준선을 한 번만 흔든다.
+   ⏸ **재개 시점**: D+0 인수 뒤, 다음 `tunnel_bringup` 변경 **전에** 판정기 회귀 편입과
+   `test_gate_regression` 간헐 실패 규명을 **같은 묶음**에서 처리한다. 둘 다 회귀 하네스를 여는
+   작업이라 기준선을 한 번만 흔든다.
 
    ★ **08-03 갱신 — 이 예약의 위험이 실제로 실현됐다.** 위 "10 시나리오" 로 검증했다고 적은
    바로 그 두 도구에서 **검토 §30 이 P1 2건을 더 찾았다**(정상 10Hz `/scan` 거부 · `topic hz`
@@ -612,6 +620,22 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
    TODO 픽스처 **6종** · 부호 **4모드**. 편입 시 **이 목록부터** 옮긴다.
    ⚠ 완료판정도 갱신한다: 위 "10 시나리오" 가 아니라 **"토픽별 계약과 관측 창 완주를 포함한
    위 목록 전량"** 이 회귀로 돌아야 한다. 근거 = `FREEZE_MANIFEST.md §10.6`.
+
+   **★★ 08-03 사용자 결정 — DDS/Nav2 간헐성을 예약 21의 정식 완료판정에 편입**
+
+   지목 사례는 하나가 아니라 기계 기록 전수상 **case 9·11·12·14**다. 과거에는 case 12·12·9가
+   이동했고(`TEST_GATES §2`), 최신 두 실행은 **13/14(case 12)** → **12/14(case 14·11)**로
+   다시 이동했다(`FREEZE_MANIFEST §10.10`). 따라서 “Nav2가 가끔 늦다” 한 자리만 늘리는 것이
+   아니라 **case 사이 DDS 세대·프로세스 cleanup·부하/발견 순서의 교차 오염 클래스**를 다룬다.
+
+   | 항목 | 내용 |
+   |---|---|
+   | 영향 | 이 flake가 남아 있으면 `tunnel_bringup` 변경 뒤 FAIL이 새 코드인지 기존 DDS/하네스인지 분리할 수 없어 게이트를 승인 근거로 쓸 수 없다. 실차 Nav2 자체 고장으로 확정된 것은 아니며, 현재 관찰은 노트북의 가짜 센서·readiness 통합 하네스다 |
+   | 완료판정 | case 9·11·12·14 각각의 마지막 미충족 술어와 DDS/프로세스 세대를 실행 로그로 식별하고, 원인을 재현하는 입력은 결정적으로 FAIL하며, 수리 뒤 fresh 실행과 순차 실행에서 기존 14경로 의미를 바꾸지 않고 통과한다. **우연히 전량 PASS한 한 회차는 완료가 아니다** |
+   | 최소 보완 | 케이스별 ROS_DOMAIN_ID·daemon·launch 자식·lifecycle 서비스 세대를 trace하고 cleanup 전후 잔류를 기계 검사한다. 공통 원인이 입증되면 한 소유층에서 고치고, production Nav2/launch 결함이면 이 하네스 묶음에서 몰래 고치지 말고 별도 runtime 승인 묶음으로 분리한다 |
+   | 필수 부정 회귀 | cleanup 일부 생략·옛 lifecycle 응답 지연·서비스 소실→복구·SLAM/Nav2 다음 단계 미기동을 주입하면 해당 case와 잔류 검사가 FAIL. 실패 위치가 다른 case로 이동했는데 전체 성공으로 기록하는 집계도 FAIL |
+   | 역회귀 | 기존 음성은 계속 거부되고, 정상 mapping(case 11)·bringup A→B→C(case 12)·소실 후 새 ACTIVE 2회(case 14)·액션 준비(case 9)는 각각 PASS. `GATE_SKIP_LAUNCH=1`의 빠른 격리 경로도 유지 |
+   | 반복 실행 계약 | 반복 횟수와 부하 조건은 **실패 분포를 보기 전에** 정하고 fresh/순차 두 군으로 실행한다. 성공할 때까지 재실행하거나 실패 회차를 버리지 않고 전량을 기록한다 |
 
 22. **Nav2 명령 하한 — 펌웨어 `MIN_EFFECTIVE_WHEEL_CMD` 를 Nav2 가 모른다** 🔴 **미승인 · 08-02 신설**
 
