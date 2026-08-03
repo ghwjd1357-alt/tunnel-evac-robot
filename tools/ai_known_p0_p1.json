@@ -59,5 +59,6 @@
   {"id":"0729-input-fd","path":"tools/scan_unbounded_cli.py","anchor":"입력 FD 복제"},
   {"id":"0801-odom-publisher-contract","path":"tools/d0_check.sh","anchor":"`/odom` RELIABLE"},
   {"id":"0801-context-fenced-heading-34","path":"tools/ai_context.py","anchor":"fenced code 내부의 `#`는 절 경계로 취급하지 않는다"},
-  {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"}
+  {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"},
+  {"id":"0801-watchdog-record-slot-37","path":"tools/test_ai_context.py","anchor":"watchdog 정상 실측 기록 슬롯의 위치 계약"}
 ]

@@ -556,8 +556,10 @@ timeout --kill-after=2s 12s \
 0.5초를 넘으면 실제 활주이므로 FAIL이다. FAIL·측정 불능이면 R1의 0.05m/s 지면 명령부터 금지하고
 `FREEZE_MANIFEST.md §6` 조건부 수용을 재개방한다.
 
+<!-- watchdog-evidence-slot:start -->
 TODO(D+0): 확인 — 영상 fps·정지 프레임 수·환산 시간·bag 경로와 PASS/FAIL을
 `D1_FIRST_STEP.md §0-a`에 기록한다. 빈칸이면 바로 아래 R1 대조군으로 진행하지 않는다.
+<!-- watchdog-evidence-slot:end -->
 
 #### 7-c-R1. R1 0.05m/s 대조군
 

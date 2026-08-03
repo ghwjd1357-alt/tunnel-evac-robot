@@ -34,6 +34,14 @@ WATCHDOG_DOWNGRADE = re.compile(
     r"통과(?:\s*처리)?(?:하지|하면\s*안)|"
     r"만으로(?:는)?[^.!?]*(?:아니|안\s*(?:되|된|돼)))"
 )
+WATCHDOG_SLOT_START = "<!-- watchdog-evidence-slot:start -->"
+WATCHDOG_SLOT_END = "<!-- watchdog-evidence-slot:end -->"
+WATCHDOG_RESULT = re.compile(r"(?:^|\s|[|—-])(?:PASS|FAIL)(?:\s|$|[—:.-])")
+WATCHDOG_MEASUREMENT = re.compile(r"\d+(?:\.\d+)?\s*(?:fps|프레임|ms|s\b|초)", re.I)
+WATCHDOG_REPLY_ONLY = re.compile(
+    r"(?:실측|측정)\s*(?:을\s*)?(?:생략|없이)|"
+    r"회신(?:값|수치)?(?:만)?\s*(?:으로|만으로)"
+)
 
 
 def review_history_findings(review_dir: Path):
@@ -61,19 +69,108 @@ def watchdog_authority_paths(freeze_text: str):
     return tuple(re.findall(r"^\| `([^`]+\.md)` \|", census, re.M))
 
 
+def watchdog_authority_documents(freeze_text: str, docs_dir: Path):
+    """Load every census path, with a readable fail-closed error for stale paths."""
+    documents = {}
+    for path in watchdog_authority_paths(freeze_text):
+        source_path = docs_dir / path
+        if not source_path.is_file():
+            raise AssertionError(f"active watchdog document is missing: {source_path}")
+        documents[path] = source_path.read_text()
+    return documents
+
+
+def watchdog_record_slot_lines(source: str):
+    """Return line indexes inside balanced evidence-slot markers; malformed means none."""
+    lines = source.splitlines()
+    slot_lines, opened = set(), None
+    for index, line in enumerate(lines):
+        if WATCHDOG_SLOT_START in line:
+            if opened is not None:
+                return set()
+            opened = index
+        if WATCHDOG_SLOT_END in line:
+            if opened is None:
+                return set()
+            slot_lines.update(range(opened + 1, index))
+            opened = None
+    return set() if opened is not None else slot_lines
+
+
+def markdown_table_cells(line: str):
+    """Split Markdown cells without treating escaped or inline-code pipes as separators."""
+    cells, cell, code_ticks = [], [], 0
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if char == "\\" and index + 1 < len(line):
+            cell.extend((char, line[index + 1]))
+            index += 2
+            continue
+        if char == "`":
+            run = 1
+            while index + run < len(line) and line[index + run] == "`":
+                run += 1
+            if code_ticks == 0:
+                code_ticks = run
+            elif code_ticks == run:
+                code_ticks = 0
+            cell.extend("`" * run)
+            index += run
+            continue
+        if char == "|" and code_ticks == 0:
+            value = "".join(cell).strip()
+            if value:
+                cells.append(value)
+            cell = []
+        else:
+            cell.append(char)
+        index += 1
+    value = "".join(cell).strip()
+    if value:
+        cells.append(value)
+    return cells
+
+
 def markdown_statements(source: str):
-    """Join wrapped prose while keeping table rows as independent statements."""
+    """Return claim-sized text with evidence-slot location, including split claims."""
     statements, paragraph = [], []
+    slot_lines = watchdog_record_slot_lines(source)
 
     def flush():
         if paragraph:
-            joined = " ".join(paragraph)
-            statements.extend(part for part in re.split(r"(?<=[.!?])\s+", joined) if part)
+            joined = " ".join(text for text, _in_slot in paragraph)
+            in_slot = all(flag for _text, flag in paragraph)
+            sentences = [
+                part for part in re.split(r"(?<=[.!?])\s+", joined) if part
+            ]
+            statements.extend((sentence, in_slot) for sentence in sentences)
+            for left, right in zip(sentences, sentences[1:]):
+                combined = f"{left} {right}"
+                left_complete = all((
+                    WATCHDOG_ORIGIN.search(left),
+                    WATCHDOG_AUTHORITY.search(left),
+                    WATCHDOG_SCOPE.search(left),
+                ))
+                right_complete = all((
+                    WATCHDOG_ORIGIN.search(right),
+                    WATCHDOG_AUTHORITY.search(right),
+                    WATCHDOG_SCOPE.search(right),
+                ))
+                if not left_complete and not right_complete and all((
+                    WATCHDOG_ORIGIN.search(combined),
+                    WATCHDOG_AUTHORITY.search(combined),
+                    WATCHDOG_SCOPE.search(combined),
+                )):
+                    statements.append((combined, in_slot))
             paragraph.clear()
 
     in_fence = False
-    for raw in source.splitlines():
+    for index, raw in enumerate(source.splitlines()):
         line = raw.strip()
+        if WATCHDOG_SLOT_START in line or WATCHDOG_SLOT_END in line:
+            flush()
+            continue
         if re.match(r"^(?:`{3,}|~{3,})", line):
             flush()
             in_fence = not in_fence
@@ -84,23 +181,40 @@ def markdown_statements(source: str):
             flush()
         elif line.startswith("|"):
             flush()
-            statements.append(line)
+            cells = markdown_table_cells(line)
+            if cells:
+                in_slot = index in slot_lines
+                statements.extend((cell, in_slot) for cell in cells)
+                statements.extend(
+                    (f"{cells[0]} | {cell}", in_slot) for cell in cells[1:]
+                )
         else:
-            paragraph.append(line)
+            paragraph.append((line, index in slot_lines))
     flush()
     return statements
+
+
+def measured_watchdog_record(statement: str):
+    """Accept measured PASS/FAIL comparisons only inside document-owned record slots."""
+    return (
+        WATCHDOG_RESULT.search(statement)
+        and WATCHDOG_MEASUREMENT.search(statement)
+        and not WATCHDOG_REPLY_ONLY.search(statement)
+    )
 
 
 def watchdog_authority_violations(documents):
     """Find reply-only claims that improperly close the physical watchdog gate."""
     violations = []
     for path, source in documents.items():
-        for statement in markdown_statements(source):
+        for statement, in_record_slot in markdown_statements(source):
             if not all((
                 WATCHDOG_ORIGIN.search(statement),
                 WATCHDOG_AUTHORITY.search(statement),
                 WATCHDOG_SCOPE.search(statement),
             )):
+                continue
+            if in_record_slot and measured_watchdog_record(statement):
                 continue
             if WATCHDOG_DOWNGRADE.search(statement):
                 continue
@@ -120,8 +234,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(61, len(rows))
-        self.assertEqual(61, len({row["id"] for row in rows}))
+        self.assertEqual(62, len(rows))
+        self.assertEqual(62, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -155,7 +269,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_61_primary_findings(self):
+    def test_02b_history_scan_independently_counts_62_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         files, found = review_history_findings(review_dir)
         if not files:
@@ -164,7 +278,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(61, len(found))
+        self.assertEqual(62, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
@@ -195,6 +309,12 @@ class ContextRouterTest(unittest.TestCase):
             first.write_text("### 1.1 P1 original — finding\n")
             extra.write_text("### 2.1 P2 documentation only — finding\n")
             _files, found = review_history_findings(review_dir)
+            self.assertEqual(1, len(found))
+
+            outside_contract = review_dir / "0803_review.md"
+            outside_contract.write_text("### 3.1 P1 outside suffix contract — finding\n")
+            files, found = review_history_findings(review_dir)
+            self.assertNotIn(outside_contract, files)
             self.assertEqual(1, len(found))
 
     def test_03_unknown_path_falls_back_to_all_safety_docs(self):
@@ -484,12 +604,25 @@ outside
         paths = watchdog_authority_paths(freeze)
         self.assertEqual(7, len(paths))
         self.assertEqual(7, len(set(paths)))
-        documents = {path: (ROOT / "docs" / path).read_text() for path in paths}
+        documents = watchdog_authority_documents(freeze, ROOT / "docs")
+        slot_counts = {
+            path: source.count(WATCHDOG_SLOT_START)
+            for path, source in documents.items()
+            if WATCHDOG_SLOT_START in source
+        }
+        self.assertEqual({"D1_FIRST_STEP.md": 1, "JETSON_SETUP.md": 1}, slot_counts)
+        self.assertTrue(all(
+            source.count(WATCHDOG_SLOT_START) == source.count(WATCHDOG_SLOT_END)
+            for source in documents.values()
+        ))
+        for path in slot_counts:
+            self.assertTrue(watchdog_record_slot_lines(documents[path]), path)
         self.assertEqual([], watchdog_authority_violations(documents))
 
     def test_29_watchdog_authority_sweep_rejects_paraphrases_in_all_active_docs(self):
         freeze = (ROOT / "docs/FREEZE_MANIFEST.md").read_text()
         paths = watchdog_authority_paths(freeze)
+        documents = watchdog_authority_documents(freeze, ROOT / "docs")
         attacks = (
             "구동부 회신만으로 watchdog 정지 조건은 사실상 충족됐다고 본다.",
             "구동부 3차 회신으로 watchdog 정지 조건은 이미 충족됐다.",
@@ -501,8 +634,9 @@ outside
         for path in paths:
             for attack in attacks:
                 with self.subTest(path=path, attack=attack):
-                    violations = watchdog_authority_violations({path: attack})
-                    self.assertEqual([(path, attack)], violations)
+                    injected = {**documents, path: f"{documents[path]}\n\n{attack}\n"}
+                    violations = watchdog_authority_violations(injected)
+                    self.assertIn((path, attack), violations)
 
     def test_30_watchdog_authority_sweep_allows_explicitly_downgraded_replies(self):
         allowed = (
@@ -513,6 +647,86 @@ outside
         for statement in allowed:
             with self.subTest(statement=statement):
                 self.assertEqual([], watchdog_authority_violations({"fixture.md": statement}))
+
+    def test_31_watchdog_measurements_are_allowed_in_both_document_owned_slots(self):
+        freeze = (ROOT / "docs/FREEZE_MANIFEST.md").read_text()
+        documents = watchdog_authority_documents(freeze, ROOT / "docs")
+        records = (
+            "PASS — 60fps 18프레임 = 0.30초, bag d0_watchdog_0803_1420",
+            "PASS 0.30초. 구동부 회신 0.010s보다 느리지만 조건 충족",
+            "PASS — 정지 조건 충족(0.30초). 구동부 회신값과 자릿수 차이 있음",
+            "PASS. 회신 0.010s 대비 0.30초로 느림, 통과 처리",
+            "FAIL — 0.8초 활주, E-stop. 구동부 회신과 불일치",
+        )
+
+        def replace_slot(source, content):
+            before, rest = source.split(WATCHDOG_SLOT_START, 1)
+            _old, after = rest.split(WATCHDOG_SLOT_END, 1)
+            return (
+                f"{before}{WATCHDOG_SLOT_START}\n{content}\n"
+                f"{WATCHDOG_SLOT_END}{after}"
+            )
+
+        for path in ("D1_FIRST_STEP.md", "JETSON_SETUP.md"):
+            for record in records:
+                with self.subTest(path=path, record=record):
+                    content = (
+                        f"| R0 watchdog | 실차 판정 | {record} |"
+                        if path == "D1_FIRST_STEP.md"
+                        else f"R0 watchdog 실측 기록: {record}"
+                    )
+                    source = replace_slot(documents[path], content)
+                    self.assertEqual([], watchdog_authority_violations({path: source}))
+
+    def test_32_watchdog_record_slot_does_not_exempt_reply_only_or_outside_claims(self):
+        outside_records = (
+            "PASS 0.30초. 구동부 회신 0.010s보다 느리지만 조건 충족",
+            "PASS — 정지 조건 충족(0.30초). 구동부 회신값과 자릿수 차이 있음",
+            "PASS. 회신 0.010s 대비 0.30초로 느림, 통과 처리",
+        )
+        for record in outside_records:
+            with self.subTest(outside=record):
+                outside = f"R0 watchdog 실측 기록: {record}"
+                self.assertTrue(watchdog_authority_violations({"outside.md": outside}))
+
+        reply_only_records = (
+            "PASS — 실측 생략, 구동부 회신으로 정지 조건 충족",
+            "PASS — 0.010s, 실측 생략, 구동부 회신으로 정지 조건 충족",
+        )
+        for record in reply_only_records:
+            with self.subTest(reply_only=record):
+                source = (
+                    f"{WATCHDOG_SLOT_START}\nR0 watchdog: {record}\n"
+                    f"{WATCHDOG_SLOT_END}\n"
+                )
+                self.assertTrue(watchdog_authority_violations({"slot.md": source}))
+
+        outside = f"R0 watchdog 실측 기록: {outside_records[0]}"
+        marked = f"{WATCHDOG_SLOT_START}\n{outside}\n{WATCHDOG_SLOT_END}\n"
+        self.assertEqual([], watchdog_authority_violations({"slot.md": marked}))
+        missing_end = marked.replace(WATCHDOG_SLOT_END, "")
+        self.assertTrue(watchdog_authority_violations({"slot.md": missing_end}))
+        unmarked = marked.replace(WATCHDOG_SLOT_START, "").replace(WATCHDOG_SLOT_END, "")
+        self.assertTrue(watchdog_authority_violations({"slot.md": unmarked}))
+
+    def test_33_watchdog_table_cells_and_split_sentences_cannot_hide_claims(self):
+        attacks = (
+            "| watchdog 회신 | 구동부 회신으로 정지 조건 충족 | 참고: 3차 회신 |",
+            "구동부 3차 회신이 도착했다. 이로써 watchdog 정지 조건은 충족됐다.",
+        )
+        for attack in attacks:
+            with self.subTest(attack=attack):
+                self.assertTrue(watchdog_authority_violations({"fixture.md": attack}))
+
+    def test_34_missing_watchdog_census_path_names_the_contract_failure(self):
+        freeze = (ROOT / "docs/FREEZE_MANIFEST.md").read_text()
+        broken = freeze.replace(
+            "| `MASTER_PLAN.md` |", "| `MISSING_WATCHDOG.md` |", 1
+        )
+        with self.assertRaisesRegex(
+            AssertionError, "active watchdog document is missing: .*MISSING_WATCHDOG.md"
+        ):
+            watchdog_authority_documents(broken, ROOT / "docs")
 
 
 if __name__ == "__main__":

@@ -39,7 +39,9 @@ R0→R1→R2→R3 순서를 건너뛰면 무엇이 틀렸는지 못 가른다.
 | 우회전 각속도 | `angular.z=-0.12` 10초 뒤 `/imu/yaw_deg` 변화: 약 −69°=회신 오기, 약 −112°=실제 과속 | `TODO(D+1): 확인` |
 | odom 의미 | pose는 raw encoder 적분, twist는 EMA(`α=0.10`, 시정수 약 0.2초). EKF는 **twist** 소비 | R3 가감속·covariance 판정에 반영 |
 | 감속 능력 | 역 PWM을 의도적으로 쓰지 않아 능동 제동 없음. 경사 하강 자유주행 가능 | R6 경사 시험 전 별도 안전판정 |
+<!-- watchdog-evidence-slot:start -->
 | R0 watchdog | 명령 단절 뒤 실제 바퀴 정지 ≤0.5초. EMA twist가 아니라 60fps 영상+raw pose로 판정 | `TODO(D+0): 확인` — fps·프레임·초·bag·PASS/FAIL |
+<!-- watchdog-evidence-slot:end -->
 
 ⚠ 3m 거리로 확인한 pose 정확도를 곧바로 EKF twist 정확도로 승격하지 않는다. 등속 평균은
 보존되지만 가감속 구간에는 약 0.2초 지연이 있으므로 §5의 bag과 R4 잔차에서 따로 본다.
