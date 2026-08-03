@@ -45,6 +45,12 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md
 - 2026-08-03 현장 결정으로 라이다 장착·높이·포트·`/scan`은 다음 날 재개한다. 오늘은
   라이다 비의존 agent·odom·IMU·EKF와 `partial_odom_imu` bag까지만 진행하며, `/scan`이 필요한
   3토픽 사전 bag 판정과 4토픽 동시부하 판정은 통과로 기록하지 않는다.
+- E-stop 설치용 사진에서 Tattu 6S 22.2V/25.2V·16Ah, MDD10A Rev2.0 두 장,
+  IG-36PGM 24V 네 대(무부하 0.25A·정격 1.1A·stall 약 5A)를 확인했다. 설치 선정 입력과
+  후보 릴레이 배제 근거는 `REAL_ROBOT_VALUES.md §1-e`, 실행 요청은 Desktop 0804 요청서가 맡는다.
+- 사용자는 E-stop 해제 뒤 재가동 승인을 ROS 서비스로 결정했다. 명령 `/drive/enable`·상태
+  `/drive/enabled` 방향은 확정했지만 서비스 타입·`micro_ros_arduino` 반영은 라이브러리 확인 뒤
+  별도 구현한다. 현재 펌웨어에는 re-arm 래치가 없으므로 구현·부정/전환 시험 전 R1·R2는 금지다.
 - 같은 날 비구동 실측에서 EKF 출력 30Hz, frame_id 3종, IMU TF z=0.392m·yaw=-90°와
   odom/IMU covariance 의미값을 확인했다. 상세 수치는 `JETSON_SETUP.md §11-d` 한 곳에 기록했다.
 - 149.6초 부분 bag의 odom·IMU 내부 간격·stamp는 정상이었으나 TF 계열이 bag 시작점을 먼저
