@@ -708,3 +708,57 @@ colcon **245**(0e·0f·3s) (`colcon test` → `colcon test-result`) · `doc_chec
 **182/182** · harness **24/24** · colcon **245/245**(0 failure, 3 skip) · build·문서/정적 검사
 PASS. readiness 통합 **13/14**는 이미 `TEST_GATES §1`에 공개된 case 12 간헐성 그대로이며,
 실행 값·분기 diff 0이라 승인 근거에서 제외하고 실패 사실을 보존한다.
+
+### 10.9 검토 §35 P2 보완 — watchdog 권위·현장 관측 창·61건 corpus (2026-08-03, **동결 예외 아님**)
+
+Claude의 §35 독립 검토는 `b856609`를 **승인(P0 0 · P1 0 · P2 3)**했다. 사용자가 P2 세 건도
+전부 구현하도록 명시해 **Codex가 구현자**, Claude가 이 후속 diff의 독립 재검토자다. 변경은
+`docs/`·`tools/`뿐이며 `src/**` diff는 0이다. 예약 22·23도 열지 않았다. 바로 위 §10.8의
+**59/59·27/27은 `b856609` 당시 역사적 스냅샷**이므로 덮어쓰지 않고, 현행값은 이 절에 둔다.
+
+| §35 P2 | 같은 클래스 전수·완료판정 | 보완 |
+|---|---|---|
+| watchdog 문서 권위 충돌 | 활성 7문서의 역할을 모두 대조. 구동부 회신은 참고, D0 실측만 물리 권위, D1은 결과 소비자여야 한다 | `REAL_ROBOT_VALUES`의 회신을 참고값으로 내리고, `D1_FIRST_STEP §6`은 D0 FAIL·미실측·빈 기록이면 재개방·중단하도록 정정 |
+| 두 명령을 한꺼번에 복사 | R0는 비영 publish 종료와 zero publish 사이 **명령 없는 2초 관측**이 구조적으로 존재해야 한다. R1 대조군은 반대로 즉시 zero를 유지해야 한다 | R0 publish를 두 fenced block으로 분리하고 관측 지시를 블록 사이에 배치. R1은 한 블록 두 publish인 역회귀로 잠금 |
+| 검토 역사가 §34 앞에서 영구 절단 | Desktop 검토문을 끝까지 세어 inventory와 exact 일치, 새 P0/P1은 증가 방향도 FAIL해야 한다 | `split("\\n## 34.")` 제거, §34 P1 두 행 추가, 현행 **61/61**·common-only **0/61**. 이후 새 제목은 history/inventory 불일치로 자동 FAIL |
+
+**★ watchdog 활성 문서 전수 열거 → 항목별 대조** (`AGENTS.md §3-10`)
+
+열거 명령은 `rg -n -i 'cmd_vel watchdog|R0 watchdog|0\.5초.*watchdog|watchdog.*0\.5초|0\.5s.*watchdog' docs/*.md`다.
+scan liveness watchdog만 말하는 `PROJECT_CONTEXT`·`PITFALLS`는 이 물리 계약 클래스가 아니어서
+제외했다. 아래 7자리는 모두 서로 다른 역할 하나로 덮인다.
+
+| 활성 문서 | 맡은 역할 | 항목별 대조 |
+|---|---|---|
+| `MASTER_PLAN.md` | R0 계약·순서 | ✅ 단절 0.5초 내 정지를 통과조건으로만 선언 |
+| `JETSON_SETUP.md` | **유일한 물리 측정·증거 권위** | ✅ zero 없는 관측 창·영상+raw pose·PASS/FAIL 기록 |
+| `D1_FIRST_STEP.md` | D0 결과 소비 | ✅ PASS만 진행, FAIL·미실측·빈값은 FREEZE 재개방+D+1 중단 |
+| `REAL_ROBOT_VALUES.md` | 구동부 회신·소스 참고 | ✅ 회신 수치를 실차 증거로 승격하지 않음 |
+| `FREEZE_MANIFEST.md` | 조건부 수용·재개방 상태 | ✅ R0 실측 전 미해결, 불일치 시 §6 재개방 |
+| `TEST_GATES.md` | 자동 검증 상한 | ✅ CLI 관측은 물리 연속 생존·손실을 못 증명하며 R0 실측 몫임을 공개 |
+| `CURRENT_HANDOFF.md` | 현행 전환·상태 | ✅ D0 실측 전제와 독립 재검토 대기를 한 묶음으로 지시 |
+
+**회귀 관찰값**
+
+| 무엇 | 명령 | 관찰값 |
+|---|---|---|
+| AI routing·history·R0/R1 구조 | `python3 tools/test_ai_context.py` | **29/29 PASS**; R0 두 block+사이 관측, R1 한 block 두 publish, 61/61·0/61 |
+| D0/D1 TODO exact 계약 | `python3 tools/test_todo_scan.py` | **5/5 PASS** |
+| 미션 단위 회귀 | `python3 -m pytest src/mission_manager/test/ -q` | **182/182 PASS** |
+| 공격 하네스 | `bash tools/test_harness_guards.sh` | **24/24 PASS** |
+| readiness 부정·역회귀 | `ROS_LOG_DIR=/tmp/codex_ros_logs bash tools/test_gate_regression.sh` | **14/14 PASS** |
+| 전체 빌드 | `colcon build --symlink-install` | **5 packages PASS** |
+| 전체 테스트 | `ROS_LOG_DIR=/tmp/codex_ros_logs colcon test` → `colcon test-result --verbose` | **245 tests, 0 errors, 0 failures, 3 skipped** |
+| 문서·핸드오프 정합 | `bash tools/doc_check.sh --strict` | **PASS** |
+
+⚠ **검증 상한**
+- watchdog은 아직 실제 바퀴로 측정하지 않았다. 이 보완은 **측정 절차와 증거 권위 충돌**을
+  닫았을 뿐 `FREEZE_MANIFEST §6`의 조건부 위험을 통과로 바꾸지 않는다.
+- 검토 역사 재계수는 Desktop archive가 있는 정본 개발 PC에서만 강제된다. archive 없는
+  이식 환경에서는 그 테스트를 skip하므로, portable CI가 새 발견 편입을 증명한다고 주장하지 않는다.
+- fenced block 분리는 copy/paste 실수를 구조적으로 줄이지만 사용자가 두 블록을 일부러 연속
+  실행하는 것까지 셸이 차단하지는 않는다. 현장 증거는 영상과 raw pose가 실제 무명령 창을 보여야 한다.
+- 첫 `colcon test`는 샌드박스의 읽기 전용 `~/.ros/log`에 쓰지 못해 첫 timer test가 실패했고,
+  뒤 10건이 `Context.init()` 중복으로 연쇄 실패했다(**인프라 분류**). 원인 기록 뒤 로그 경로를
+  `/tmp`로 지정한 동일 245건이 위와 같이 전량 통과했다. 재실행 성공만 남기지 않고 최초 실패와
+  분류를 함께 보존한다.

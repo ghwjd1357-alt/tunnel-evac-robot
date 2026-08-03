@@ -32,8 +32,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(59, len(rows))
-        self.assertEqual(59, len({row["id"] for row in rows}))
+        self.assertEqual(61, len(rows))
+        self.assertEqual(61, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -67,7 +67,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_59_primary_findings(self):
+    def test_02b_history_scan_independently_counts_61_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         names = (
             "0719검토현황.md", "0720검토현황.md", "0723검토현황.md",
@@ -78,11 +78,6 @@ class ContextRouterTest(unittest.TestCase):
         found = []
         for name in names:
             source = (review_dir / name).read_text()
-            if name == "0801검토현황.md":
-                # The fixed 59-row replay corpus ends at §33. §34 findings have
-                # their own regressions in this file and are not silently folded
-                # into the historical baseline under repair.
-                source = source.split("\n## 34.", 1)[0]
             for line in source.splitlines():
                 primary_heading = (
                     re.match(r"^### .*P(?:0|1)(?:/P2|·P2|→P1)? .*—", line)
@@ -101,7 +96,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in specials:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(59, len(found))
+        self.assertEqual(61, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
@@ -353,6 +348,37 @@ outside
         for ref in ai_context.PROFILE_REFS["bringup"]:
             suffix = f" §{ref.section}" if ref.section else ""
             self.assertIn(f"SOURCE `{ref.path}{suffix}`", packet)
+
+    def test_27_watchdog_commands_require_an_uncommanded_observation_window(self):
+        text = ai_context.read_ref(ai_context.Ref("docs/JETSON_SETUP.md", "7"))[0]
+        watchdog = text.split("#### 7-c-0.", 1)[1].split("#### 7-c-R1.", 1)[0]
+        blocks = list(re.finditer(r"```bash\n(.*?)```", watchdog, re.S))
+        pub_blocks = [match for match in blocks if "ros2 topic pub" in match.group(1)]
+        self.assertEqual(2, len(pub_blocks))
+        self.assertTrue(all(match.group(1).count("ros2 topic pub") == 1
+                            for match in pub_blocks))
+        self.assertIn("--times 30", pub_blocks[0].group(1))
+        self.assertIn("linear: {x: 0.05", pub_blocks[0].group(1))
+        self.assertNotIn("linear: {x: 0.0,", pub_blocks[0].group(1))
+        self.assertIn("--times 3", pub_blocks[1].group(1))
+        self.assertIn("linear: {x: 0.0,", pub_blocks[1].group(1))
+        between = watchdog[pub_blocks[0].end():pub_blocks[1].start()]
+        self.assertIn("2초 이상 관찰", between)
+        self.assertIn("마친 뒤에만", between)
+
+        r1 = text.split("#### 7-c-R1.", 1)[1].split("#### 7-c-1.", 1)[0]
+        r1_blocks = re.findall(r"```bash\n(.*?)```", r1, re.S)
+        self.assertTrue(any(block.count("ros2 topic pub") == 2 for block in r1_blocks))
+
+    def test_28_watchdog_evidence_has_one_physical_authority(self):
+        d1 = (ROOT / "docs/D1_FIRST_STEP.md").read_text()
+        real = (ROOT / "docs/REAL_ROBOT_VALUES.md").read_text()
+        freeze = (ROOT / "docs/FREEZE_MANIFEST.md").read_text()
+        self.assertNotIn("R0 의 미결 하나를 잊지 말 것", d1)
+        self.assertNotIn("조건부 수용의 **정지 조건은 충족**", real)
+        self.assertIn("cmd_vel watchdog 회신 참고값", real)
+        self.assertIn("확정·재개방의 유일한 근거", real)
+        self.assertIn("R0 실측에서 watchdog 이 확인되지 않으면", freeze)
 
 
 if __name__ == "__main__":

@@ -529,7 +529,13 @@ ros2 bag record /cmd_vel /odom /estop/state -o d0_watchdog_$(date +%m%d_%H%M)
 timeout --signal=INT --kill-after=2s 10s \
   ros2 topic pub --times 30 -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.05, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
-# 여기서 zero Twist 없이 2초 이상 관찰한다.
+# 이 블록이 끝나도 아래 zero Twist 블록은 아직 실행하지 않는다.
+```
+
+첫 블록이 끝나면 **아무 명령도 보내지 않고 2초 이상 관찰한다.** 영상·pose 관찰을 마친 뒤에만
+아래 블록을 따로 복사해 실행한다. 두 블록을 한꺼번에 붙여넣으면 이 시험은 무효다.
+
+```bash
 timeout --kill-after=2s 12s \
   ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
@@ -549,6 +555,8 @@ timeout --kill-after=2s 12s \
 
 TODO(D+0): 확인 — 영상 fps·정지 프레임 수·환산 시간·bag 경로와 PASS/FAIL을
 `D1_FIRST_STEP.md §0-a`에 기록한다. 빈칸이면 바로 아래 R1 대조군으로 진행하지 않는다.
+
+#### 7-c-R1. R1 0.05m/s 대조군
 
 먼저 R1 대조군으로 0.05m/s를 약 5초만 보낸다. `timeout`과 메시지 수가 이 명령의 상한이고,
 끝난 뒤 zero Twist를 3회 보낸다. 움직임·진동·편향이 이상하면 0.12 시험으로 올라가지 않는다.

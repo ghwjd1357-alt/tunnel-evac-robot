@@ -57,5 +57,7 @@
   {"id":"0729-unknown-parent-parser","path":"tools/lib_e2e.sh","anchor":"부모 전환"},
   {"id":"0729-observation-start-time","path":"tools/lib_e2e.sh","anchor":"시작 GID 스냅샷 확정"},
   {"id":"0729-input-fd","path":"tools/scan_unbounded_cli.py","anchor":"입력 FD 복제"},
-  {"id":"0801-odom-publisher-contract","path":"tools/d0_check.sh","anchor":"`/odom` RELIABLE"}
+  {"id":"0801-odom-publisher-contract","path":"tools/d0_check.sh","anchor":"`/odom` RELIABLE"},
+  {"id":"0801-context-fenced-heading-34","path":"tools/ai_context.py","anchor":"fenced code 내부의 `#`는 절 경계로 취급하지 않는다"},
+  {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"}
 ]
