@@ -762,3 +762,49 @@ scan liveness watchdog만 말하는 `PROJECT_CONTEXT`·`PITFALLS`는 이 물리 
   뒤 10건이 `Context.init()` 중복으로 연쇄 실패했다(**인프라 분류**). 원인 기록 뒤 로그 경로를
   `/tmp`로 지정한 동일 245건이 위와 같이 전량 통과했다. 재실행 성공만 남기지 않고 최초 실패와
   분류를 함께 보존한다.
+
+### 10.10 검토 §36 P2 보완 — 검사 입력 폐포·R0 실패 중단 (2026-08-03, **동결 예외 아님**)
+
+Claude의 §36 독립 검토는 `53230a8`을 **승인(P0 0 · P1 0 · P2 3)**했고, 사용자가 잔여 P2도
+전부 구현하도록 명시했다. **Codex가 구현자**, Claude가 이 후속 diff의 독립 재검토자다. 변경은
+`docs/`와 `tools/test_ai_context.py`뿐이며 `src/**`·예약 22·예약 23은 열지 않았다.
+
+| §36 P2 | 착수 전 전수·완료판정 | 구현자 주장 |
+|---|---|---|
+| watchdog 권위 검사가 특정 문구만 봄 | §10.9 활성 7문서의 어디에서든 구동부 회신을 물리 통과로 승격하면 FAIL, 명시적 참고·부정·실측 전제는 PASS | 활성 문서 표 자체를 파싱해 검사 입력으로 사용. 7문서 × 위험 표현 6종 = **42조합 전부 검출**, 현행 7문서와 정상 격하 3종은 오탐 0. `금지·재개방·전제`가 뒤에 붙어도 앞의 거짓 통과를 면제하지 않음 |
+| 검토 역사 파일명 5개 하드코딩 | 어떤 이름의 새 `*검토현황.md`도 자동 계수하고 P0/P1 증감은 exact 계약을 깨며 P2-only는 오탐하지 않음 | `Path.glob` 자동 발견으로 교체. 임의 이름 6번째 P1 추가·제거, 기존 P1 소실, P2-only 추가를 합성 회귀로 고정. 정본 archive는 현재 5파일·61건 유지 |
+| R0 실패 중단 지시 없음 | 0.5초 초과 회전이면 2초를 채우지 않고 E-stop→FAIL 증거→zero 미실행→R1 금지→§6 재개방 | 두 publish block 사이에 중단 경로를 적고 `test_27`의 `between` 범위에 고정. 즉시 zero가 정답인 R1에는 같은 문구가 들어가면 FAIL |
+
+**회귀 관찰값**
+
+| 무엇 | 명령 | 관찰값 |
+|---|---|---|
+| AI routing·history·watchdog 권위·R0/R1 구조 | `python3 tools/test_ai_context.py` | **32/32 PASS** |
+| D0/D1 TODO exact 계약 | `python3 tools/test_todo_scan.py` | **5/5 PASS** |
+| 미션 단위 회귀 | `python3 -m pytest src/mission_manager/test/ -q` | **182/182 PASS** |
+| 공격 하네스 | `bash tools/test_harness_guards.sh` | **24/24 PASS** |
+| 전체 빌드 | `colcon build --symlink-install` | **5 packages PASS** |
+| 전체 테스트 | `ROS_LOG_DIR=/tmp/codex_ros_logs colcon test --packages-select mission_manager tunnel_sim tunnel_bringup` → `colcon test-result --verbose` | **245 tests, 0 errors, 0 failures, 3 skipped** |
+| 정적 검사 | `python3 -m py_compile tools/ai_context.py tools/test_ai_context.py` · `python3 -m flake8 --max-line-length=99 tools/ai_context.py tools/test_ai_context.py` · `git diff --check` · `bash -n tools/*.sh` | **PASS** |
+| 문서·핸드오프 정합 | `bash tools/doc_check.sh --strict` | **PASS** |
+
+⚠ **실패를 숨기지 않는 분류 기록**
+
+- 전용 회귀 첫 실행은 새 의미 스윕이 정상 금지문과 자기 설명문을 오탐해 32건 중 2건 실패했다.
+  **코드 결함**으로 분류하고 금지형 어미를 보완하고 설명문을 모호하지 않게 바꿨다. §10.10 상한을
+  처음 쓴 뒤에도 어휘 세 묶음을 한 문장에 나열해 1건 오탐했고, 예외를 넓히지 않고 설명문을 구조와
+  분리한 뒤 최종 32/32를 얻었다.
+- readiness 통합은 첫 실행 **13/14(case 12)**, 원인 기록 뒤 한 번 재실행은 **12/14(case 14·11)**였다.
+  실패 위치가 이동했고 readiness 런타임·launch·파라미터 diff는 0이며, §1에 이미 공개된 DDS/부하
+  간헐 클래스와 일치하므로 **하네스/인프라**로 분류한다. 성공할 때까지 재실행하지 않았고 이 묶음의
+  승인 근거로 쓰지 않는다.
+
+⚠ **검증 상한**
+
+- watchdog 자연어의 가능한 모든 우회 표현을 정규식으로 전수하는 것은 원리적으로 불가능하다.
+  이번 폐포는 §36이 제시한 세 어휘 집합의 조합과 명시적 격하 문맥까지다. 정확한 탐지 집합은
+  `tools/test_ai_context.py`의 `WATCHDOG_*` 상수 한 곳에 있다. 이 상한 밖의 새 표현이 발견되면
+  단어를 하나씩 덧대기 전에 계약 소유층을 다시 정해야 한다.
+- archive 자동 발견은 정본 개발 PC의 해당 Desktop 디렉터리가 마운트돼 있을 때만 강제된다.
+- 이 보완은 R0 현장 절차를 안전하게 만들었지만 watchdog 물리 PASS를 만들지는 않았다. 실제 영상·
+  raw pose 증거 없이 `FREEZE_MANIFEST §6`을 닫거나 R1로 진행할 수 없다.

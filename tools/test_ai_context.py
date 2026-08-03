@@ -20,6 +20,94 @@ sys.path.insert(0, str(ROOT / "tools"))
 import ai_context  # noqa: E402
 
 
+REVIEW_HISTORY_GLOB = "*검토현황.md"
+REVIEW_HISTORY_SPECIALS = (
+    ("0719검토현황.md", "### 4.1 P0 stale goal 취소 레이스"),
+    ("0720검토현황.md", "| P2→P1 — service ready 후 Future 영구 미완료 |"),
+    ("0720검토현황.md", "### 10.2 P1 재현 경로"),
+)
+WATCHDOG_ORIGIN = re.compile(r"(?:구동부(?:의)?\s*)?(?:\d+차\s*)?회신(?:값|수치)?")
+WATCHDOG_AUTHORITY = re.compile(r"(?:충족|통과(?:\s*처리)?|확정|해소)")
+WATCHDOG_SCOPE = re.compile(r"(?:watchdog|정지\s*조건|물리\s*증거|조건부\s*수용)", re.I)
+WATCHDOG_DOWNGRADE = re.compile(
+    r"(?:참고|근거가\s*아니|승격하지|대신하지|충족하지|확정하지|해소하지|"
+    r"통과(?:\s*처리)?(?:하지|하면\s*안)|"
+    r"만으로(?:는)?[^.!?]*(?:아니|안\s*(?:되|된|돼)))"
+)
+
+
+def review_history_findings(review_dir: Path):
+    """Return every primary P0/P1 finding from every review-history file."""
+    files = sorted(review_dir.glob(REVIEW_HISTORY_GLOB))
+    found = []
+    for path in files:
+        source = path.read_text()
+        for line in source.splitlines():
+            primary_heading = (
+                re.match(r"^### .*P(?:0|1)(?:/P2|·P2|→P1)? .*—", line)
+                or re.match(r"^### .*P1-[①②] .*—", line)
+                or re.match(r"^## \d+\. P[01] —", line)
+            )
+            primary_table = re.match(r"^\| P0(?:\([^)]*\))? \|", line)
+            if (primary_heading and "충족 확인" not in line) or primary_table:
+                found.append((path.name, line))
+    return files, found
+
+
+def watchdog_authority_paths(freeze_text: str):
+    """Read the active-doc census itself so the scanner and inventory cannot drift."""
+    census = freeze_text.split("**★ watchdog 활성 문서 전수 열거", 1)[1]
+    census = census.split("**회귀 관찰값**", 1)[0]
+    return tuple(re.findall(r"^\| `([^`]+\.md)` \|", census, re.M))
+
+
+def markdown_statements(source: str):
+    """Join wrapped prose while keeping table rows as independent statements."""
+    statements, paragraph = [], []
+
+    def flush():
+        if paragraph:
+            joined = " ".join(paragraph)
+            statements.extend(part for part in re.split(r"(?<=[.!?])\s+", joined) if part)
+            paragraph.clear()
+
+    in_fence = False
+    for raw in source.splitlines():
+        line = raw.strip()
+        if re.match(r"^(?:`{3,}|~{3,})", line):
+            flush()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not line:
+            flush()
+        elif line.startswith("|"):
+            flush()
+            statements.append(line)
+        else:
+            paragraph.append(line)
+    flush()
+    return statements
+
+
+def watchdog_authority_violations(documents):
+    """Find reply-only claims that improperly close the physical watchdog gate."""
+    violations = []
+    for path, source in documents.items():
+        for statement in markdown_statements(source):
+            if not all((
+                WATCHDOG_ORIGIN.search(statement),
+                WATCHDOG_AUTHORITY.search(statement),
+                WATCHDOG_SCOPE.search(statement),
+            )):
+                continue
+            if WATCHDOG_DOWNGRADE.search(statement):
+                continue
+            violations.append((path, statement))
+    return violations
+
+
 def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=ROOT, check=True, text=True,
@@ -69,31 +157,11 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_02b_history_scan_independently_counts_61_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
-        names = (
-            "0719검토현황.md", "0720검토현황.md", "0723검토현황.md",
-            "0729검토현황.md", "0801검토현황.md",
-        )
-        if not all((review_dir / name).exists() for name in names):
+        files, found = review_history_findings(review_dir)
+        if not files:
             self.skipTest("Desktop review history is unavailable on this machine")
-        found = []
-        for name in names:
-            source = (review_dir / name).read_text()
-            for line in source.splitlines():
-                primary_heading = (
-                    re.match(r"^### .*P(?:0|1)(?:/P2|·P2|→P1)? .*—", line)
-                    or re.match(r"^### .*P1-[①②] .*—", line)
-                    or re.match(r"^## \d+\. P[01] —", line)
-                )
-                primary_table = re.match(r"^\| P0(?:\([^)]*\))? \|", line)
-                if (primary_heading and "충족 확인" not in line) or primary_table:
-                    found.append((name, line))
         # Three primary findings use historical formats outside the rule above.
-        specials = (
-            ("0719검토현황.md", "### 4.1 P0 stale goal 취소 레이스"),
-            ("0720검토현황.md", "| P2→P1 — service ready 후 Future 영구 미완료 |"),
-            ("0720검토현황.md", "### 10.2 P1 재현 경로"),
-        )
-        for name, marker in specials:
+        for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
         self.assertEqual(61, len(found))
@@ -101,6 +169,33 @@ class ContextRouterTest(unittest.TestCase):
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
         self.assertEqual(history_counts, inventory_counts)
+
+    def test_02c_history_scan_discovers_new_files_in_both_directions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            review_dir = Path(tmp)
+            first = review_dir / "0801검토현황.md"
+            first.write_text("### 1.1 P1 original — finding\n")
+            files, found = review_history_findings(review_dir)
+            self.assertEqual([first], files)
+            self.assertEqual(1, len(found))
+
+            extra = review_dir / "arbitrary-new-name-검토현황.md"
+            extra.write_text("### 2.1 P1 newly found — finding\n")
+            files, found = review_history_findings(review_dir)
+            self.assertEqual([first, extra], files)
+            self.assertEqual(2, len(found))
+
+            extra.unlink()
+            _files, found = review_history_findings(review_dir)
+            self.assertEqual(1, len(found))
+
+            first.write_text("### 1.1 P2 documentation only — finding\n")
+            _files, found = review_history_findings(review_dir)
+            self.assertEqual([], found)
+            first.write_text("### 1.1 P1 original — finding\n")
+            extra.write_text("### 2.1 P2 documentation only — finding\n")
+            _files, found = review_history_findings(review_dir)
+            self.assertEqual(1, len(found))
 
     def test_03_unknown_path_falls_back_to_all_safety_docs(self):
         packet = ai_context.build_packet(["new_package/novel.runtime"], "implement")
@@ -365,10 +460,16 @@ outside
         between = watchdog[pub_blocks[0].end():pub_blocks[1].start()]
         self.assertIn("2초 이상 관찰", between)
         self.assertIn("마친 뒤에만", between)
+        self.assertIn("0.5초를 넘겨 계속 돌면", between)
+        self.assertIn("즉시 E-stop", between)
+        self.assertIn("2초를 채우지", between)
+        self.assertIn("zero Twist 블록은 실행하지 않는다", between)
 
         r1 = text.split("#### 7-c-R1.", 1)[1].split("#### 7-c-1.", 1)[0]
         r1_blocks = re.findall(r"```bash\n(.*?)```", r1, re.S)
         self.assertTrue(any(block.count("ros2 topic pub") == 2 for block in r1_blocks))
+        self.assertNotIn("2초를 채우지", r1)
+        self.assertNotIn("zero Twist 블록은 실행하지 않는다", r1)
 
     def test_28_watchdog_evidence_has_one_physical_authority(self):
         d1 = (ROOT / "docs/D1_FIRST_STEP.md").read_text()
@@ -379,6 +480,39 @@ outside
         self.assertIn("cmd_vel watchdog 회신 참고값", real)
         self.assertIn("확정·재개방의 유일한 근거", real)
         self.assertIn("R0 실측에서 watchdog 이 확인되지 않으면", freeze)
+
+        paths = watchdog_authority_paths(freeze)
+        self.assertEqual(7, len(paths))
+        self.assertEqual(7, len(set(paths)))
+        documents = {path: (ROOT / "docs" / path).read_text() for path in paths}
+        self.assertEqual([], watchdog_authority_violations(documents))
+
+    def test_29_watchdog_authority_sweep_rejects_paraphrases_in_all_active_docs(self):
+        freeze = (ROOT / "docs/FREEZE_MANIFEST.md").read_text()
+        paths = watchdog_authority_paths(freeze)
+        attacks = (
+            "구동부 회신만으로 watchdog 정지 조건은 사실상 충족됐다고 본다.",
+            "구동부 3차 회신으로 watchdog 정지 조건은 이미 충족됐다.",
+            "R0 watchdog 정지 조건은 구동부 회신으로 통과 처리한다.",
+            "구동부 회신으로 watchdog 정지 조건은 충족됐으며 R1은 금지한다.",
+            "구동부 회신으로 watchdog 정지 조건은 확정됐고 필요하면 재개방한다.",
+            "구동부 회신으로 watchdog 정지 조건을 통과 처리하고 실측을 전제한다.",
+        )
+        for path in paths:
+            for attack in attacks:
+                with self.subTest(path=path, attack=attack):
+                    violations = watchdog_authority_violations({path: attack})
+                    self.assertEqual([(path, attack)], violations)
+
+    def test_30_watchdog_authority_sweep_allows_explicitly_downgraded_replies(self):
+        allowed = (
+            "구동부 회신은 watchdog 판단의 참고값일 뿐 물리 증거가 아니다.",
+            "구동부 회신만으로는 watchdog 정지 조건을 통과 처리하면 안 된다.",
+            "watchdog 조건부 수용은 구동부 회신으로 확정하지 않고 R0 실측을 전제한다.",
+        )
+        for statement in allowed:
+            with self.subTest(statement=statement):
+                self.assertEqual([], watchdog_authority_violations({"fixture.md": statement}))
 
 
 if __name__ == "__main__":
