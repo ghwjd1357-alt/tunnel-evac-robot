@@ -244,10 +244,13 @@ source install/setup.bash
 
 ```bash
 ros2 pkg list | grep -E "tunnel_bringup|mission_manager|sllidar"
-ros2 launch tunnel_bringup real_bringup.launch.py --show-args | head -30
+D0_SHOW_ARGS=/tmp/d0_real_bringup_show_args.txt
+ros2 launch tunnel_bringup real_bringup.launch.py --show-args >"$D0_SHOW_ARGS"
+grep -A3 -B1 "'serial_baud':" "$D0_SHOW_ARGS"
 ```
 
-`--show-args` 는 **스택을 띄우지 않고** 인자 목록만 보여 준다. 여기서
+`--show-args` 는 **스택을 띄우지 않고** 인자 목록만 보여 준다. 출력을 파일에 완주한 뒤
+필요한 절만 읽는다(`head` 로 파이프를 먼저 닫으면 정상 `ros2` 가 `BrokenPipeError` 를 낸다). 여기서
 `serial_baud` 기본값이 **115200** 으로 보이면 08-02 확정값이 제대로 들어간 것이다.
 
 ## 5. `micro_ros_agent` 확보 — 2안 (S6-2)
@@ -292,7 +295,10 @@ source install/local_setup.bash
 
 ⚠ `create_agent_ws.sh` 는 **네트워크에서 여러 저장소를 내려받는다.** 여기서 막히면 안 B.
 ⚠ 이 워크스페이스를 `~/ros2_ws` 안에 만들지 말 것 — 우리 `colcon build` 가 같이 빌드하려 든다.
-TODO(D+0): 확인 — 빌드 소요 시간과 실제로 성공했는지. 실패 메시지는 그대로 기록해 둔다.
+TODO(D+0): 확인 완료 (2026-08-03) — `micro_ros_setup` HEAD
+`af209288676e5f02ac7c6d419b8ad157d3bed14e`에서 agent 소스 생성 종료 0,
+agent 2패키지 빌드 종료 0·98초. `/home/hanhan/uros_ws/install/micro_ros_agent`의
+실행 파일을 확인했고, agent 먼저 기동 → USB 전원 재인가 뒤 8개 펌웨어 토픽을 수신했다.
 
 ### 5-c. 안 B — Docker (백업: 소스 빌드가 막히면)
 
@@ -342,36 +348,54 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
 - **그래서 안 붙으면 여전히 여기가 1순위 용의자다.**
 
 **TODO(D+0): 확인 — 버전 번호를 받아적지 말고 `~/Arduino/libraries/` 폴더를 통째로 복사받는다.**
+2026-08-03 Jetson에는 이 폴더가 없음을 확인했다. `/firmware/info`는
+`arduino_macro=10607`·`teensyduino_macro=158`과 라이브러리 이름 5개를 방송하지만 원본
+재현 수단은 아니다. **D+0 종료 전 구동부 개발환경(`/home/park/...`에서 빌드됨) 또는 USB로
+폴더 전체를 수령해 다시 확인한다.** 수령 전까지 이 항목은 미완료다.
 번호는 나중에 재현할 때 또 틀리지만, 폴더는 그 자체가 재현 수단이다. USB 하나면 된다.
 
 **펌웨어 정체 확인 (붙은 뒤 30초)** — 소스를 받았으므로 이제 대조가 가능하다:
 
 ```bash
-ros2 topic echo /firmware/info --once     # 5초 주기라 최대 5초 기다린다
+ros2 topic echo /firmware/info --field data --full-length --once
+# 5초 주기라 최대 5초 기다린다. --full-length 없이는 긴 문자열이 128자에서 잘린다.
 ```
+
+**D+0 실측(2026-08-03)** — 수신 종료 0. `build=Aug 2 2026 06:46:55`,
+`source=/home/park/robot_firmware/teensy_integrated_pi_continuous_low_speed_v1_3.ino`,
+`transport=serial`, `baud=115200`, `wheel_radius=0.05698`, `control=PI`,
+`kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
 ⚠ **`version=…-1.3.0` 이라고 나오는 것이 정상이다.** 소스는 v1.4 인데 `FW_VERSION` 문자열이
 1.3.0 그대로이고 `FW_GIT_SHA` 는 0 으로 채워져 있다 — **이 필드로 버전을 판별할 수 없다.**
 대신 `wheel_radius=0.05698` · `kp=30.000` · `ki=5.000` 이 소스와 일치하는지 본다
-(`d0_check.sh` 검사 [6] 이 이걸 자동으로 한다).
+(`d0_check.sh` 검사 [7] 이 이걸 자동으로 한다).
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
 펌웨어 소스를 읽고서야 알게 된 두 가지다. **둘 다 D+0 에 바로 걸린다.**
 
-**① 순서: agent 를 먼저 띄우고, 그 다음 Teensy 를 리셋한다**
+**① 순서: agent 를 먼저 띄우고, 그 다음 Teensy USB 전원을 재인가한다**
 
 ```
 1. agent 실행 (위 5-d)
-2. Teensy 리셋 버튼 (또는 USB 재삽입)
+2. Teensy USB 를 뺐다가 다시 꽂아 전원을 재인가한다
 3. LED 를 보며 8.7초 기다린다 (아래 ②)
 4. ros2 topic list
 ```
 
+🔴 **Teensy 4.1의 보드 버튼을 누르지 않는다.** 그 버튼은 reset이 아니라 **Program
+pushbutton**이다. 누르면 사용자 펌웨어가 멈추고 HalfKay bootloader(`16c0:0478` HID)로
+들어가 `/dev/ttyACM*`가 사라진다. 2026-08-03 D+0에서 실제로 `16c0:0483` Serial →
+`16c0:0478` HID 전이를 재현했다. **13~17초 길게 누르면 플래시 전체 삭제와 기본 blink
+복원까지 실행될 수 있으므로 절대 시도하지 않는다.** Teensy 4.1은 하드웨어 reset 신호도
+외부에 제공하지 않는다. 애플리케이션 재시작은 이 런북에서 **USB 전원 재인가**로만 한다.
+
 **이유**: 소스에 **재연결 로직이 아예 없다.** `setup()` 에서 micro-ROS 를 1회 초기화할
 뿐이고 세션이 끊겼을 때 복구하는 경로가 없다. **agent 를 나중에 띄우거나 재시작하면
 Teensy 는 그 사실을 모른 채 계속 돌기만 한다** → 토픽이 영영 안 뜬다.
-→ **agent 를 재시작할 때마다 Teensy 도 리셋한다.** 이건 버그가 아니라 이 펌웨어의 사용법이다.
+→ **agent 를 재시작할 때마다 Teensy USB 전원도 재인가한다.** 이건 버그가 아니라 이
+펌웨어의 사용법이다.
 
 **② 부팅 후 약 8.7초 동안 로봇을 절대 건드리지 않는다**
 
@@ -420,7 +444,7 @@ ros2 topic list | grep -E "odom|imu"
 # ① Teensy 를 꽂고 VID/PID 를 실측한다
 udevadm info -q property -n /dev/ttyACM0 | grep -E '^ID_VENDOR_ID=|^ID_MODEL_ID=|^ID_SERIAL_SHORT='
 
-# ② 그 값을 규칙 파일의 XXXX / YYYY 자리에 넣는다 (편집기로)
+# ② 실측값이 규칙 파일의 값과 같은지 대조한다
 nano ~/ros2_ws/tools/udev/99-teensy-drive.rules
 
 # ③ 설치하고 다시 읽힌다
@@ -432,7 +456,9 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ls -l /dev/teensy_drive
 ```
 
-TODO(D+0): 확인 — `idVendor`/`idProduct` 실측값. **추측으로 채우지 않는다**(위 ① 이 확인 방법).
+TODO(D+0): 확인 완료 (2026-08-03) — `/dev/ttyACM0`, `idVendor=16c0`,
+`idProduct=0483`, `ID_SERIAL_SHORT=20379630`. 위 ①의 실제 Jetson 출력으로 확정했고,
+재삽입 뒤 `/dev/teensy_drive -> ttyACM0` 및 `DEVLINKS` 반영을 확인했다.
 
 ## 7. 연결 판정 — `tools/d0_check.sh`
 
@@ -494,7 +520,30 @@ bash tools/d0_check.sh
   각각 `--no-sign`·`--no-estop` 으로 따로 끌 수 있고, 끄면 종료 2 다.
 - **E-stop 을 지금 누를 수 없으면 `s` + Enter** 로 건너뛴다. 그러면 "배선 없음"이 아니라
   **"확인 못 함"** 으로 기록된다 — 안 눌러 본 것을 결함으로 적으면 그 기록이 다음 판단을 오염시킨다.
+- **D+0 현장 사실(2026-08-03)**: 이번에는 "누를 수 없음"이 아니라 **물리 버튼 자체가 없음**을
+  사용자가 확인했다. 구동부는 연결된 노트북/Jetson에서 `Ctrl+C`로 정지하라고 안내했고,
+  사용자는 E-stop 항목을 임시 생략해 연결 검사를 계속하기로 결정했다. 그러나 `Ctrl+C`는
+  ROS 프로세스의 정상 종료 요청일 뿐 독립 전원 차단이 아니므로 **검사 8 PASS로 승격하지
+  않는다**. `--no-estop` 종료 2로 남기고, 모터 명령 시험 전 물리 차단 수단을 다시 확인한다.
 - ⚠ 통과해도 **주기의 상한이 증명된 것은 아니다**(관측 창이 짧다). 상한 판정은 R3 rosbag 이다.
+
+**D+0 1차 실행(2026-08-03 13:48)** — 장치·두 토픽 주기·최대 간격·QoS·전진 부호와
+종료 시점 EKF 구독 유지가 모두 통과했다. `/firmware/info`는 별도 전체 필드 조회에서
+`wheel_radius=0.05698`, `kp=30.000`, `ki=5.000`이 확인됐지만, 당시 판정기가 기본 128자
+축약 출력의 `...` 뒤 값을 찾다가 거짓 FAIL을 냈다. 판정 명령에 `--field data
+--full-length`를 추가했으며, 이 실행은 수정판 재실행 전이므로 최종 통과로 기록하지 않는다.
+
+**D+0 2차 실행 후 종료 확인 분류** — `/odom --once` 격리 5회는
+`rc=0,124,0,0,0`, 성공 지연도 1.996~2.315초였다. 같은 실행의 8초 주기창·후속 전진 부호와
+종료 시 EKF 구독은 정상이어서 센서 중단으로 단정할 수 없다. 종료 확인의 기존 3초 상한이
+DDS 발견 지연과 너무 가까운 판정기 결함으로 분류됐고, 주 측정창과 같은 8초 유한 상한으로
+보완했다. 수정판 재실행 전이므로 이 결과도 최종 통과로 승격하지 않는다.
+
+**D+0 수정판 재실행 결과** — `--no-manual`로 실행해 자동 검사 전부 통과, 종료 2였다.
+이 실행은 전진 부호와 E-stop 두 항목을 생략했지만 전진 부호는 직전 두 실행에서 각각
+`linear.x=+0.1502`, `+0.1459m/s`로 이미 확인됐다. 따라서 장치·주기·간격·QoS·전진 부호·
+펌웨어 정체·종료 시 EKF 생존까지는 확인 완료다. 물리 E-stop은 여전히 없으므로 검사 8과
+D+0 전량 통과는 미완료로 유지한다.
 
 ★ **구동부가 자리에 있을 때 돌린다.** 최종합의서에도 "인수 당일 함께 확인" 으로 넣어 뒀다.
 실패를 그 자리에서 보면 10분이고, 돌아간 뒤에 보면 며칠이다.
@@ -656,25 +705,275 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 착수 전에 이 목록을 한 번 읽고, 확인할 때마다 결과를 **이 문서에 적어** 다음 사람에게 남긴다.
 
-| # | 무엇 | 확인 방법 | 절 |
-|---|---|---|---|
-| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 |
-| 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 |
-| 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 |
-| 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c |
-| 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 |
-| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d |
-| 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 |
-| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 |
-| 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b |
-| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 |
-| 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 60fps 영상 30프레임 이하 + `/odom.pose` 정지 교차 확인 | §7-c-0 |
+| # | 무엇 | 확인 방법 | 절 | D+0 결과 (2026-08-03) |
+|---|---|---|---|---|
+| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. L4T R36.5.0(JetPack 6.2.2 계열)이며 `nvidia-jetpack` 메타패키지·`nvcc`는 없음(D+0 비차단, 역할 B 전에 별도 확인) |
+| 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 | ✅ IPv6 2/2 수신·손실 0%, 평균 175ms |
+| 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
+| 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
+| 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ⏳ Jetson에 폴더 없음 확인; D+0 종료 전 구동부 개발환경/USB에서 원본 전체 수령 |
+| 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
+| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
+| 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
+| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 | ⚠ 물리 버튼 없음 확인·사용자 임시 생략 결정. `Ctrl+C`는 대체 PASS 아님; 모터 시험 전 재확인 |
+| 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 60fps 영상 30프레임 이하 + `/odom.pose` 정지 교차 확인 | §7-c-0 | ⏳ 미확인 |
 
 ## 10. 다음 단계
 
 `d0_check.sh` 가 **종료 0** 이면 연결 게이트를 통과한 것이다. 이어서 §7-c의 R1·R2 사전
 실측을 안전조건 아래 닫고 결과를 **`docs/D1_FIRST_STEP.md §0-a`**에 옮긴다. 그다음
 agent → TF 트리 → EKF → **R3 rosbag** 순서로 간다. R0→R1→R2를 건너뛰고 R3로 가지 않는다.
+
+## 11. 물리 E-stop 설치 대기 중 비구동 선행 작업 — `pre-R3 diagnostic`
+
+> **적용 조건**: 2026-08-03처럼 물리 E-stop이 아직 없지만 라이다·TF·센서·Jetson 상태를
+> 먼저 확인하려는 경우에만 쓴다. 이 절은 §7의 검사 8, §7-c의 R0~R2 또는
+> `D1_FIRST_STEP.md`의 정식 R3를 대체하지 않는다.
+
+### 11-a. 시작 조건과 금지선
+
+아래 네 조건을 **전부** 만족해야 §11-b로 간다.
+
+1. 전기 작업 담당자가 배터리에서 두 MDD10A로 가는 **모터 전력 계통을 물리적으로 분리**하고,
+   두 드라이버의 모터 공급 전압이 0V임을 확인했다. Jetson·Teensy·라이다의 제어 전원은
+   유지해도 되지만, 활선 상태에서 배선·단자를 만지지 않는다.
+2. 바퀴는 공중에 띄우거나 구름 방지 조치를 하고, 작업 반경 안에 사람이 들어가지 않는다.
+3. 아래 확인에서 Nav2·미션·수동 조종기처럼 `/cmd_vel`을 낼 수 있는 노드가 보이면 중단하고
+   그 프로세스를 정상 종료한 뒤 다시 확인한다.
+4. 이 절에서는 **`/cmd_vel`을 한 번도 발행하지 않는다.** `real_bringup` 전체 런치,
+   R0 watchdog, R1·R2, `make_map.sh`, Nav2 goal·미션 명령도 실행하지 않는다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+ros2 node list
+ros2 topic info /cmd_vel -v
+```
+
+⚠ `Ctrl+C`는 여기서 띄운 **관측 프로세스를 종료하는 수단**일 뿐 E-stop이 아니다. 모터 전력이
+분리됐다는 1번 조건을 대신하지 않는다. 1번을 확인할 수 없으면 이 절도 시작하지 않는다.
+
+### 11-b. 펌웨어 재현 환경 수령
+
+`§5-d`의 미완료 항목을 먼저 닫는다. 구동부 개발 PC 또는 인계 USB에서
+`~/Arduino/libraries/`를 **폴더 전체로** 받아 별도 보관하고, 원본을 수정하지 않은 상태에서
+목록과 해시를 남긴다. 인계 매체가 아직 없으면 `미수령`으로 기록하고 다음 비구동 항목은
+계속할 수 있지만 D+0 완료로 승격하지 않는다.
+
+```bash
+find ~/Arduino/libraries -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+find ~/Arduino/libraries -type f -print0 | sort -z | xargs -0 sha256sum > ~/Arduino/libraries.sha256
+wc -l ~/Arduino/libraries.sha256
+```
+
+### 11-c. 라이다 장착·높이·포트 확인
+
+기계 장착과 높이 계산은 `D1_FIRST_STEP.md §2`의 제약을 그대로 따른다. 스캔 평면을 모든
+차체 구조물보다 위, 임시 기준으로 몸통 최상면보다 0.05m 이상 높이고 x/y는 정중앙에 둔다.
+
+**현장 상태(2026-08-03)** — 라이다 작업은 다음 날로 미뤘다. 장착·스캔면 높이·시리얼
+포트·USB 정체·`/scan`은 전부 미확인이다. 따라서 오늘은 §11-d에서 라이다 TF를 제외한
+agent·odom·IMU·EKF만 확인하고, `/scan`이 필요한 §11-e 정식 사전 bag 판정과 §11-f의
+4토픽 동시부하 판정은 실행하지 않는다. 라이다를 장착한 뒤 이 절 처음으로 돌아온다.
+
+1. 바닥에서 라이다 스캔 평면까지 높이를 m 단위로 잰다.
+2. 계산값 `lidar_joint z = 측정 높이 - 0.053m`를 기록한다.
+3. 현재 묶음은 `src/**` 동결 중이므로 **측정값만 기록하고 URDF는 아직 수정하지 않는다.**
+4. 포트와 USB 정체를 확인한다. 번호가 재삽입 때 바뀌면 라이다 전용 udev 별칭을 별도 구현한다.
+
+```bash
+ls -l /dev/ttyUSB*
+udevadm info -q property -n /dev/ttyUSB0 | grep -E '^ID_VENDOR_ID=|^ID_MODEL_ID=|^ID_SERIAL_SHORT='
+```
+
+터미널 C에서 드라이버만 기동한다. `/dev/ttyUSB0`가 아니면 위에서 확인한 실제 포트를 넣는다.
+
+```bash
+ros2 run sllidar_ros2 sllidar_node --ros-args \
+  -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=460800 \
+  -p frame_id:=lidar_link -p angle_compensate:=true -p scan_mode:=Standard
+```
+
+다른 터미널에서 유한 시간으로 확인한다.
+
+```bash
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /scan
+timeout --kill-after=2s 10s ros2 topic echo /scan --field header.frame_id --once
+```
+
+### 11-d. agent·정적 TF·EKF 비구동 확인
+
+터미널 A에서 `§5-d`의 agent를 계속 띄우고, Teensy USB 전원을 재인가한 뒤 `§5-e`의 8.7초
+정지 조건을 지킨다. 터미널 D에는 robot_state_publisher, 터미널 E에는 EKF만 띄운다.
+
+```bash
+# 터미널 D
+ros2 run robot_state_publisher robot_state_publisher \
+  ~/ros2_ws/src/tunnel_bringup/urdf/robot_real.urdf
+```
+
+```bash
+# 터미널 E
+ros2 run robot_localization ekf_node --ros-args \
+  --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml
+```
+
+관측 터미널에서 다음을 확인한다. 현재 URDF의 라이다 z는 미실측 표시인 0이므로
+`base_footprint→lidar_link`는 값 확정이 아니라 **연결 여부만** 본다.
+라이다를 아직 장착하지 않은 2026-08-03 실행에서는 해당 명령만 건너뛰고 나머지를 수행한다.
+
+```bash
+timeout --kill-after=2s 10s ros2 run tf2_ros tf2_echo base_footprint imu_link
+timeout --kill-after=2s 10s ros2 run tf2_ros tf2_echo base_footprint lidar_link
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odometry/filtered
+
+timeout --kill-after=2s 10s ros2 topic echo /odom --field header.frame_id --once
+timeout --kill-after=2s 10s ros2 topic echo /odom --field child_frame_id --once
+timeout --kill-after=2s 10s ros2 topic echo /imu/data --field header.frame_id --once
+timeout --kill-after=2s 10s ros2 topic echo /odom --field twist.covariance --once
+timeout --kill-after=2s 10s ros2 topic echo /imu/data --field angular_velocity_covariance --once
+```
+
+기대 frame은 차례로 `odom`, `base_footprint`, `imu_link`다. IMU TF 기대값은 바닥 기준
+z=0.392m, yaw=-90°다. 다르면 remap으로 덮지 않고 관측값을 기록한다.
+
+**현장 결과(2026-08-03)** — agent·robot_state_publisher·`ekf_filter_node`가 함께 생존했고
+`/odometry/filtered`는 12초 창에서 평균 29.999~30.003Hz, 간격 0.033~0.034초였다.
+frame_id 3종은 `odom`·`base_footprint`·`imu_link`로 전부 일치했다. IMU TF는
+translation `[0,0,0.392]`, yaw `-1.571rad(-90°)`로 기대값과 일치했다. `tf2_echo`의 최초
+1회 `frame does not exist`는 디스커버리 대기 뒤 같은 변환이 반복 수신돼 실패가 아니다.
+`/odom twist.covariance`는 x·y `0.02`, yaw `0.1`; `/imu/data angular_velocity_covariance`는
+x·y·z `0.0025`로 확인돼 전부 0인 미기입 값이 아니다. 라이다 관련 값만 §11-c 미결로 남는다.
+
+### 11-e. 비구동 진단 bag과 판정
+
+이 녹화는 정식 R3가 아니다. 디렉터리와 문서 어디에서도 `r3_PASS` 같은 이름을 쓰지 않고
+반드시 `pre_r3_no_estop`을 사용한다. 모터 전력이 분리된 상태에서 정지 60초 → 바퀴를 손으로
+앞뒤로 30초 → 좌우 바퀴를 손으로 반대 방향으로 돌려 회전 부호를 30초 → 정지 30초로 기록한다.
+
+**라이다 미장착일의 부분 녹화** — `/scan`이 없으면 아래 명령으로 odom·IMU만 먼저
+수집할 수 있다. 출력 이름에 `partial_odom_imu`를 반드시 넣고, 분석도 두 입력만 한다.
+정상이더라도 3토픽 사전 판정이나 R3 PASS가 아니며 라이다 장착 뒤 아래 본 녹화를 새로 한다.
+⚠ 이 부분 녹화에는 `/tf`·`/tf_static`을 섞지 않는다. 2026-08-03 실측에서 TF를 같이 담으면
+TF 계열이 bag 시작점을 먼저 만들고 센서 구독 DDS 매칭 전 약 0.81초가 두 센서의 앞 공백으로
+잡혔다. TF까지 필요한 본 녹화의 시작점 계약은 정식 R3 전에 판정기 트랙에서 별도로 해결한다.
+
+```bash
+mkdir -p ~/pre_r3_bags
+cd ~/pre_r3_bags
+timeout --signal=INT --kill-after=5s 180s \
+  ros2 bag record /odom /imu/data \
+  -o pre_r3_no_estop_partial_odom_imu_$(date +%m%d_%H%M)
+```
+
+```bash
+cd ~/ros2_ws
+python3 tools/bag_gap_report.py \
+  ~/pre_r3_bags/pre_r3_no_estop_partial_odom_imu_MMDD_HHMM /odom /imu/data
+```
+
+**현장 결과(2026-08-03)** — 최초 149.6초 bag은 odom 7084개·IMU 7085개, 내부 stamp 최대
+간격 22.00ms·25.68ms와 엄격 단조를 확인했지만, `/tf`·`/tf_static`을 함께 담아 두 센서 모두
+앞 공백 약 0.81초로 RC 1이었다. 원인 분리용 센서 전용 44.3초 대조 bag은 odom 2111개·IMU
+2110개, 평균 47.64·47.62Hz, 수신 최대 간격 22.55·25.00ms, stamp 최대 간격 22.00·24.87ms,
+양끝 포함 계약 초과 0건·엄격 단조로 RC 0이었다. 따라서 센서 두절로 승격하지 않고
+**TF 포함 녹화의 관측 시작점 문제**로 분류한다. bag 경로는 각각
+`~/pre_r3_bags/pre_r3_no_estop_partial_odom_imu_0803_1504`와
+`~/pre_r3_bags/pre_r3_no_estop_endpoint_control_0803_1511`이다.
+
+아래는 라이다 장착 뒤 `/scan`까지 포함하는 **본 사전 녹화**다.
+
+```bash
+mkdir -p ~/pre_r3_bags
+cd ~/pre_r3_bags
+timeout --signal=INT --kill-after=5s 180s \
+  ros2 bag record /odom /imu/data /scan /tf /tf_static \
+  -o pre_r3_no_estop_$(date +%m%d_%H%M)
+```
+
+생성된 실제 경로를 넣어 간격·bag 양끝 공백·`header.stamp` 중복/역행을 판정한다.
+토픽별 숫자 계약은 문서에 복사하지 않고 도구의 `TOPIC_POLICY` 출력만 사용한다.
+
+```bash
+cd ~/ros2_ws
+python3 tools/bag_gap_report.py \
+  ~/pre_r3_bags/pre_r3_no_estop_MMDD_HHMM /odom /imu/data /scan
+```
+
+판정 결과는 **사전 진단값**이다. 정상이어도 `D1_FIRST_STEP.md §5`의 R3 PASS 칸이나
+`REAL_ROBOT_VALUES.md`의 확정값을 닫지 않는다. 비정상이면 bag 경로·도구 전체 출력·NTP 상태를
+보존해 E-stop 설치 뒤 정식 R3에서 재현 여부를 본다.
+
+### 11-f. Jetson 10분 동시부하 관찰
+
+agent·라이다·robot_state_publisher·EKF만 띄운 상태에서 실행한다. Nav2·SLAM·미션은 포함하지
+않으므로 이 결과를 전체 스택 성능으로 부르지 않는다.
+
+라이다가 없는 날에는 agent·robot_state_publisher·EKF만으로 아래 부분 부하를 먼저 볼 수 있다.
+파일명과 판정에 `partial_odom_imu`를 남기며, `/scan`을 포함한 4토픽 동시부하를 대신하지 않는다.
+
+```bash
+mkdir -p ~/pre_r3_logs
+timeout --signal=INT --kill-after=5s 600s tegrastats --interval 1000 \
+  | tee ~/pre_r3_logs/tegrastats_no_estop_partial_odom_imu_$(date +%m%d_%H%M).log
+```
+
+```bash
+ros2 node list
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odom
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /imu/data
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odometry/filtered
+```
+
+**현장 결과(2026-08-03)** — 부분 부하 로그
+`~/pre_r3_logs/tegrastats_no_estop_partial_odom_imu_0803_1516.log`에 596개 1초 표본을 남겼다.
+최고 온도는 tj·gpu·soc1 49.375°C, RAM 최고 1075/7607MB(약 14.1%), swap 0MB였다.
+10분 뒤에도 agent·robot_state_publisher·EKF와 transform listener가 생존했다. 후속 12초 창은
+odom 47.611Hz·최대 22ms, IMU 47.657Hz·최대 25ms, EKF 29.999Hz·최대 34ms였다.
+`/odometry/filtered`의 최초 `does not appear` 1회는 DDS 발견 뒤 30Hz가 연속 수신돼 장애가 아니다.
+따라서 **라이다 없는 부분 soak는 통과**했지만 `/scan` 포함 4토픽·전체 Nav2 스택 성능으로
+승격하지 않는다.
+
+아래는 라이다 장착 뒤 수행하는 **4토픽 본 부하 관찰**이다.
+
+```bash
+mkdir -p ~/pre_r3_logs
+timeout --signal=INT --kill-after=5s 600s tegrastats --interval 1000 \
+  | tee ~/pre_r3_logs/tegrastats_no_estop_$(date +%m%d_%H%M).log
+```
+
+끝난 뒤 입력·출력 노드가 그대로 있는지 확인한다.
+
+```bash
+ros2 node list
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odom
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /imu/data
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /scan
+timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odometry/filtered
+```
+
+### 11-g. 이 절의 완료 표기와 복귀점
+
+다음을 한 묶음으로 남기면 **`pre-R3 diagnostic 완료`**라고만 기록한다.
+
+- 모터 전력 분리 확인자·시각·확인 방법
+- Arduino 라이브러리 수령 여부와 해시 파일
+- 라이다 포트·USB 정체·스캔면 실측 높이·계산한 URDF z
+- frame_id 3종·IMU/라이다 TF·covariance 출력
+- bag 경로와 `bag_gap_report.py` 전체 결과
+- tegrastats 로그 경로와 전후 네 토픽 생존 결과
+
+**2026-08-03 부분 진행 상태** — agent·odom·IMU·EKF·frame/covariance, 센서 전용 부분 bag,
+라이다 없는 10분 부분 soak까지 완료했다. Arduino 라이브러리 원본, 라이다 전 항목,
+`/scan` 포함 3토픽 bag·4토픽 soak, E-stop·R0~R2는 미완료다. 따라서 §11 전체 완료나
+D+0/R3 통과가 아니다.
+
+물리 E-stop 설치가 끝나면 **§7 검사 8로 돌아가** `false→true`를 확인한다. 그 뒤에만
+§7-c R0 watchdog → R1 → R2를 순서대로 실행하고, 모두 통과한 다음
+`D1_FIRST_STEP.md`의 정식 R3를 새 bag으로 다시 수행한다. 이 절의 bag을 정식 R3로 이름만
+바꿔 재사용하지 않는다.
 
 ## 근거 문서
 

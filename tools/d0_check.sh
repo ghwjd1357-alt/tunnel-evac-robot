@@ -70,7 +70,7 @@
 #     echo --once(ⓒ)  | 스냅샷   | 0        | if 로 사용 ✅ | 유지 (보조 증거로 격하 명시)
 #     topic info -v   | 스냅샷   | 0        | rc 무시       | rc 0 아니면 판독 실패
 #     echo --field(부호)| 관측 창 | 124/137  | rc 무시       | 결론 방향별로 분기(아래 [6] 주석)
-#     echo /firmware  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
+#     echo /firmware  | 스냅샷   | 0        | if 로 사용 ✅ | 전체 문자열 출력 후 판독
 #     echo /estop ×2  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
 #     topic info(재확인)| 스냅샷 | 0        | 파이프 끝 grep| rc 0 확인 후 판독 (08-03 P2 보완)
 #
@@ -289,11 +289,15 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
   #   앞의 요약이 완전한 창이 되지는 않는다(그 승격을 막는 것은 위 ⓪ 하나뿐이다).
   #   관측자가 죽은 뒤 센서가 이 echo 때만 복구돼도 ⓪ 에서 이미 FAIL 이라 여기 오지 않는다.
   # ⚠ 여기 rc 는 위 ⓪ 과 **정상값이 반대**다 — `--once` 는 스스로 끝나므로 rc 0 이 정상이고,
-  #   상한 발동(124/137)은 '3초 안에 한 건도 안 왔다'는 뜻이라 실패다.
-  if hard_timeout 3 ros2 topic echo "$topic" --once >/dev/null 2>&1; then
+  #   상한 발동(124/137)은 '상한 안에 한 건도 확인하지 못했다'는 뜻이라 실패다.
+  # ★ 08-03 D+0 실측: `/odom --once` 5회가 0·124·0·0·0, 성공도 1.996~2.315초였다.
+  #   3초는 47Hz 데이터가 아니라 DDS 발견 지연에 너무 가까워 정상 발행을 거짓 FAIL 냈다.
+  #   주 측정창과 같은 8초를 주되 hard_timeout 으로 유한성은 유지한다. 실패하더라도
+  #   이 한 번으로 '센서가 끊겼다'고 단정하지 않고 토픽/DDS 발견 경로를 함께 지목한다.
+  if hard_timeout 8 ros2 topic echo "$topic" --once >/dev/null 2>&1; then
     ok "$topic 관측 창 종료 시점에도 수신됨"
   else
-    ng "$topic 이 창 종료 시점에는 오지 않는다 — 측정 도중 끊겼다"
+    ng "$topic 을 종료 확인 8초 안에 못 받았다 — 발행 중단 또는 DDS 발견 실패"
   fi
 
   if awk "BEGIN{exit !($rate >= $HZ_MIN)}"; then
@@ -433,7 +437,7 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   elif [ -n "$off_pub" ]; then
     ng "$topic 발행자가 소스와 다르다 (기대 $expect): $(echo "$off_pub" | tr '\n' ' ')"
     ng "  → 인수받은 펌웨어가 우리가 읽은 v1.4 소스가 아닐 수 있다."
-    ng "     ros2 topic echo /firmware/info --once  로 정체를 먼저 확인한다"
+    ng "     ros2 topic echo /firmware/info --field data --full-length --once  로 정체를 먼저 확인한다"
   else
     ok "$topic 발행자 ${npub}개 전부 $expect (소스 v1.4 와 일치)"
   fi
@@ -525,9 +529,14 @@ echo
 #   그래도 **바퀴 반지름·게인·baud 가 우리가 읽은 소스와 같은지**는 여기서 갈린다.
 # ⚠ 발행 주기가 5초(FW_INFO_PERIOD_MS)라 --once 는 최대 5초를 기다린다. VOLATILE 이라
 #   지나간 것은 못 받는다 — 타임아웃을 넉넉히 준다.
+# ★ 08-03 D+0 실측: Humble `topic echo` 는 긴 문자열을 기본 128자에서 `...` 로 잘랐다.
+#   wheel_radius·게인은 그 뒤에 있어 정상 펌웨어가 불일치로 오판됐다. 이 스크립트의
+#   `topic echo --once` 전수를 대조하면, 장문을 판정에 쓰는 곳은 여기 하나뿐이다
+#   (나머지는 짧은 bool·숫자 또는 값을 버리는 생존 확인). `--full-length` 를 빼지 않는다.
 next_idx; echo "[$IDX] 펌웨어 정체 (/firmware/info · 5초 주기)"
 FWOUT="$TMP/fw.txt"
-if hard_timeout 12 ros2 topic echo /firmware/info --once >"$FWOUT" 2>&1 && [ -s "$FWOUT" ]; then
+if hard_timeout 12 ros2 topic echo /firmware/info --field data --full-length --once \
+   >"$FWOUT" 2>&1 && [ -s "$FWOUT" ]; then
   sed 's/^/       /' "$FWOUT" | head -6
   if grep -q "wheel_radius=0.05698" "$FWOUT"; then
     ok "wheel_radius=0.05698 — 소스 v1.4 와 일치"

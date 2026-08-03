@@ -12,23 +12,22 @@
 #   (docs/REAL_ROBOT_VALUES.md §5 항목 5).
 #
 # =============================================================================
-# ⚠⚠ 이 파일은 아직 **완성되지 않았다.** 아래 두 값은 Teensy 를 실제로 꽂아 봐야 안다.
-#     추측으로 채우지 않는다 — 틀린 값을 넣으면 규칙이 조용히 아무 일도 안 하고,
-#     "규칙을 넣었는데 왜 안 되지"로 D+0 오전을 쓴다 (docs/PITFALLS.md 의 반복 패턴).
+# ✅ 2026-08-03 D+0 실측으로 아래 두 값을 확정했다. 추측값이 아니다.
+#     장치=/dev/ttyACM0 · idVendor=16c0 · idProduct=0483 · serial=20379630.
 #
-#   TODO(D+0): 확인 — idVendor / idProduct 를 실측해 아래 XXXX / YYYY 를 바꾼다.
+#   TODO(D+0): 확인 완료 — idVendor=16c0 / idProduct=0483.
 #
 #   [확인 방법] Teensy 를 Jetson USB 에 꽂은 뒤 (장치 번호는 ttyACM1 일 수도 있다):
 #
 #     ls /dev/ttyACM*
 #     udevadm info -q property -n /dev/ttyACM0 | grep -E '^ID_VENDOR_ID=|^ID_MODEL_ID=|^ID_SERIAL_SHORT='
 #
-#   출력 예시(값은 실제와 다를 수 있다 — 이건 '형식'을 보여주는 것이지 정답이 아니다):
+#   D+0 실측 출력:
 #     ID_VENDOR_ID=16c0
 #     ID_MODEL_ID=0483
-#     ID_SERIAL_SHORT=1234567
+#     ID_SERIAL_SHORT=20379630
 #
-#   그 세 값을 아래 규칙의 XXXX(=ID_VENDOR_ID) · YYYY(=ID_MODEL_ID) 자리에 넣는다.
+#   아래 규칙에는 ID_VENDOR_ID · ID_MODEL_ID 실측값을 넣었다.
 #
 #   [속성 전체를 보고 싶을 때] 위 명령으로 안 나오면 아래로 장치 트리를 거슬러 본다:
 #     udevadm info -a -n /dev/ttyACM0 | head -40
@@ -55,7 +54,5 @@
 #   그때는 ATTRS{serial}=="…"(위 ID_SERIAL_SHORT)를 조건에 추가한다.
 # =============================================================================
 
-# 아래 한 줄이 실제 규칙이다. XXXX / YYYY 를 바꾸기 전에는 **아무 것도 하지 않는다**
-# (존재하지 않는 VID/PID 라 매칭이 안 된다 = 조용히 무효). 그래서 안 바꾸고 설치하면
-# tools/d0_check.sh 의 검사 [1] 이 "/dev/teensy_drive 없음" 으로 잡아 준다.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="XXXX", ATTRS{idProduct}=="YYYY", SYMLINK+="teensy_drive", MODE="0666"
+# 아래 한 줄이 실제 규칙이다. 실측한 Teensy 한 대의 VID/PID 에만 매칭한다.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="0483", SYMLINK+="teensy_drive", MODE="0666"
