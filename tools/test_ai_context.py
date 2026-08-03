@@ -234,8 +234,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(62, len(rows))
-        self.assertEqual(62, len({row["id"] for row in rows}))
+        self.assertEqual(64, len(rows))
+        self.assertEqual(64, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -269,7 +269,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_62_primary_findings(self):
+    def test_02b_history_scan_independently_counts_64_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         files, found = review_history_findings(review_dir)
         if not files:
@@ -278,7 +278,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(62, len(found))
+        self.assertEqual(64, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
@@ -402,20 +402,23 @@ class ContextRouterTest(unittest.TestCase):
         now = (ROOT / "tools/handoff_single_check.sh").read_text()
         self.assertEqual(old, now)
 
-        def reservation(text: str, start: str, end: str) -> str:
-            return text.split(start, 1)[1].split(end, 1)[0]
+        def reservation(text: str, start: str, end_pattern: str) -> str:
+            tail = text.split(start, 1)[1]
+            boundary = re.search(end_pattern, tail, re.MULTILINE)
+            self.assertIsNotNone(boundary, start)
+            return tail[:boundary.start()]
 
         old_master = git("show", "ef25ad3:docs/MASTER_PLAN.md")
         new_master = (ROOT / "docs/MASTER_PLAN.md").read_text()
         self.assertEqual(
-            reservation(old_master, "23. **", "\n## 8."),
-            reservation(new_master, "23. **", "\n## 8."),
+            reservation(old_master, "23. **", r"^(?:\d+\. \*\*|## 8\.)"),
+            reservation(new_master, "23. **", r"^(?:\d+\. \*\*|## 8\.)"),
         )
         old_handoff = git("show", "ef25ad3:docs/CURRENT_HANDOFF.md")
         new_handoff = (ROOT / "docs/CURRENT_HANDOFF.md").read_text()
         self.assertEqual(
-            reservation(old_handoff, "- **⚠ 미해결 보류", "\n- **⏸ 6단 보류"),
-            reservation(new_handoff, "- **⚠ 미해결 보류", "\n- **⏸ 6단 보류"),
+            reservation(old_handoff, "- **⚠ 미해결 보류 — 예약 23", r"^- \*\*"),
+            reservation(new_handoff, "- **⚠ 미해결 보류 — 예약 23", r"^- \*\*"),
         )
 
     def test_14_cold_start_repository_input_is_at_least_30_percent_smaller(self):

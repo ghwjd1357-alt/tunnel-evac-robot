@@ -60,5 +60,7 @@
   {"id":"0801-odom-publisher-contract","path":"tools/d0_check.sh","anchor":"`/odom` RELIABLE"},
   {"id":"0801-context-fenced-heading-34","path":"tools/ai_context.py","anchor":"fenced code 내부의 `#`는 절 경계로 취급하지 않는다"},
   {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"},
-  {"id":"0801-watchdog-record-slot-37","path":"tools/test_ai_context.py","anchor":"watchdog 정상 실측 기록 슬롯의 위치 계약"}
+  {"id":"0801-watchdog-record-slot-37","path":"tools/test_ai_context.py","anchor":"watchdog 정상 실측 기록 슬롯의 위치 계약"},
+  {"id":"0801-lidar-d0-d1-owner-38","path":"tools/test_ai_context.py","anchor":"라이다 실측 소유 시점 D+0/D+1 정합"},
+  {"id":"0801-readiness-doc-owner-38","path":"tools/test_ai_context.py","anchor":"readiness flake 활성 정본 소유권 정합"}
 ]
