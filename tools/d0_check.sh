@@ -27,8 +27,11 @@
 #   bash tools/d0_check.sh --no-sign    # 검사 6(바퀴 부호)만 생략
 #   bash tools/d0_check.sh --no-estop   # 검사 8(E-stop)만 생략
 #   bash tools/d0_check.sh --no-manual  # 사람이 필요한 6·8 을 함께 생략
-#   bash tools/d0_check.sh --secs 15    # 주기 측정 시간(기본 8초, 허용 3~120)
+#   bash tools/d0_check.sh --secs 15    # **관측 창** 길이(기본 8초, 허용 3~120)
 #   ⚠ 무엇을 생략하든 '전량 통과'가 아니다 — 종료 2.
+#   ⚠ `--secs` 는 **관측 창만** 바꾼다. 스냅샷(`echo --once`·`topic info`) 상한은 별도
+#     상수(SNAP_ECHO_SECS·SNAP_INFO_SECS·FW_INFO_SECS)이고 이유는 그 정의부에 있다.
+#     실제 시간 예산은 머리말이 그 변수들로 **계산해서** 찍는다 (08-05 검토 §39.3 P2-1).
 #
 # 검사 목록 (8개):
 #   [1] 시리얼 장치   [2] /odom 주기   [3] /imu/data 주기
@@ -59,21 +62,31 @@
 #   ⓒ `ros2 topic echo --field twist.twist.linear.x --once` 도 기본 인자로 관측된다.
 #   ⓓ `ros2 topic info -v` 는 퍼블리셔·구독자 **각각의 Reliability** 를 찍어 준다.
 #
-# [08-03 검토 §30.3 보완 — `hard_timeout` 8자리 전수 대조]
-#   지적받은 곳은 `topic hz` **한 자리**였지만, 같은 클래스(외부 CLI 의 종료 상태를 묻는가)를
-#   `grep -n "hard_timeout " tools/d0_check.sh` 로 전수 열거하고 **한 줄씩** 대조했다
-#   (`AGENTS.md §3-10 ①`). 열거를 세는 데서 끝내지 않고 각 자리가 덮이는지 적어 둔다:
+# [08-05 검토 §39.2 보완 — `hard_timeout` 8자리 전수 대조 2회차]
+#   08-03(§30.3)에 이 표를 처음 썼을 때는 **종료 상태를 묻는가**만 물었다. 08-04 검토 §39.2 가
+#   같은 8자리에서 **다른 축**을 찾았다: 그 자리가 *"몇 초 기다렸다"* 를 말할 자격이 있는가.
+#   두 자리(구 `300`·`552`)는 벽시계를 한 번도 안 재고 `"8초 안에"`·`"12초 대기했다"` 를
+#   **사실로 단정**했다 — 검토자 실측 실패 지연은 **0.408초**였다.
 #
-#     자리            | 종류     | 정상 rc  | 구판          | 지금
-#     ----------------|----------|----------|---------------|--------------------------------
-#     topic hz        | 관측 창  | 124/137  | rc 무시 ★결함 | rc + 벽시계 둘 다 (검토 §30.3)
-#     echo --once(ⓒ)  | 스냅샷   | 0        | if 로 사용 ✅ | 유지 (보조 증거로 격하 명시)
-#     topic info -v   | 스냅샷   | 0        | rc 무시       | rc 0 아니면 판독 실패
-#     echo --field(부호)| 관측 창 | 124/137  | rc 무시       | 결론 방향별로 분기(아래 [6] 주석)
-#     echo /firmware  | 스냅샷   | 0        | if 로 사용 ✅ | 전체 문자열 출력 후 판독
-#     echo /estop ×2  | 스냅샷   | 0        | if 로 사용 ✅ | 유지
-#     topic info(재확인)| 스냅샷 | 0        | 파이프 끝 grep| rc 0 확인 후 판독 (08-03 P2 보완)
+#   ★ 이번에는 검토가 준 목록(2자리)을 그대로 따라가지 않고 `grep` 으로 전수를 다시 셌다
+#     (`AGENTS.md §3-10 ★★④` — 남이 준 열거가 더 위험하다). 그랬더니 **원인 문자열을
+#     못 보여주는 자리가 4개**였다(검토 지목 2 + E-stop 2). 재확인 자리는 stderr 를
+#     `2>/dev/null` 로 아예 버리고 있어 캡처 대상조차 아니었다.
 #
+#     자리(현재 줄)      | 종류    | 정상 rc | 상한 출처        | 실측 경과 | 원인 문자열
+#     -------------------|---------|---------|------------------|-----------|-------------
+#     topic hz           | 관측 창 | 124/137 | $HZ_SECS(--secs) | ✅ 표시    | ✅ 앞 3줄
+#     echo --once(창 끝) | 스냅샷  | 0       | $SNAP_ECHO_SECS  | ✅ 표시    | ✅ (구: 폐기)
+#     topic info -v      | 스냅샷  | 0       | $SNAP_INFO_SECS  | ✅ 표시    | ✅ 앞 3줄
+#     echo --field(부호) | 관측 창 | 124/137 | $HZ_SECS(--secs) | ✅ 표시    | ✅ 앞 3줄
+#     echo /firmware     | 스냅샷  | 0       | $FW_INFO_SECS    | ✅ 표시    | ✅ (구: 캡처만)
+#     echo /estop(평상시)| 스냅샷  | 0       | $SNAP_ECHO_SECS  | ✅ 표시    | ✅ (구: 캡처만)
+#     echo /estop(누름)  | 스냅샷  | 0       | $SNAP_ECHO_SECS  | ✅ 표시    | ✅ (구: 캡처만)
+#     topic info(재확인) | 스냅샷  | 0       | $SNAP_INFO_SECS  | ✅ 표시    | ✅ (구: stderr 폐기)
+#
+#   ★ 표와 구현이 갈라질 자리를 없앴다 (`§3-10 ★②`): 8자리 전부 **같은 두 함수**
+#     (`clock_begin`/`clock_end`)로 재고, 실패 문장도 `why_snapshot()` 한 곳에서만 쓴다.
+#     자리마다 손으로 초를 적던 것이 정확히 이 결함의 근인이었다.
 #   마지막 자리도 원 명령 rc를 먼저 확인한다. rc 0이 아닌 잘린 스냅샷은 EKF 행이 보여도
 #   유지 판정에 사용하지 않는다.
 #
@@ -98,6 +111,21 @@ GAP_MAX_MS=33.33                   # 최대 간격 상한(ms) = EKF 한 주기(1
 SIGN_MIN=0.005                     # 바퀴를 굴렸을 때 '움직였다'고 볼 최소 속도(m/s)
 
 D0_KILL_GRACE=2                    # SIGTERM 뒤 SIGKILL 까지 유예(초)
+
+# --- 스냅샷 상한 (★ 08-05 검토 §39.3 P2-1 — `--secs` 와 **다른 축**이다) -------------
+# 구판은 이 세 값을 호출 자리에 숫자로 박아 두고, 주석에는 *"주 측정창과 같은 8초를 주되"*
+# 라고 적었다. 그런데 `--secs` 는 3~120 을 받으므로 `--secs 3` 이면 창 3초 · 스냅샷 8초로
+# **갈라진다.** 주석이 거짓이 된 것이지 값이 틀린 게 아니다 → 이름을 붙여 한 곳에서 정하고,
+# 머리말은 이 변수들로 예산을 **계산해서** 찍는다(숫자를 손으로 다시 적지 않는다).
+#
+# ⚠ `--secs` 에 묶지 **않는** 이유(권고를 받았으나 채택하지 않았고, 그 근거를 남긴다):
+#   08-03 D+0 실측에서 `--once` 성공까지 **1.996~2.315초**가 걸렸다(DDS 발견 지연).
+#   `--secs 3` 을 그대로 물리면 정상 발행을 거짓 FAIL 내는 회귀가 된다 — 그게 정확히
+#   구판 3초가 현장에서 낸 오경보다. 관측 창은 '표본을 얼마나 모으나'이고 스냅샷 상한은
+#   'DDS 가 답하는 데 얼마나 걸리나'라, 사용자가 조절할 축이 아니다.
+SNAP_ECHO_SECS=8                   # `topic echo --once` — 실측 2.0~2.3초의 3.5~4배 여유
+SNAP_INFO_SECS=20                  # `topic info -v` — daemon 응답 대기
+FW_INFO_SECS=12                    # /firmware/info 는 5초 주기 VOLATILE → 2주기 + 여유
 
 # --- 외부 CLI 상한 불변조건 (FREEZE_MANIFEST.md §10 · 07-30 신설) --------------
 # `ros2` CLI 는 daemon flake 로 **무한 행**할 수 있다(실측 13분 27초 매달린 적이 있다).
@@ -124,6 +152,44 @@ hard_timeout() {  # $1=상한(초) $2..=실행할 명령
 # GNU timeout 규약: 상한 발동 시 124, SIGKILL 까지 갔으면 128+9=137 (`--preserve-status` 미사용).
 window_completed() {  # $1=rc — 관측 창이 '상한 발동으로' 끝났는가
   [ "$1" = "124" ] || [ "$1" = "137" ]
+}
+
+# --- ★ 08-05 검토 §39.2 — "기다렸다"고 쓰려면 **잰 사람**이 써야 한다 -----------------
+# 구판의 스냅샷 실패 문장 두 자리는 상한 초를 **사실로 단정**했다:
+#   `"종료 확인 8초 안에 못 받았다"` (검토자 실측 지연 0.408초) · `"5초 주기 × 12초 대기했다"`.
+# 근인은 값이 아니라 **구조**다 — 재는 일(t0/t1)과 말하는 일(문장)이 자리마다 흩어져 있으면
+# 반드시 갈라진다. 관측 창 3자리는 §30.3 에서 `elapsed_ms` 를 받았는데 스냅샷은 못 받은 것이
+# 정확히 그 갈라짐이다. → 재기·판정 근거·설명을 **아래 세 함수 한 곳**에 모은다.
+# 호출자는 상한을 고르고 결과를 묻기만 하며, 초를 문장에 손으로 적지 않는다.
+#
+# ⚠ `hard_timeout <초> ros2 …` 인접은 **호출 자리에 그대로 남긴다.** 명령까지 함수로 감싸면
+#   `tools/scan_unbounded_cli.py` 가 위반으로 잡는다 — 그 검사기는 wrapper 화이트리스트를
+#   **일부러** 갖지 않기 때문이다(§13.3: 목록이 있으면 목록 밖 wrapper 로 조용히 뚫린다).
+#   그래서 상한을 씌우는 일만 호출자가 하고, 재는 일·말하는 일은 여기가 한다.
+CLK_T0=0; CLK_RC=0; CLK_MS=0; CLK_LIMIT=0; CLK_OUT=""
+clock_begin() { CLK_T0=$(date +%s%N); }
+clock_end() {   # $1=rc(바로 다음 줄에서 $? 를 넘긴다) $2=상한(초) $3=출력파일("" 가능)
+  CLK_RC="$1"; CLK_LIMIT="$2"; CLK_OUT="${3:-}"
+  CLK_MS=$(( ($(date +%s%N) - CLK_T0) / 1000000 ))
+}
+
+# 스냅샷 실패 분기의 **유일한** 설명자. 여기서 말하는 것은 전부 관측된 사실이다:
+#   실측 rc · 실측 경과 · 그리고 상한은 '주장'이 아니라 **계약값**으로만 표기한다.
+# 원인 문자열을 반드시 남긴다 — rc 124(상한 발동 = DDS 지연)와 rc 1(타입 판별 실패 =
+# 토픽 부재·노드 미기동)은 **원인도 조치도 다른데** 구판은 한 문장으로 뭉갰다.
+why_snapshot() {
+  ng "  → rc=$CLK_RC · 실측 경과 ${CLK_MS}ms · 이 검사의 상한 계약 ${CLK_LIMIT}초"
+  case "$CLK_RC" in
+    124|137) ng "     rc 124/137 = 상한이 **실제로 발동**했다 — 상대가 끝까지 응답하지 않았다" ;;
+    0)       ng "     rc 0 = 명령 자체는 성공했다 — 실패 원인은 아래 출력 내용 쪽이다" ;;
+    *)       ng "     rc $CLK_RC = 상한 전에 **스스로** 끝났다 — 토픽 부재·타입 판별 실패·CLI 오류" ;;
+  esac
+  if [ -n "$CLK_OUT" ] && [ -s "$CLK_OUT" ]; then
+    ng "     원문 앞 3줄:"
+    head -3 "$CLK_OUT" | sed 's/^/       /'
+  else
+    ng "     (원문 출력이 비어 있다 — 명령이 아무 말도 남기지 않았다)"
+  fi
 }
 
 EKF_NODE="ekf_filter_node"         # ★ ekf_real.yaml 최상단 키와 같은 이름이어야 한다
@@ -171,8 +237,17 @@ skip() { printf '  \033[33m--\033[0m   %s (생략)\n' "$1"; SKIPPED=$((SKIPPED+1
 IDX=0
 next_idx() { IDX=$((IDX + 1)); }
 
+# ★ 08-05 검토 §39.3 P2-1 — 구판 머리말은 `"주기 ${HZ_SECS}초 × 2회"` 만 말해서 실제 예산을
+#   **축소 표기**했다(스냅샷 상한 9자리가 빠져 있었다). 숫자를 손으로 적지 않고 실제 상한
+#   변수로 계산한다 — 그래야 `--secs` 를 바꾸든 상수를 바꾸든 문장이 사실과 갈라지지 않는다.
+BUDGET=$(( HZ_SECS * 2 + SNAP_ECHO_SECS * 2 + SNAP_INFO_SECS * 4 + FW_INFO_SECS ))
+[ "$SKIP_SIGN" = "1" ]  || BUDGET=$(( BUDGET + HZ_SECS ))
+[ "$SKIP_ESTOP" = "1" ] || BUDGET=$(( BUDGET + SNAP_ECHO_SECS * 2 ))
+
 echo "=== D+0 연결 판정 ($(date '+%Y-%m-%d %H:%M:%S')) ==="
-echo "    측정 시간: 주기 ${HZ_SECS}초 × 2회"
+echo "    관측 창: ${HZ_SECS}초 (--secs) × 2회"
+echo "    스냅샷 상한: echo ${SNAP_ECHO_SECS}초 · info ${SNAP_INFO_SECS}초 · 펌웨어 ${FW_INFO_SECS}초"
+echo "    → 사람이 손을 쓰는 시간을 뺀 **최악 ${BUDGET}초**. 실제 경과는 각 검사가 ms 로 찍는다"
 echo
 
 # ── [1] 시리얼 장치 ─────────────────────────────────────────────────────────
@@ -205,15 +280,15 @@ echo
 is_finite_num() { printf '%s' "${1:-}" | grep -qE '^[0-9]+(\.[0-9]+)?$'; }
 
 check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
-  local topic="$1" expect="$2" idx="$3" out="$TMP/hz$3.txt"
+  local topic="$1" expect="$2" idx="$3" out="$TMP/hz$3.txt" tail_out="$TMP/tail$3.txt"
   local parsed rate gapms win need
-  local hz_rc t0 t1 elapsed_ms need_ms
+  local hz_rc elapsed_ms need_ms
   echo "[$idx] $topic 발행 주기 (기대 약 ${expect}Hz)"
-  t0=$(date +%s%N)
+  clock_begin
   hard_timeout "$HZ_SECS" ros2 topic hz "$topic" >"$out" 2>&1
-  hz_rc=$?                                   # ★ 바로 다음 줄에서 받는다(뒤로 미루면 덮인다)
-  t1=$(date +%s%N)
-  elapsed_ms=$(( (t1 - t0) / 1000000 ))
+  clock_end $? "$HZ_SECS" "$out"             # ★ rc 는 바로 다음 줄에서 받는다(뒤로 미루면 덮인다)
+  hz_rc=$CLK_RC
+  elapsed_ms=$CLK_MS
   need_ms=$(( HZ_SECS * 1000 ))
 
   # ── ⓪ 같은 관측자가 창을 **끝까지** 살아서 채웠는가 (★ 08-03 검토 §30.3) ─
@@ -292,12 +367,18 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
   #   상한 발동(124/137)은 '상한 안에 한 건도 확인하지 못했다'는 뜻이라 실패다.
   # ★ 08-03 D+0 실측: `/odom --once` 5회가 0·124·0·0·0, 성공도 1.996~2.315초였다.
   #   3초는 47Hz 데이터가 아니라 DDS 발견 지연에 너무 가까워 정상 발행을 거짓 FAIL 냈다.
-  #   주 측정창과 같은 8초를 주되 hard_timeout 으로 유한성은 유지한다. 실패하더라도
+  #   그래서 상한을 $SNAP_ECHO_SECS 로 두되 hard_timeout 으로 유한성은 유지한다. 실패하더라도
   #   이 한 번으로 '센서가 끊겼다'고 단정하지 않고 토픽/DDS 발견 경로를 함께 지목한다.
-  if hard_timeout 8 ros2 topic echo "$topic" --once >/dev/null 2>&1; then
-    ok "$topic 관측 창 종료 시점에도 수신됨"
+  # ★ 08-05 검토 §39.2: 구판은 출력을 `/dev/null` 로 버리고 `"8초 안에 못 받았다"` 라고
+  #   **기다린 적 없는 시간**을 단정했다. 이제 재고, 원인 문자열을 남긴다.
+  clock_begin
+  hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo "$topic" --once >"$tail_out" 2>&1
+  clock_end $? "$SNAP_ECHO_SECS" "$tail_out"
+  if [ "$CLK_RC" = "0" ]; then
+    ok "$topic 관측 창 종료 시점에도 수신됨 (${CLK_MS}ms)"
   else
-    ng "$topic 을 종료 확인 8초 안에 못 받았다 — 발행 중단 또는 DDS 발견 실패"
+    ng "$topic 을 관측 창 종료 뒤 한 건도 못 받았다 — 발행 중단 또는 DDS 발견 실패"
+    why_snapshot
   fi
 
   if awk "BEGIN{exit !($rate >= $HZ_MIN)}"; then
@@ -365,15 +446,19 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   local topic="$1" idx="$2" expect="${3:-}" out="$TMP/qos$2.txt"
   local rows npub nsub off_pub be_pub bad_pair ekf_rel pub_rel info_rc
   echo "[$idx] $topic QoS 정합"
-  hard_timeout 20 ros2 topic info "$topic" -v >"$out" 2>&1
-  info_rc=$?
+  clock_begin
+  hard_timeout "$SNAP_INFO_SECS" ros2 topic info "$topic" -v >"$out" 2>&1
+  clock_end $? "$SNAP_INFO_SECS" "$out"
+  info_rc=$CLK_RC
   # ★ 08-03 검토 §30.3 계열 — 여기는 **스냅샷**이라 rc 0 이 정상이다(위 window_completed 와 반대).
   #   상한이 발동했다면 daemon 이 매달린 것이고, 그때 남은 출력은 **잘린 목록**이다.
   #   잘린 목록으로 "RELIABLE 구독자 없음" 을 말하면 그건 안 본 것을 봤다고 하는 것이다.
+  # ★ 08-05 검토 §39.2 계열 — 구판 문장은 rc 가 무엇이든 `"(20초 상한 발동 = 124)"` 를 달아
+  #   rc 1(daemon 오류·토픽 부재)까지 '매달렸다'로 읽히게 했다. 원인은 why_snapshot 이 가른다.
   if [ "$info_rc" != "0" ]; then
-    ng "$topic 의 topic info 가 rc=$info_rc 로 끝났다 (20초 상한 발동 = 124) — **판독 실패**"
+    ng "$topic 의 topic info 가 끝까지 성공하지 못했다 — **판독 실패**"
+    why_snapshot
     ng "  → 엔드포인트 목록이 잘렸을 수 있다. 잘린 목록으로 QoS 를 판정하지 않는다"
-    head -3 "$out" | sed 's/^/       /'
     echo; return
   fi
 
@@ -474,9 +559,12 @@ else
   echo "  ★ 지금 할 일: **바퀴를 손으로 '앞으로' 굴려 주세요** (바퀴가 공중에 뜬 상태 R0)."
   echo "     준비되면 Enter — 그때부터 ${HZ_SECS}초 동안 /odom 을 봅니다."
   read -r _ || true
+  clock_begin
   hard_timeout "$HZ_SECS" ros2 topic echo "$ODOM_TOPIC" \
       --field twist.twist.linear.x >"$TMP/sign.txt" 2>&1
-  SIGN_RC=$?
+  clock_end $? "$HZ_SECS" "$TMP/sign.txt"
+  SIGN_RC=$CLK_RC
+  SIGN_MS=$CLK_MS
 
   # 숫자로 읽히는 줄만 채택한다(`---` 구분선·경고문 제외). 한 줄도 없으면 판독 실패.
   SIGN=$(awk -v lo="$SIGN_MIN" '
@@ -499,15 +587,21 @@ else
     OK*)
       ok "앞으로 굴릴 때 linear.x 최대 $(echo "$SIGN" | cut -d' ' -f2) m/s > 0 (부호 정상)"
       window_completed "$SIGN_RC" \
-        || warn "  ⚠ 관측자는 rc=$SIGN_RC 로 일찍 끝났다 — 부호는 관측된 사실이라 유효하다" ;;
+        || warn "  ⚠ 관측자는 ${SIGN_MS}ms 만에 rc=$SIGN_RC 로 일찍 끝났다 — 부호는 관측된 사실이라 유효하다" ;;
     REVERSED*)
       ng "부호가 **반대**다 — 앞으로 굴렸는데 linear.x 최소 $(echo "$SIGN" | cut -d' ' -f2) m/s"
       ng "  → 펌웨어의 좌우/전후 부호를 구동부와 지금 맞춘다. URDF 로 덮지 말 것" ;;
     READFAIL|STILL*)
       if ! window_completed "$SIGN_RC"; then
-        ng "/odom 관측자가 rc=$SIGN_RC 로 **먼저 끝났다** — 판독 실패다"
+        ng "/odom 관측자가 ${SIGN_MS}ms 만에 rc=$SIGN_RC 로 **먼저 끝났다** — 판독 실패다"
         ng "  → '안 움직였다'가 아니라 **못 봤다**. 다시 돌린다(agent 연결부터 확인)"
         head -3 "$TMP/sign.txt" | sed 's/^/       /'
+      # ★ 08-05 — 관측 창 클래스의 나머지 한 자리에도 §30.3 의 **벽시계** 규칙을 준다.
+      #   `topic hz` 자리는 rc 와 벽시계를 둘 다 보는데 여기는 rc 만 봤다. 결론이
+      #   '안 움직였다'(= 못 본 것)일 때는 창이 실제로 채워졌는지가 판정의 전제다.
+      elif [ "$SIGN_MS" -lt "$(( HZ_SECS * 1000 ))" ]; then
+        ng "/odom 관측이 ${SIGN_MS}ms 만에 끝났다 (요구 $(( HZ_SECS * 1000 ))ms) — **창을 다 안 썼다**"
+        ng "  → 종료 상태는 상한 발동인데 벽시계가 모자라다. 시스템 시각 또는 CLI 를 의심한다"
       elif [ "$SIGN" = "READFAIL" ]; then
         ng "/odom 값을 한 줄도 못 읽었다 — **판독 실패**(값이 0 이었다는 뜻이 아니다)"
         head -3 "$TMP/sign.txt" | sed 's/^/       /'
@@ -535,8 +629,11 @@ echo
 #   (나머지는 짧은 bool·숫자 또는 값을 버리는 생존 확인). `--full-length` 를 빼지 않는다.
 next_idx; echo "[$IDX] 펌웨어 정체 (/firmware/info · 5초 주기)"
 FWOUT="$TMP/fw.txt"
-if hard_timeout 12 ros2 topic echo /firmware/info --field data --full-length --once \
-   >"$FWOUT" 2>&1 && [ -s "$FWOUT" ]; then
+clock_begin
+hard_timeout "$FW_INFO_SECS" ros2 topic echo /firmware/info --field data --full-length --once \
+   >"$FWOUT" 2>&1
+clock_end $? "$FW_INFO_SECS" "$FWOUT"
+if [ "$CLK_RC" = "0" ] && [ -s "$FWOUT" ]; then
   sed 's/^/       /' "$FWOUT" | head -6
   if grep -q "wheel_radius=0.05698" "$FWOUT"; then
     ok "wheel_radius=0.05698 — 소스 v1.4 와 일치"
@@ -549,7 +646,11 @@ if hard_timeout 12 ros2 topic echo /firmware/info --field data --full-length --o
     warn "제어 게인이 소스(Kp=30, Ki=5)와 다르다 — 시험 데이터의 전제가 달라진다"
   fi
 else
-  ng "/firmware/info 를 못 읽었다 (5초 주기 × 12초 대기했다)"
+  # ★ 08-05 검토 §39.2 — 구판은 `"(5초 주기 × 12초 대기했다)"` 라고 적고 실제로는 0.4초 만에
+  #   끝난 적이 있다. 바로 아랫줄이 *"노드가 없다면"* 을 맞게 짚어 놓고 윗줄이 그 경우와
+  #   모순되는 사실을 주장했다. 이제 왜 끝났는지는 why_snapshot 이 rc 로 가른다.
+  ng "/firmware/info 를 한 건도 못 읽었다 (발행 주기 5초 · VOLATILE)"
+  why_snapshot
   ng "  → agent 는 붙었는데 노드가 없다면 **IMU 초기화 실패**를 먼저 의심한다"
   ng "     (소스: IMU 실패 시 errorLoop() → micro-ROS 노드 자체가 안 뜬다."
   ng "      Teensy LED 가 100ms 주기로 빠르게 깜빡이면 그 상태다)"
@@ -568,7 +669,10 @@ if [ "$SKIP_ESTOP" = "1" ]; then
   skip "E-stop 배선 — 사람이 버튼을 눌러야 한다 (--no-estop)"
 else
   ESOUT="$TMP/estop_idle.txt"
-  if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT" 2>&1 && [ -s "$ESOUT" ]; then
+  clock_begin
+  hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state --field data --once >"$ESOUT" 2>&1
+  clock_end $? "$SNAP_ECHO_SECS" "$ESOUT"
+  if [ "$CLK_RC" = "0" ] && [ -s "$ESOUT" ]; then
     if grep -qi "false" "$ESOUT"; then
       ok "평상시 /estop/state = false"
       # ★ 08-02 검토 §29 계열 정정 — 구판은 "누르지 않았으면 그냥 Enter" 라고 안내해 놓고
@@ -584,8 +688,11 @@ else
           warn "  → 눌러 보기 전에는 배선 여부를 알 수 없다. 인수 전에 반드시 확인할 것" ;;
         *)
           ESOUT2="$TMP/estop_press.txt"
-          if hard_timeout 8 ros2 topic echo /estop/state --field data --once >"$ESOUT2" 2>&1 \
-             && [ -s "$ESOUT2" ]; then
+          clock_begin
+          hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state --field data --once \
+             >"$ESOUT2" 2>&1
+          clock_end $? "$SNAP_ECHO_SECS" "$ESOUT2"
+          if [ "$CLK_RC" = "0" ] && [ -s "$ESOUT2" ]; then
             if grep -qi "true" "$ESOUT2"; then
               ok "누름 → true 전환 확인 — **배선 정상**"
             else
@@ -595,6 +702,7 @@ else
             fi
           else
             ng "누른 뒤 /estop/state 를 못 읽었다 — **판독 실패**(배선 없음과 다른 사실이다)"
+            why_snapshot
             ng "  → agent 연결이 끊겼는지 먼저 본다. 끊겼다면 배선 판정을 하지 않는다"
           fi ;;
       esac
@@ -604,6 +712,7 @@ else
     fi
   else
     ng "/estop/state 를 못 읽었다 — 토픽이 없다면 굽힌 펌웨어가 v1.4 가 아니다"
+    why_snapshot
   fi
 fi
 echo
@@ -615,12 +724,16 @@ echo
 echo "[재확인] $EKF_NODE 가 아직 두 토픽을 구독 중인가"
 for t in "$ODOM_TOPIC" "$IMU_TOPIC"; do
   RECHECK_OUT="$TMP/recheck${t//\//_}.txt"
-  hard_timeout 20 ros2 topic info "$t" -v >"$RECHECK_OUT" 2>/dev/null
-  RECHECK_RC=$?
+  # ★ 08-05 — 구판은 stderr 를 `2>/dev/null` 로 버려 실패 원인을 **캡처조차 못 했다**.
+  #   검토가 지목한 두 자리 밖이지만 같은 클래스라 여기서 함께 닫는다(§3-10 전수).
+  clock_begin
+  hard_timeout "$SNAP_INFO_SECS" ros2 topic info "$t" -v >"$RECHECK_OUT" 2>&1
+  clock_end $? "$SNAP_INFO_SECS" "$RECHECK_OUT"
+  RECHECK_RC=$CLK_RC
   if [ "$RECHECK_RC" != "0" ]; then
-    ng "$t 의 최종 topic info 가 rc=$RECHECK_RC 로 끝났다 — **판독 실패**"
+    ng "$t 의 최종 topic info 가 끝까지 성공하지 못했다 — **판독 실패**"
+    why_snapshot
     ng "  → EKF 행이 일부 출력됐어도 스냅샷이 완주하지 않았으므로 유지 판정하지 않는다"
-    head -3 "$RECHECK_OUT" | sed 's/^/       /'
     continue
   fi
   if awk '/^Node name:/ { node=$3 } /^Endpoint type:/ { ep=$3 }
