@@ -17,6 +17,18 @@
 ## 2. ROS 토픽·통신·테스트 자동화
 
 - **`topic pub --once` 유실** — 디스커버리 매칭 전에 쏘고 죽음 → `-w 1 --times 2~3`. → 0705_현황 §14.3
+- ★ **활성 런북의 `ros2 topic echo … --once` 는 전부 `timeout --kill-after=2s 10s` 로 감싼다**
+  (08-04 검토 §39.3 P2-4). 발행자가 없거나 DDS 발견이 실패하면 `--once` 는 **영영 안 돌아온다**
+  — 이 저장소가 **13분 27초 실측**으로 겪은 함정이다(`tools/d0_check.sh:103`).
+  **전수 근거는 손으로 세지 말고** `grep -n "ros2 topic echo" docs/*.md | grep -v timeout` 출력을
+  그대로 쓴다. ⚠ **상한을 안 거는 예외는 두 종류뿐**이며 그 밖은 결함이다:
+  ① 사람이 화면을 보다가 `Ctrl+C` 하는 **관찰용 스트림**(`TEST_GATES §2` 의 `/mission_state`
+  — `--once` 를 오히려 금지한다) ② **역사 서술 안의 옛 명령 인용**(`MASTER_PLAN §3`).
+- ★ **`--symlink-install` 이라도 `data_files`(launch·config·urdf)는 `build/` 사본을 거친다**
+  — `install/…/share/<pkg>/urdf/x.urdf` 는 `src` 가 아니라 `build/<pkg>/urdf/x.urdf` 를 가리킨다.
+  즉 **`src` 의 URDF·YAML·launch 를 고쳐도 `colcon build` 없이는 실행에 반영되지 않는다**.
+  파이썬 모듈만 src 로 직결된다. D+1 에 라이다 높이를 `robot_real.urdf` 에 넣을 때 정확히
+  이 자리를 밟는다 — 고친 뒤 **반드시 `colcon build --symlink-install`** 을 다시 돌린다.
 - 상태성 신호(/siren 등)는 전환 1회가 아니라 **매 tick 반복 발행** (늦은 구독자 대비).
 - 자동화에선 명령 도달을 **상대 노드 로그로 수신 확인** 후 다음 단계. 스폰류 서비스는 멱등으로.
 - **오래 뜬 액션 서버 + 새 CLI = goal 응답 유실 가능** (send_goal 영구 대기) → 타임아웃+1회 재전송. → 0705_현황 §15.7

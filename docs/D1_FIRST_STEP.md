@@ -164,9 +164,9 @@ EKF 가 죽어 있어도 통과한다. 출력이 흐르면 EKF 가 살아서 융
 **틀리면 오류 없이 조용히 실패한다** — TF 가 안 이어져 스캔이 지도에 안 붙는다.
 
 ```bash
-ros2 topic echo /odom --field header.frame_id --once        # 기대: odom
-ros2 topic echo /odom --field child_frame_id --once         # 기대: base_footprint
-ros2 topic echo /imu/data --field header.frame_id --once    # 기대: imu_link
+timeout --kill-after=2s 10s ros2 topic echo /odom --field header.frame_id --once        # 기대: odom
+timeout --kill-after=2s 10s ros2 topic echo /odom --field child_frame_id --once         # 기대: base_footprint
+timeout --kill-after=2s 10s ros2 topic echo /imu/data --field header.frame_id --once    # 기대: imu_link
 ```
 
 TODO(D+1): 확인 — 셋 중 하나라도 다르면 **구동부 펌웨어 쪽을 고쳐야 한다.**
@@ -266,8 +266,8 @@ TODO(D+1): 확인 — 토픽별 중복·역행 건수와 NTP 상태를 `REAL_ROB
 ### 5-d. 판정 ③ — covariance 가 '의미값'인가
 
 ```bash
-ros2 topic echo /odom --field twist.covariance --once
-ros2 topic echo /imu/data --field angular_velocity_covariance --once
+timeout --kill-after=2s 10s ros2 topic echo /odom --field twist.covariance --once
+timeout --kill-after=2s 10s ros2 topic echo /imu/data --field angular_velocity_covariance --once
 ```
 
 **보는 법**: 전부 `0.0` 이면 "불확실성이 0" 이라는 뜻이 되어 EKF 가 그 값을 **절대 신뢰**한다

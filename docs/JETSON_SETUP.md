@@ -10,8 +10,17 @@
 
 ## 0. 먼저 알아야 할 것 — 이 문서의 한계 (읽고 시작한다)
 
-⚠ **이 런북은 장비 없이 썼다.** 2026-08-02 작성 시점에 Jetson 도 Teensy 도 손에 없었다.
-그래서 아래 규칙을 지켰다. **"완벽한 런북"이 아니라 "막힐 자리를 미리 드러낸 런북"이다.**
+⚠ **이 런북은 장비 없이 썼고(2026-08-02), 2026-08-03 에 실차에서 §1~§7 을 1회 완주했다.**
+그래서 **절마다 신뢰도가 다르다** — 아래 표를 먼저 보고 어느 절이 아직 종이 위인지 안다.
+
+| 신뢰도 | 절 | 근거 |
+|---|---|---|
+| ✅ **실차 1회 완주** | §1 · §3 · §4 · §5 · §6 · §7-b | 08-03 Jetson·Teensy 실행. 결과는 `§9` 표 |
+| ⚠ **부분만 실행** | §11-d · §11-e · §11-f | 라이다 없이 odom·IMU·EKF 만. `/scan` 포함 판정은 미실행 |
+| ❌ **실차에서 한 번도 안 돌았다** | **§7 검사 8**(E-stop) · **§7-c R0~R2** · §11-b · §11-c(라이다) | 물리 E-stop 미설치·라이다 미장착 |
+
+❌ 행은 **종이 위의 절차**다. 여기서 막히면 그것은 장비 이상이 아니라 **런북이 틀린 것일 수
+있다** — 그 자리에서 문서를 고친다. 아래 작성 규칙은 그대로 유지한다.
 
 - 노트북에서 **확인할 수 있는 것은 전부 실제로 확인**했다(패키지 존재·명령 출력 형식·
   아키텍처 지원 여부). 그 근거를 각 절에 적어 뒀다.
@@ -177,12 +186,16 @@ ls -d ~/ros2_ws/src/tunnel_bringup ~/ros2_ws/src/sllidar_ros2
 ```
 
 🔴 **인수 전 선행 게이트 — private 저장소 인증**: `git clone` 이 아이디·비밀번호를 물으면
-GitHub 계정 비밀번호는 안 통한다(2021년에 막혔다). **1차 경로는 HTTPS + PAT(classic, `repo`),
-비상 경로는 USB 소스 복사**로 확정한다. SSH 키는 PAT를 쓰지 않기로 바꿀 때의 대안이다.
+GitHub 계정 비밀번호는 안 통한다(2021년에 막혔다). **1차 경로는 HTTPS + PAT, 비상 경로는 USB
+소스 복사**로 확정한다. SSH 키는 PAT를 쓰지 않기로 바꿀 때의 대안이다.
+
+★ **08-03 실제로 통과한 것은 fine-grained PAT 다** (`§9` 표 3번). classic 과 권한 모델이
+달라서 "classic 을 만들라"는 안내로는 재현이 안 된다 — **실측 경로를 1차로 적는다.**
 
 | 방법 | 준비 | 비고 |
 |---|---|---|
-| **Personal Access Token — 1차** | GitHub → Settings → Developer settings → PAT(classic, `repo` 권한) | 비밀번호 프롬프트에 토큰을 붙여넣는다. 가장 빠르다 |
+| **PAT — fine-grained (1차 · 08-03 실측 통과)** | GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained** → **Repository access = 이 저장소 선택** + **Permissions → Contents: Read** 이상 | 비밀번호 프롬프트에 토큰을 붙여넣는다. 권한을 이 저장소로만 좁힐 수 있어 안전하다 |
+| **PAT — classic (대안)** | GitHub → Settings → Developer settings → PAT(classic, `repo` 권한) | `repo` 는 계정의 **모든** private 저장소를 연다. fine-grained 가 막힐 때만 |
 | **SSH 키** | Jetson 에서 `ssh-keygen` → 공개키를 GitHub 에 등록 | `git@github.com:…` 주소로 clone |
 | **USB 복사 — 비상** | 노트북에서 소스만 복사 (§8) | 네트워크 없을 때의 유일한 길 |
 
@@ -238,7 +251,10 @@ source install/setup.bash
 ```
 
 `tunnel_bringup`·`mission_manager` 는 **순수 Python** 이라 컴파일이 없어 수 초면 끝난다.
-`sllidar_ros2` 는 C++ 이라 조금 걸린다(Jetson 에서 수 분 예상 — TODO(D+0): 확인, 실제 시간을 적어 둘 것).
+TODO(D+0): 확인 완료 (2026-08-03) — **4패키지 전체 28초, 종료 0**. `sllidar_ros2` 가 C++ 이라
+가장 오래 걸리지만 "수 분"은 아니었다. ★ **28초가 기준선이다** — 다음에 몇 분이 걸리면
+정상이 아니라 **이상 신호**로 보고 원인을 찾는다(스왑·전원 모드·디스크). 관측된 경고는
+`sllidar_ros2` 외부 SDK 의 C++ 경고뿐이다.
 
 확인:
 
@@ -350,14 +366,18 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
 **TODO(D+0): 확인 — 버전 번호를 받아적지 말고 `~/Arduino/libraries/` 폴더를 통째로 복사받는다.**
 2026-08-03 Jetson에는 이 폴더가 없음을 확인했다. `/firmware/info`는
 `arduino_macro=10607`·`teensyduino_macro=158`과 라이브러리 이름 5개를 방송하지만 원본
-재현 수단은 아니다. **D+0 종료 전 구동부 개발환경(`/home/park/...`에서 빌드됨) 또는 USB로
-폴더 전체를 수령해 다시 확인한다.** 수령 전까지 이 항목은 미완료다.
+재현 수단은 아니다.
+🔴 **기한 경과 — 08-03 "D+0 종료 전" 은 지났고 아직 미수령이다.** 새 계약:
+**소유자 = 역할 A(사용자) · 트리거 = 구동부와 다음 대면 · 기한 = R1 진입 전(늦어도 D+1)**.
+구동부 개발환경(`/home/park/...`에서 빌드됨) 또는 USB로 폴더 전체를 수령한다.
+⚠ **펌웨어를 다시 빌드해야 하는 상황(re-arm 래치 구현 등)에서는 이것이 차단 항목이 된다** —
+그때는 수령 전까지 진행할 수 없다. 순수 연결·주행 시험만 하는 동안은 비차단이다.
 번호는 나중에 재현할 때 또 틀리지만, 폴더는 그 자체가 재현 수단이다. USB 하나면 된다.
 
 **펌웨어 정체 확인 (붙은 뒤 30초)** — 소스를 받았으므로 이제 대조가 가능하다:
 
 ```bash
-ros2 topic echo /firmware/info --field data --full-length --once
+timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-length --once
 # 5초 주기라 최대 5초 기다린다. --full-length 없이는 긴 문자열이 128자에서 잘린다.
 ```
 
@@ -644,14 +664,14 @@ ros2 bag record /odom /imu/yaw_deg /cmd_vel /estop/state -o d0_drive_$(date +%m%
 35초 상한이 먼저 끝나도 시험은 실패가 아니라 **0.12 도달 불확실**로 기록하고 원인을 본다.
 
 ```bash
-ros2 topic echo /odom --field header.stamp --once
+timeout --kill-after=2s 10s ros2 topic echo /odom --field header.stamp --once
 timeout --signal=INT --kill-after=2s 35s \
   ros2 topic pub -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.12, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
 timeout --kill-after=2s 12s \
   ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
-ros2 topic echo /odom --field header.stamp --once
+timeout --kill-after=2s 10s ros2 topic echo /odom --field header.stamp --once
 ```
 
 `elapsed = (끝 sec−시작 sec) + (끝 nanosec−시작 nanosec)/1e9`,
@@ -666,14 +686,14 @@ ros2 topic echo /odom --field header.stamp --once
 회신 기록 오기, 약 −112°면 실제 우회전 과속이다.
 
 ```bash
-ros2 topic echo /imu/yaw_deg --field data --once
+timeout --kill-after=2s 10s ros2 topic echo /imu/yaw_deg --field data --once
 timeout --signal=INT --kill-after=2s 20s \
   ros2 topic pub --times 100 -r 10 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: -0.12}}'
 timeout --kill-after=2s 12s \
   ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
-ros2 topic echo /imu/yaw_deg --field data --once
+timeout --kill-after=2s 10s ros2 topic echo /imu/yaw_deg --field data --once
 ```
 
 두 실측은 `D1_FIRST_STEP.md §0-a`의 시작 대조표에 결과를 옮긴다. 추측값이나 구동부 회신값으로
@@ -693,6 +713,8 @@ ros2 topic echo /imu/yaw_deg --field data --once
 | `d0_check` 이 "구독자가 하나도 없다" FAIL | EKF 를 안 띄웠다 | §7-a 를 먼저 한다. 이건 로봇 고장이 아니라 순서 문제다 |
 | `d0_check` 이 "표본이 N개뿐" FAIL | 창의 일부만 살아 있었다 | 평균이 정상이어도 믿지 않는다. agent 로그에서 재연결 흔적을 본다 |
 | `d0_check` 이 "관측자가 rc=N 으로 먼저 끝났다" FAIL | **8초 창이 성립하지 않았다** (08-03 검토 §30.3) | `ros2 topic hz` 자체가 죽은 것이다 — DDS·daemon·agent 를 본다(`ros2 daemon stop` 후 재시도). 요약이 정상 모양이어도 그 표본은 창의 일부다 |
+| **펌웨어 정체가 소스와 다르다고 나온다** (08-03 실현) | **판정기 오경보를 먼저 의심한다** | 기본 `topic echo` 는 장문을 **128자에서 자른다**. `--full-length` 로 전체 필드를 다시 본다. 반지름·게인이 그제서야 맞았다 — 자른 문자열로 펌웨어 불일치를 선언하지 않는다 |
+| **`/odom --once` 가 "못 받았다"로 FAIL 한다** (08-03 실현) | **정상 발행인데 상한이 짧았다** | 격리 5회가 `0·124·0·0·0`, 성공 지연 약 2.0~2.3초였다. 3초 단발 상한이 정상을 거짓 FAIL 시킨 것이라 8초로 넓혔다. FAIL 한 번으로 센서 두절을 선언하지 말고 주기창·후속 부호를 같이 본다 |
 | 인터넷이 없다 | apt·clone·agent 빌드가 전부 막힌다 | ↓ 아래 오프라인 대비 |
 
 **오프라인 대비 (네트워크가 없을 때)** — 소스는 아키텍처와 무관하므로 복사가 통한다:
@@ -712,12 +734,12 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 | # | 무엇 | 확인 방법 | 절 | D+0 결과 (2026-08-03) |
 |---|---|---|---|---|
-| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. L4T R36.5.0(JetPack 6.2.2 계열)이며 `nvidia-jetpack` 메타패키지·`nvcc`는 없음(D+0 비차단, 역할 B 전에 별도 확인) |
+| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. 🔴 L4T R36.5.0(JetPack 6.2.2 계열)이며 `nvidia-jetpack` 메타패키지·`nvcc`는 **없음** — D+0 비차단이지만 **CUDA 없이는 YOLO 추론이 CPU로 떨어져 역할 B 성능 전제가 통째로 바뀐다.** 소유자·트리거·완료판정은 `MASTER_PLAN.md §7` **예약 27** |
 | 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 | ✅ IPv6 2/2 수신·손실 0%, 평균 175ms |
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
-| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ⏳ Jetson에 폴더 없음 확인; D+0 종료 전 구동부 개발환경/USB에서 원본 전체 수령 |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ⏳ **미수령 · 기한 재설정(08-05)** — Jetson에 폴더 없음 확인. 소유자 = 역할 A · 트리거 = 구동부와 다음 대면 · 기한 = **R1 진입 전(늦어도 D+1)**. 펌웨어 재빌드가 필요해지면 그때부터 차단 항목 (§5-d) |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
@@ -726,9 +748,23 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 ## 10. 다음 단계
 
-`d0_check.sh` 가 **종료 0** 이면 연결 게이트를 통과한 것이다. 이어서 §7-c의 R1·R2 사전
-실측을 안전조건 아래 닫고 결과를 **`docs/D1_FIRST_STEP.md §0-a`**에 옮긴다. 그다음
-agent → TF 트리 → EKF → **R3 rosbag** 순서로 간다. R0→R1→R2를 건너뛰고 R3로 가지 않는다.
+🔴 **현재 상태부터 읽는다 (2026-08-05 기준) — 여기서 R1 로 바로 갈 수 없다.**
+`d0_check.sh` 는 아직 **종료 2(불완전)** 이고 **검사 8(E-stop `false→true`)은 확인된 적이
+없다.** 물리 E-stop 이 설치 중이며, 게다가 이번 회차 전장은 **PIN 21 미연결**이라
+`/estop/state` 는 눌러도 `false` 를 발행한다(`ELECTRICAL_BASELINE.md §4-b`·`§4-c`).
+→ **지금의 복귀점은 §11-g 다.** 비구동 선행 작업은 `§11`, 그 완료 표기와 복귀점은 `§11-g`.
+
+주행 허용 전제는 여기에 다시 적지 않는다 — **`§7-c` 첫 줄의 전제 목록이 유일한 정본**이고,
+그 첫 항목이 *"검사 8에서 E-stop `false→true` 전환을 실제로 확인했다"* 이다. 하나라도
+아니면 **모터 명령 금지**다. 이 문서에 같은 전제를 두 번 적어 두 판본이 갈리는 것을 막는다.
+
+**순서 (전제가 닫힌 뒤에만)**: `d0_check.sh` **종료 0** → §7-c 의 R0 watchdog → R1 → R2 를
+순서대로 실측하고 결과를 **`docs/D1_FIRST_STEP.md §0-a`** 에 옮긴다. 그다음
+agent → TF 트리 → EKF → **R3 rosbag** 이다. R0→R1→R2를 건너뛰고 R3로 가지 않는다.
+
+⚠ 이 절은 2026-08-04 검토 §39.6.1(P1)로 고쳤다. 구판은 *"종료 0 이면 통과"* 만 적어
+**§9 표의 ✅ 9건을 보고 내려온 사람이 E-stop 없이 R1(0.05m/s 지면 명령)로 갈 수 있었다.**
+방어는 §7-c 에 있었지만 **두 절 아래**였고 이 문장은 통과시켰다.
 
 ## 11. 물리 E-stop 설치 대기 중 비구동 선행 작업 — `pre-R3 diagnostic`
 
@@ -883,10 +919,16 @@ python3 tools/bag_gap_report.py \
 간격 22.00ms·25.68ms와 엄격 단조를 확인했지만, `/tf`·`/tf_static`을 함께 담아 두 센서 모두
 앞 공백 약 0.81초로 RC 1이었다. 원인 분리용 센서 전용 44.3초 대조 bag은 odom 2111개·IMU
 2110개, 평균 47.64·47.62Hz, 수신 최대 간격 22.55·25.00ms, stamp 최대 간격 22.00·24.87ms,
-양끝 포함 계약 초과 0건·엄격 단조로 RC 0이었다. 따라서 센서 두절로 승격하지 않고
-**TF 포함 녹화의 관측 시작점 문제**로 분류한다. bag 경로는 각각
+양끝 포함 계약 초과 0건·엄격 단조로 RC 0이었다. 따라서 센서 두절로 승격하지 않는다.
+🔴 **다만 원인은 "TF 포함 녹화의 관측 시작점" 이라는 가설이며 아직 미확정이다** (08-04 검토
+§39.3 P2-3). 두 bag 은 **TF 유무와 길이(149.6초 vs 44.3초)가 동시에 다르다** — 앞 공백은
+길이에도 민감한 양이라 이 대조로는 TF 를 원인으로 **분리하지 못한다**. 단일변수 통제는
+**같은 길이로 TF 유/무 두 번**을 찍는 것이고, 그 판정은 정식 R3 전 판정기 트랙이 소유한다.
+그때까지 "TF 문제로 규명됐다"고 인용하지 않는다.
+bag 경로는 각각
 `~/pre_r3_bags/pre_r3_no_estop_partial_odom_imu_0803_1504`와
-`~/pre_r3_bags/pre_r3_no_estop_endpoint_control_0803_1511`이다.
+`~/pre_r3_bags/pre_r3_no_estop_endpoint_control_0803_1511`이며,
+**이 두 bag 이 위 대조군이므로 지우지 않는다**(보존 규정 = `§11-g`).
 
 아래는 라이다 장착 뒤 `/scan`까지 포함하는 **본 사전 녹화**다.
 
@@ -969,6 +1011,22 @@ timeout --signal=INT --kill-after=2s 12s ros2 topic hz /odometry/filtered
 - frame_id 3종·IMU/라이다 TF·covariance 출력
 - bag 경로와 `bag_gap_report.py` 전체 결과
 - tegrastats 로그 경로와 전후 네 토픽 생존 결과
+
+🔴 **산출물 보존 규정 (08-04 검토 §39.6.2 P2-D — 경로만 적는 것으로는 부족하다)**
+
+원본 bag·로그는 지금 **Jetson 로컬에만** 있고, 저장소에는 요약과 판정만 있다. 그런데
+`D1_FIRST_STEP.md` 는 D+0 산출물을 *"다시 판정하지 말고 그대로 소비한다"* 로 의존하고,
+`§11-e` 의 TF 가설도 이 bag 들이 대조군이다. **원본이 사라지면 소비할 것이 요약문뿐이다.**
+
+- **보존 위치**: Jetson 밖 **최소 한 곳** — 노트북 `~/robot_evidence/` (1차) + USB(2차).
+- **복제 수단**: `scp -r hanhan@jetson.local:~/pre_r3_bags ~/robot_evidence/` ·
+  `scp -r hanhan@jetson.local:~/pre_r3_logs ~/robot_evidence/`
+- **보존 기간**: **R3 정식 통과 + 예약 25 종결 시점까지**. 그 전에는 지우지 않는다.
+- ⚠ **재플래시·SD 교체는 재개방 시점이 아니라 소실 시점이다.** Jetson 이 살아 있는 지금만
+  유효한 기회이므로, 다음 현장 세션의 **첫 명령**으로 복제를 수행한다.
+- 대상 3건: `pre_r3_no_estop_partial_odom_imu_0803_1504` ·
+  `pre_r3_no_estop_endpoint_control_0803_1511` ·
+  `~/pre_r3_logs/tegrastats_no_estop_partial_odom_imu_0803_1516.log`
 
 **2026-08-03 부분 진행 상태** — agent·odom·IMU·EKF·frame/covariance, 센서 전용 부분 bag,
 라이다 없는 10분 부분 soak까지 완료했다. Arduino 라이브러리 원본, 라이다 전 항목,

@@ -234,8 +234,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(64, len(rows))
-        self.assertEqual(64, len({row["id"] for row in rows}))
+        self.assertEqual(67, len(rows))
+        self.assertEqual(67, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -269,7 +269,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_64_primary_findings(self):
+    def test_02b_history_scan_independently_counts_67_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         files, found = review_history_findings(review_dir)
         if not files:
@@ -278,7 +278,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(64, len(found))
+        self.assertEqual(67, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
@@ -308,6 +308,16 @@ class ContextRouterTest(unittest.TestCase):
             self.assertEqual([], found)
             first.write_text("### 1.1 P1 original — finding\n")
             extra.write_text("### 2.1 P2 documentation only — finding\n")
+            _files, found = review_history_findings(review_dir)
+            self.assertEqual(1, len(found))
+
+            # 검토 §40.4 — 계수 상한은 `###` **정확히 세 개**다. 같은 P1 을 한 단계 깊게 쓰면
+            # 조용히 계약 밖으로 샌다(실제로 §39.6.1 이 `####` 로 쓰여 1건이 안 세어졌다).
+            # 상한을 넓히려면 이 회귀를 먼저 바꾼다 — `AI_CONTEXT §3` 이 공개한 그 상한이다.
+            first.write_text("#### 1.1 P1 deeper heading — finding\n")
+            _files, found = review_history_findings(review_dir)
+            self.assertEqual([], found)
+            first.write_text("### 1.1 P1 original — finding\n")
             _files, found = review_history_findings(review_dir)
             self.assertEqual(1, len(found))
 

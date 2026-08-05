@@ -62,5 +62,8 @@
   {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"},
   {"id":"0801-watchdog-record-slot-37","path":"tools/test_ai_context.py","anchor":"watchdog 정상 실측 기록 슬롯의 위치 계약"},
   {"id":"0801-lidar-d0-d1-owner-38","path":"tools/test_ai_context.py","anchor":"라이다 실측 소유 시점 D+0/D+1 정합"},
-  {"id":"0801-readiness-doc-owner-38","path":"tools/test_ai_context.py","anchor":"readiness flake 활성 정본 소유권 정합"}
+  {"id":"0801-readiness-doc-owner-38","path":"tools/test_ai_context.py","anchor":"readiness flake 활성 정본 소유권 정합"},
+  {"id":"0801-d0-snapshot-wallclock-39","path":"tools/d0_check.sh","anchor":"스냅샷 판정이 상한 초를 사실로 단정한다"},
+  {"id":"0801-runbook-next-step-split-39","path":"docs/JETSON_SETUP.md","anchor":"런북 안에 다음 단계가 두 개 있고 느슨한 쪽이 먼저 읽힌다"},
+  {"id":"0801-method-b-decision-lost-40","path":"tools/test_ai_context.py","anchor":"방법 B 계약 표면 재설계 결정의 소재"}
 ]
