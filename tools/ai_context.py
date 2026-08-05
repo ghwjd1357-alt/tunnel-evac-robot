@@ -41,6 +41,12 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/PROJECT_CONTEXT.md", "8"),
         Ref("docs/TEST_GATES.md", "7"),
     ),
+    "firmware": (
+        Ref("docs/FIRMWARE_REBUILD.md"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "1"),
+        Ref("docs/ELECTRICAL_BASELINE.md", "4"),
+        Ref("docs/TEST_GATES.md", "7"),
+    ),
     "mission": (
         Ref("docs/PROJECT_CONTEXT.md", "4"),
         Ref("docs/PROJECT_CONTEXT.md", "6"),
@@ -167,6 +173,7 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "src/tunnel_interfaces/**", "**/*detection*", "**/*perception*",
         "console/**",
     )),
+    ("firmware", ("firmware/**", "firmware/*")),
     ("docs", ("docs/*.md",)),
 )
 

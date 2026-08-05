@@ -108,18 +108,28 @@ EOF
 > **왜 이 순서인가**: 나중에 `re-arm` 을 구현하고 문제가 생겼을 때 **"내 코드 탓인가 환경
 > 탓인가"** 를 갈라야 한다(`AGENTS.md §3-6`). 기준점을 안 만들면 그 분류를 영영 못 한다.
 
+★ **작업본은 저장소 `firmware/teensy_integrated_base/` 다** (08-05 신설). Desktop 수령본은
+독립 대조군으로 남겨 두고 건드리지 않는다 — 소유 경계·수정 규칙 = `firmware/VENDOR_DROP.md`.
+
 ```bash
-cp -r ~/Desktop/teensy_integrated_base_v1_4 /tmp/fwbuild/     # 수령본은 그대로 둔다
-cd /tmp/fwbuild/teensy_integrated_base_v1_4 && sha256sum -c SHA256SUMS.txt
-cd /tmp/fwbuild
-arduino-cli compile -b teensy:avr:teensy41 --output-dir out teensy_integrated_base_v1_4
+cd ~/ros2_ws/firmware/teensy_integrated_base_v1_4 && sha256sum -c SHA256SUMS.txt  # 무엇이 바뀌었는지 먼저
+cd ~/ros2_ws/firmware
+arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integrated_base_v1_4
 ```
+
+⚠ 산출물(`--output-dir`)은 **저장소 밖**으로 뺀다. 빌드물은 소스에서 다시 만들어지므로 커밋하지 않는다.
+
+★ **폴더 이름은 `.ino` 파일 이름과 정확히 같아야 한다** — Arduino 의 규칙이다.
+`teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino` 처럼 짝이 맞지 않으면
+*"Error: no valid sketch found"* 로 **컴파일 시작도 못 한다.** 폴더를 예쁘게 줄여 부르고 싶어도
+바꾸지 않는다(08-05 에 실제로 이 자리를 밟아 폴더를 되돌렸다).
 
 **2026-08-05 관측값 (기준점)**
 
 | 항목 | 값 |
 |---|---|
 | 소스 해시 | `13f929cb551ce3aa75d69bb615e04de5a0794c5259501684aae626eec2412106` (빌드 전후 불변) |
+| 재현 확인 | 임시 사본 빌드와 저장소 `firmware/` 빌드가 **바이트 수까지 동일**했다(08-05, 2회) |
 | FLASH | code **291,100** · data **84,452** · headers **8,440** |
 | RAM1 | variables **60,096** · code **156,088** · padding **7,752** |
 | RAM2 | variables **12,448** |
@@ -130,7 +140,7 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir out teensy_integrated_ba
 지문 확인 명령 (⚠ `strings` 기본 최소길이가 4라 세 글자 `158` 이 안 잡힌다 — `-n 3` 필수):
 
 ```bash
-strings -n 3 out/*.elf | grep -xE "158|10607"
+strings -n 3 /tmp/fwout/*.elf | grep -xE "158|10607"
 ```
 
 ⚠ **검증 상한 (과대 주장 금지)**: 확인한 것은 **환경 지문 일치·링크 성공·소스 해시 불변**이다.

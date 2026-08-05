@@ -106,5 +106,7 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 
 **Desktop 팀 공유물 (`~/Desktop/`)**: `미션노드_개발현황_및_실차이후계획.md` · `TEENSY_실차연동_합의사항.md` · `YOLO_탐지연동_합의사항.md`.
 
+**`firmware/`**(Teensy 펌웨어 작업본 — vendor drop + 역할 A 수정. 소유 경계·수정 규칙 = `firmware/VENDOR_DROP.md`, 빌드 환경 = `docs/FIRMWARE_REBUILD.md`. 08-05 신설. ⚠ `src/**` 동결과 무관한 별개 최상위 폴더) ·
+
 **기타**: `~/setup-tasks/`(GPU 복구 브리프·스피커 SOF 로그). `~/ros2_ws/console/`(관제 웹 — ROS 패키지 아님).
 패키지: `tunnel_sim`(시뮬 자산) / `mission_manager`(미션 로직) / `my_first_pkg`(학습용).

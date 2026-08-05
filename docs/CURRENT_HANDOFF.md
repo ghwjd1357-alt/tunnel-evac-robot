@@ -71,6 +71,14 @@ Claude 였고 구현자는 Codex 였다.** 이번 회차는 사용자 명시 요
 - **전기계통 정본을 라우터에 등록했다** — `AGENTS.md §2` · `CLAUDE.md §0`. 08-04 전기 결정
   6건과 방법 B 결정을 `MASTER_PLAN.md §8` 색인에 넣었다.
 - **예약 신설 시 채울 자리 4개를 규약으로 고정했다**(`AGENTS.md §5`, §42.3 완료판정).
+- **08-05 라이브러리 수령 → 펌웨어 재빌드 환경 구축·검증**(`docs/FIRMWARE_REBUILD.md` 신설).
+  micro-ROS 는 Teensy `platform.txt` 패치 없이는 **링크에서만** 죽는데 어디에도 안 적혀
+  있었다. 소스 무변경 재빌드로 환경 지문(`ARDUINO`=10607·`TEENSYDUINO`=158)이 실차와
+  일치함을 확인했고 FLASH/RAM 기준점을 남겼다. **업로드는 하지 않았다.**
+- **`firmware/` 최상위 폴더 신설** — Teensy 소스를 저장소 작업본으로 들여왔다(vendor drop
+  그대로, 해시 대조 성공). 되돌릴 곳·diff 증거·독립 검토 경로를 확보하려는 것이고
+  **`src/**` 동결과 무관**하다. 소유 경계·수정 규칙 = `firmware/VENDOR_DROP.md`,
+  검토 라우팅 = `TEST_GATES.md §7` 새 행, 라우터 프로필 = `tools/ai_context.py`.
 
 ## 직전 완료 — 전기계통 정본 v2 (구현자 = Claude, 독립 검토자 = Codex 예정)
 
