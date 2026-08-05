@@ -363,16 +363,45 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
   없으므로 인수 시 개발환경에서 함께 확인한다"* 고 회신했다(최종 회신 §1).
 - **그래서 안 붙으면 여전히 여기가 1순위 용의자다.**
 
-**TODO(D+0): 확인 — 버전 번호를 받아적지 말고 `~/Arduino/libraries/` 폴더를 통째로 복사받는다.**
-2026-08-03 Jetson에는 이 폴더가 없음을 확인했다. `/firmware/info`는
-`arduino_macro=10607`·`teensyduino_macro=158`과 라이브러리 이름 5개를 방송하지만 원본
-재현 수단은 아니다.
-🔴 **기한 경과 — 08-03 "D+0 종료 전" 은 지났고 아직 미수령이다.** 새 계약:
-**소유자 = 역할 A(사용자) · 트리거 = 구동부와 다음 대면 · 기한 = R1 진입 전(늦어도 D+1)**.
-구동부 개발환경(`/home/park/...`에서 빌드됨) 또는 USB로 폴더 전체를 수령한다.
-⚠ **펌웨어를 다시 빌드해야 하는 상황(re-arm 래치 구현 등)에서는 이것이 차단 항목이 된다** —
-그때는 수령 전까지 진행할 수 없다. 순수 연결·주행 시험만 하는 동안은 비차단이다.
-번호는 나중에 재현할 때 또 틀리지만, 폴더는 그 자체가 재현 수단이다. USB 하나면 된다.
+**TODO(D+0): 확인 완료 (2026-08-05) — 폴더 전체 수령.**
+받은 곳 = 노트북 `~/Desktop/teensy_required_libraries_v1_4/` (1946 파일 · 117MB).
+번호를 받아적지 않고 폴더를 통째로 받았다 — 폴더 그 자체가 재현 수단이다.
+
+| 라이브러리 | 버전 | 소스가 요구하는 헤더 |
+|---|---|---|
+| `micro_ros_arduino` | **2.0.8-humble** | `micro_ros_arduino.h`·`rclc`·`rmw_microros` |
+| `Encoder` (보드 라이브러리) | **1.4.3** | `Encoder.h` |
+| `Adafruit_BNO055` | **1.6.4** | `Adafruit_BNO055.h` |
+| `Adafruit_Unified_Sensor` | **1.1.15** | `Adafruit_Sensor.h` |
+| `Adafruit_BusIO` | **1.17.4** | (BNO055 의존성 — 직접 include 없음) |
+
+`Wire.h`·`Arduino.h` 는 Teensyduino 내장이라 별도 수령 대상이 아니다.
+`.ino` 의 `#include` 전수와 대조해 **5개가 요구를 정확히 덮는 것**을 확인했다.
+
+★ **가장 중요한 확인 — 사전컴파일 정적 라이브러리가 살아 있다**:
+`micro_ros_arduino/src/imxrt1062/fpv5-d16-hard/libmicroros.a` **8,360,694 bytes**
+(imxrt1062 = Teensy 4.x). 이 파일이 없으면 링크 단계에서 죽는다. 자주 누락되는 자리다.
+
+무결성: 심링크 0 · 0바이트 1건뿐이며 그 1건(`uxr/client/core/session/time_sync.h`)은
+**저장소 전체에서 아무 것도 include 하지 않는다**(실제 사용되는 것은
+`rmw_microros/time_sync.h` 2052 bytes). 상류 배포판의 빈 placeholder이지 전송 손상이 아니다.
+
+보존 해시 (`§11-g` 규정):
+```text
+라이브러리 전체 매니페스트 sha256 = 1f349c4474e46180200857bf1377fabe0d390097ebaab65dafdfadce39e1cb78
+  (생성: find . -type f -exec sha256sum {} + | sort -k2)
+펌웨어 소스 sha256                = 13f929cb551ce3aa75d69bb615e04de5a0794c5259501684aae626eec2412106
+  (~/Desktop/teensy_integrated_base_v1_4/SHA256SUMS.txt 대조 성공)
+```
+
+🔴 **미해결 — 버전 문자열이 폴더명과 다르다**: 폴더는 `v1_4` 인데 소스 상수는
+`FW_VERSION[] = "handover-integrated-pi-continuous-low-speed-1.3.0"` 이고, `/firmware/info` 가
+방송하는 값이 이것이다. **어느 쪽이 정본인지 구동부에 확인한다** — 버전으로 판정하는 자리에서
+갈린다. 소유자 = 역할 A · 트리거 = 구동부와 다음 대면.
+
+★ **환경 지문**: 소스가 `STRINGIFY(ARDUINO)`·`STRINGIFY(TEENSYDUINO)` 를 그대로 굽는다.
+실차 관측값 `arduino_macro=10607`(= Arduino IDE 2.x·arduino-cli 계열) ·
+`teensyduino_macro=158`(= Teensyduino 1.58). **재빌드 환경이 맞는지는 이 두 숫자로 판정한다.**
 
 **펌웨어 정체 확인 (붙은 뒤 30초)** — 소스를 받았으므로 이제 대조가 가능하다:
 
@@ -739,7 +768,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
-| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ⏳ **미수령 · 기한 재설정(08-05)** — Jetson에 폴더 없음 확인. 소유자 = 역할 A · 트리거 = 구동부와 다음 대면 · 기한 = **R1 진입 전(늦어도 D+1)**. 펌웨어 재빌드가 필요해지면 그때부터 차단 항목 (§5-d) |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. 🔴 잔여: `FW_VERSION` 문자열(1.3.0)과 폴더명(v1_4) 불일치를 구동부에 확인 |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
