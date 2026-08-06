@@ -38,7 +38,7 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
    - `docs/FREEZE_MANIFEST.md` — 동결 증거(해시·게이트 수치·조건부 위험·검토 결과). **platform-core 를 건드리기 전 필수**
    - `docs/REAL_ROBOT_VALUES.md` — 구동부 실측값 정본·실차 반영 지점 (실차 작업 시)
    - `docs/ELECTRICAL_BASELINE.md` — 전기계통 사실·위험·최소 안전선. **E-stop·전원·배선·퓨즈
-     전 필수** (실행 절차 = `~/Desktop/전기계통_최종작업안_0804.md`)
+     전 필수** (실행 절차 = `~/Desktop/전기계통_최종작업안_0806.md`)
    - `docs/FIRMWARE_REBUILD.md` — 펌웨어 재빌드 환경·`platform.txt` 패치·기준점.
      **다시 굽기 전 필수** (소유 경계 = `firmware/VENDOR_DROP.md`)
 
