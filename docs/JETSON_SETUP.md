@@ -772,7 +772,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
-| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 | ⚠ 물리 버튼 없음 확인·사용자 임시 생략 결정. `Ctrl+C`는 대체 PASS 아님; 모터 시험 전 재확인 |
+| 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 | ✅ **2026-08-07 통과** — 전기 시공 완주(`ELECTRICAL_BASELINE.md §14`). `평상시 false` · `누름 → true 전환 확인 — 배선 정상`. 같은 실행에서 **검사 1~8 전항목 OK**. ⚠ 08-03 의 `⚠ 물리 버튼 없음·임시 생략` 은 그때의 사실이고 지금은 아니다. 🔴 **이 통과는 신호 경로에 대한 것이다** — 릴레이 DC 차단 정격은 여전히 미증명(`§14-b`) |
 | 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 60fps 영상 30프레임 이하 + `/odom.pose` 정지 교차 확인 | §7-c-0 | ⏳ 미확인 |
 
 ## 10. 다음 단계

@@ -147,36 +147,84 @@ strings -n 3 /tmp/fwout/*.elf | grep -xE "158|10607"
 **실차에 올라가 있는 바이너리와 바이트 단위로 같은지는 확인하지 않았다** — Teensy 플래시를
 되읽지 않았기 때문이다. "동일 바이너리"라고 쓰지 않는다.
 
-## 5. 업로드 안전 규칙 (아직 실행하지 않았다)
+## 5. 업로드 안전 규칙 (✅ 2026-08-06 실물 1회 실행)
 
-- 🔴 **모터 전력 0V 에서만 업로드한다** — XT90 분리 또는 메인 스위치 OFF. 리셋·업로드 순간
-  핀 상태가 뜨면서 모터가 튈 수 있다. 바퀴는 공중에 띄운다.
+- 🔴 **모터 전력 0V 에서만 업로드한다** — 리셋·업로드 순간 핀 상태가 뜨면서 모터가 튈 수 있다.
+  바퀴는 공중에 띄운다. **0V 를 만드는 방법은 두 가지이고 전제가 다르다 → `§5-b`.**
 
-### 5-a. 업로드 절차 (2026-08-06 신설 — 검토 §43.7)
+### 5-0. 🔴 선행 — udev 규칙 (2026-08-06 실측 신설)
 
-> 구판은 안전 전제와 사후 확인만 있고 **실제 업로드 명령이 없어**, 시공안 `§5-F6` 를 위에서부터
-> 따라가면 그 칸에서 멈췄다. 아래를 채운다.
+**이게 없으면 첫 업로드가 반드시 실패한다.** 08-06 에 실제로 실패했고, 규칙 부재가 원인이었다.
 
-1. **포트 확인** — `arduino-cli board list` 에 `Teensy` 가 보여야 한다.
-   🔴 **안 보이면 멈춘다.** Program 버튼을 누르면 `/dev/ttyACM*` 이 **사라지는** HID 전이가
-   일어나므로(D+0 실측 · `PITFALLS.md §1`), 안 보이는 상태는 정상이 아니라 이미 Program 모드다.
-2. **업로드** — 포트는 1번의 실제 값으로 바꾼다.
+```
+Teensy did not respond to a USB-based request to enter program mode.
+  Cause may be missing 00-teensy.rules UDEV rules in /etc/udev/rules.d
+Failed uploading: uploading error: exit status 1
+```
+
+🟢 **인터넷에서 받을 필요 없다 — 규칙 파일은 teensy-tools 안에 이미 있다.**
+
+```bash
+sudo cp ~/.arduino15/packages/teensy/tools/teensy-tools/1.58.2/00-teensy.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+# USB 를 뽑았다 다시 꽂는 것이 가장 확실하다
+```
+
+### 5-a. 업로드 절차 (✅ 2026-08-06 실측 반영)
+
+1. **포트 확인** — `arduino-cli board list`.
+   🔴 **판정 기준 정정(08-06 실측)** — 구판은 "`/dev/ttyACM0` **같은 줄**에 `Teensy`" 라고
+   했으나 **실제 출력은 두 줄로 갈린다.** 그대로 읽으면 정상 상태를 중단으로 오판한다.
+   ```
+   /dev/ttyACM0  serial  Serial Port (USB)  Unknown
+   usb3/3-2      teensy  Teensy Ports       Teensy 4.1  teensy:avr:teensy41   ← 품번은 여기만
+   ```
+   → **`Teensy` 문자열이 어느 줄에든 보이면 통과.** 업로드 포트는 **`usb3/3-2`(teensy 프로토콜)**
+   를 쓴다. Program 버튼을 누르면 `/dev/ttyACM*` 은 사라지지만 **이 포트는 남기** 때문이다.
+   🔴 **아무 줄에도 안 보이면 멈춘다** — 이미 Program 모드이거나 보드가 꺼져 있다.
+2. **포트 점유 확인** — agent 가 떠 있으면 업로드가 포트를 못 연다.
+   ```bash
+   ps aux | grep micro_ros_agent    # 떠 있으면 먼저 종료
+   ```
+3. **업로드**
    ```bash
    cd ~/ros2_ws/firmware
-   arduino-cli upload -b teensy:avr:teensy41 -p /dev/ttyACM0 \
+   arduino-cli upload -b teensy:avr:teensy41 -p usb3/3-2 \
      --input-dir /tmp/fwout teensy_integrated_base_v1_4
    ```
-3. **성공 관찰** — Teensy Loader 진행바 완주 → 보드 자동 재부팅 → 터미널이 오류 없이 종료.
+4. **성공 관찰** — Teensy Loader 진행바 완주 → 보드 자동 재부팅 → 터미널이 오류 없이 종료.
    자동 재부팅이 없으면 보드의 **Program 버튼을 한 번** 누른다(reset 이 아니라 Program 진입).
-4. **크기 대조** — `§4` 무변경 빌드의 `Sketch uses …` 와 비교한다. `bool` 상수 한 개 변경은
-   대개 **차이 0**이고, **1KB 이상 차이나면 한 줄만 바뀐 것이 아니므로 중단**한다.
+5. **크기 대조** — `§4` 무변경 빌드와 비교. 🔴 **Teensy 4.1 은 `Sketch uses …` 를 찍지 않는다**
+   (08-06 실측). 실제 형식은 아래이고, 이 값들을 기준점으로 적는다.
+   ```
+   FLASH: code:291100, data:84452, headers:8440
+   RAM1: variables:60096, code:156088, padding:7752    RAM2: variables:12448
+   ```
+   `bool` 상수 한 개 변경은 **차이 0** 이었다(08-06 실측). **1KB 이상 차이나면 중단**한다.
 
-🟡 **검증 상한 — 이 절차는 문서상 조립본이고 실물 업로드로 검증된 적이 없다.**
-`arduino-cli` 와 `teensy-tools`(`teensy_post_compile`·`teensy_reboot`) 설치는 확인했으나,
-**대상 Teensy 가 노트북에 연결돼 있지 않아 명령을 실행하지 않았다.** 첫 업로드 때 실제 포트·
-출력·소요를 여기에 적어 갱신한다. **막히면 추측하지 말고 멈춘다** (`ELECTRICAL_BASELINE.md §13-d`).
-- Teensy 4.1 보드 버튼은 **Program 진입**이지 reset 이 아니다. 함부로 누르지 않는다
-  (`PITFALLS.md §1` 계열 — `/dev/ttyACM*` 이 사라지는 HID 전이를 D+0 에서 실제로 겪었다).
+🟢 **검증 상태 — 2026-08-06 실물 업로드 1회 성공.** 위 명령·포트·출력은 실측이다.
+🟡 **다만 udev 규칙 설치 후에도 사용자가 PROGRAM 버튼을 눌렀다.**
+**따라서 "udev 만으로 버튼 없이 구워진다"는 확인되지 않았다.**
+- **재개방/승격 조건**: 다음 업로드에서 **버튼을 누르지 않고** 성공하면 그때 "버튼 불필요"로 올린다.
+- 🔴 Teensy 4.1 보드 버튼은 **Program 진입**이지 reset 이 아니다. 브레드보드 작업 중 실수로
+  눌리면 보드가 **HalfKay 부트로더(`16c0:0478`)** 로 올라와 **`/dev/ttyACM*` 이 아예 안 생긴다.**
+  08-06 에 실제로 겪었다. 진단·복구 = `PITFALLS.md §1`.
+
+### 5-b. 🔴 `VUSB-VIN` 트레이스 절단 후의 업로드 (2026-08-06 신설)
+
+**트레이스를 자르면 USB 만으로는 Teensy 가 켜지지 않는다**(`ELECTRICAL_BASELINE.md §2`-⑪).
+즉 굽는 동안에도 **5V DCDC 가 살아 있어야** 하고, 그건 **XT90 연결**을 뜻한다 —
+위 "모터 전력 0V" 규칙과 정면으로 부딪힌다.
+
+| 상황 | 0V 를 만드는 방법 |
+|---|---|
+| 트레이스 **절단 전** | **XT90 분리.** Teensy 는 USB 로 산다 |
+| 트레이스 **절단 후** | 🔴 **E-stop 을 누른 채 XT90 연결.** 모터 가지만 0V 이고 로직은 산다 |
+
+🔴 **아래 조건이 성립할 때만 이 우회를 쓴다.** 하나라도 아니면 쓰지 않는다.
+1. **`§5-G8` 부하 차단 10회를 통과했다** (E-stop 이 실제로 끊는다는 실측 근거) — 2026-08-07 통과
+2. 업로드 직전 **모터 단자 0V 를 직접 잰다** (E-stop 을 눌렀다는 사실로 대신하지 않는다)
+3. 바퀴는 공중
 - 업로드 뒤 agent 재기동 → **전체 필드로** 정체를 확인한다. 기본 `topic echo` 는 **128자에서
   잘라** 정상 펌웨어를 불일치로 오판한다(D+0 실측):
 
@@ -188,7 +236,7 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 
 | # | 항목 | 소유자·트리거 |
 |---|---|---|
-| 1 | 🔴 폴더명 `v1_4` 와 소스 상수 `FW_VERSION "…-1.3.0"` 불일치. `/firmware/info` 가 방송하는 것은 후자다 | 역할 A · 구동부와 다음 대면 |
+| 1 | 🔴 폴더명 `v1_4` 와 소스 상수 `FW_VERSION "…-1.3.0"` 불일치. `/firmware/info` 가 방송하는 것은 후자다. **08-06 실물에서 확인**: `version` · `source=/home/park/…v1_3.ino` · `git_sha=000…` **셋 다 실제와 다르다**. 🔴 **정체 판별에 쓸 수 있는 필드는 `build`(컴파일 시각)와 매크로 2개뿐이다** — 08-06 업로드 확정도 `build=Aug 6 2026 22:17:38` 로 했다 | 역할 A · **펌웨어를 다음에 여는 묶음에서 상수 3개를 갱신** (구동부는 08-06 합의로 펌웨어에 관여하지 않는다) |
 | 2 | 구동부가 실제로 쓴 Teensyduino 패치 버전(1.58.**0/1/2**). 매크로는 셋 다 `158` 이라 구분되지 않는다 | 역할 A · 위와 같이 확인 |
 | 3 | `re-arm` 래치 구현 주체(역할 A / 구동부)와 부정·전환 시험 설계 | `CURRENT_HANDOFF` 결정 대기 |
 | 4 | aarch64(Jetson) 빌드 환경 필요 여부 | 터널 현장 재조정 시나리오가 실제로 오면 |

@@ -102,13 +102,19 @@ static const int8_t ENCODER_POLARITY[4] = {1, 1, 1, 1};
 
 // ============================================================================
 // E-stop monitor
-// Active-low auxiliary contact: pin 21 -> E-stop contact -> GND.
+// Active-HIGH since 2026-08-06 (ESTOP_ACTIVE_LOW = false). The pin reads the
+// normally-open contact of signal relay 3: pin 21 -> relay3 [87]/[30] -> GND.
+//   coil energised (button released) -> contact closed -> pin pulled to GND  -> LOW  -> running
+//   button pressed / wire broken / coil supply lost -> contact open -> pull-up -> HIGH -> stopped
+// Every failure therefore falls to the "stopped" side (fail-safe).
+// Do NOT set this back to true: the polarity would invert and the robot would
+// read "E-stop pressed" whenever it is actually running.
 // This software input supplements, but does not replace, the hardwired motor
 // power cutoff.
 // ============================================================================
 
 static const uint8_t ESTOP_PIN = 21;
-static const bool ESTOP_ACTIVE_LOW = true;
+static const bool ESTOP_ACTIVE_LOW = false;
 
 // ============================================================================
 // Robot parameters
