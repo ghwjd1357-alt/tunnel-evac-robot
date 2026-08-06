@@ -151,6 +151,30 @@ strings -n 3 /tmp/fwout/*.elf | grep -xE "158|10607"
 
 - 🔴 **모터 전력 0V 에서만 업로드한다** — XT90 분리 또는 메인 스위치 OFF. 리셋·업로드 순간
   핀 상태가 뜨면서 모터가 튈 수 있다. 바퀴는 공중에 띄운다.
+
+### 5-a. 업로드 절차 (2026-08-06 신설 — 검토 §43.7)
+
+> 구판은 안전 전제와 사후 확인만 있고 **실제 업로드 명령이 없어**, 시공안 `§5-F6` 를 위에서부터
+> 따라가면 그 칸에서 멈췄다. 아래를 채운다.
+
+1. **포트 확인** — `arduino-cli board list` 에 `Teensy` 가 보여야 한다.
+   🔴 **안 보이면 멈춘다.** Program 버튼을 누르면 `/dev/ttyACM*` 이 **사라지는** HID 전이가
+   일어나므로(D+0 실측 · `PITFALLS.md §1`), 안 보이는 상태는 정상이 아니라 이미 Program 모드다.
+2. **업로드** — 포트는 1번의 실제 값으로 바꾼다.
+   ```bash
+   cd ~/ros2_ws/firmware
+   arduino-cli upload -b teensy:avr:teensy41 -p /dev/ttyACM0 \
+     --input-dir /tmp/fwout teensy_integrated_base_v1_4
+   ```
+3. **성공 관찰** — Teensy Loader 진행바 완주 → 보드 자동 재부팅 → 터미널이 오류 없이 종료.
+   자동 재부팅이 없으면 보드의 **Program 버튼을 한 번** 누른다(reset 이 아니라 Program 진입).
+4. **크기 대조** — `§4` 무변경 빌드의 `Sketch uses …` 와 비교한다. `bool` 상수 한 개 변경은
+   대개 **차이 0**이고, **1KB 이상 차이나면 한 줄만 바뀐 것이 아니므로 중단**한다.
+
+🟡 **검증 상한 — 이 절차는 문서상 조립본이고 실물 업로드로 검증된 적이 없다.**
+`arduino-cli` 와 `teensy-tools`(`teensy_post_compile`·`teensy_reboot`) 설치는 확인했으나,
+**대상 Teensy 가 노트북에 연결돼 있지 않아 명령을 실행하지 않았다.** 첫 업로드 때 실제 포트·
+출력·소요를 여기에 적어 갱신한다. **막히면 추측하지 말고 멈춘다** (`ELECTRICAL_BASELINE.md §13-d`).
 - Teensy 4.1 보드 버튼은 **Program 진입**이지 reset 이 아니다. 함부로 누르지 않는다
   (`PITFALLS.md §1` 계열 — `/dev/ttyACM*` 이 사라지는 HID 전이를 D+0 에서 실제로 겪었다).
 - 업로드 뒤 agent 재기동 → **전체 필드로** 정체를 확인한다. 기본 `topic echo` 는 **128자에서

@@ -45,6 +45,11 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/FIRMWARE_REBUILD.md"),
         Ref("docs/REAL_ROBOT_VALUES.md", "1"),
         Ref("docs/ELECTRICAL_BASELINE.md", "4"),
+        # 검토 §43: E-stop 물리 권위(릴레이 DC 차단·퓨즈 협조)의 전제조건·재개방 조건이
+        # §7 에, 그 판정을 되돌린 사유가 §13 에 있다. 펌웨어 상수 MAX_LINEAR_CMD 가
+        # §43.2 조건부 수용의 전제라, 펌웨어를 만지는 사람이 이 둘을 못 보면 안 된다.
+        Ref("docs/ELECTRICAL_BASELINE.md", "7"),
+        Ref("docs/ELECTRICAL_BASELINE.md", "13"),
         Ref("docs/TEST_GATES.md", "7"),
     ),
     "mission": (
