@@ -39,7 +39,7 @@ diff 와 시험 결과를 구동부에 전달해 **양쪽 정본을 일치시킨
 | 수령일 | 2026-08-05 (원 파일 타임스탬프 2026-08-02) |
 | 수령 경로 | 구동부 → `~/Desktop/teensy_integrated_base_v1_4/` → 이 폴더로 복사 |
 | 대조 방법 | `cd firmware/teensy_integrated_base_v1_4 && sha256sum -c SHA256SUMS.txt` |
-| 🔴 08-06 이후 | 위 명령은 **`실패` 가 정상**이다 — 아래 §4-① 을 실제로 고쳤기 때문이다. 오염 판정은 **`bash tools/firmware_precheck.sh`** 로 한다(0 = 허용 내용 일치 / 1 = 멈춤 / 🔴 2 = 판정 불능) — §47 `HEAD`·미추적, §48 ignore·공식 확장자, §49 실제 `.cc/.cxx`·내용 hash·symlink 경계는 `docs/FIRMWARE_REBUILD.md §4`가 정본이다. §46.2에 따라 이 문서는 판정 밖 `[참고]`다 |
+| 🔴 08-06 이후 | 위 명령은 **`실패` 가 정상**이다 — 아래 §4-① 을 실제로 고쳤기 때문이다. 오염 판정은 **`bash tools/firmware_precheck.sh`** 로 한다(0 = 허용 내용 일치 / 1 = 멈춤 / 🔴 2 = 판정 불능) — §47 `HEAD`·미추적, §48 ignore·공식 확장자, §49 실제 `.cc/.cxx`·symlink 경계, **§50 지문을 patch 렌더링에서 파일 내용 sha256 으로**는 `docs/FIRMWARE_REBUILD.md §4`가 정본이다 — 위 "허용 **내용** 일치"를 이제 문자 그대로 잰다. §46.2에 따라 이 문서는 판정 밖 `[참고]`다 |
 
 ⚠ **폴더 이름을 바꾸지 않는다** — Arduino 는 폴더명과 `.ino` 파일명이 같아야 스케치로 인식한다.
 줄여 부르고 싶어도 `teensy_integrated_base_v1_4` 그대로 둔다.

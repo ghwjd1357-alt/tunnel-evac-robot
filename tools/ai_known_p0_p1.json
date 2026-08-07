@@ -82,5 +82,6 @@
   {"id":"0801-datasheet-model-mismatch-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"모델·제조사가 다른 데이터시트의 정격은 실물의 차단능력 증거가 아니다"},
   {"id":"0801-diff-endpoint-hides-worktree-47","path":"tools/firmware_precheck.sh","anchor":"비교 끝점을 HEAD 로 박으면, 아직 커밋하지 않은 오염은 판정에서 통째로 빠진다"},
   {"id":"0801-ignored-and-official-sketch-sources-48","path":"tools/firmware_precheck.sh","anchor":"ignore 규칙은 컴파일 제외 규칙이 아니다 — 숨은 소스도 판정 입력이다"},
-  {"id":"0801-actual-teensy-cc-cxx-inputs-49","path":"tools/firmware_precheck.sh","anchor":"실제 Teensy toolchain은 공식 sketch 명세보다 넓다"}
+  {"id":"0801-actual-teensy-cc-cxx-inputs-49","path":"tools/firmware_precheck.sh","anchor":"실제 Teensy toolchain은 공식 sketch 명세보다 넓다"},
+  {"id":"0801-fingerprint-pins-git-rendering-50","path":"tools/firmware_precheck.sh","anchor":"지문이 \"내용\"이 아니라 \"이 기계의 git 렌더링\"을 고정하고 있었다"}
 ]

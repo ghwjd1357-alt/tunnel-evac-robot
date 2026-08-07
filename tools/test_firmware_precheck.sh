@@ -27,8 +27,38 @@ CHECK="$HERE/firmware_precheck.sh"
 
 PASS=0
 FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "  PASS  $1"; }
-ng()  { FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
+
+# 사례 ID = 설명의 첫 토큰. 이 저장소는 결과를 **ID 로 인용한다** (`FIRMWARE_REBUILD §4` 가
+# 실제로 "회귀 케이스 ⑨" 라고 쓴다). ID 하나가 두 검사에 붙는 순간 "⑦-g 통과"가 `rc=0` 을
+# 뜻하는지 `rc=1` 을 뜻하는지 갈려 증거 한 줄을 되짚을 수 없다 (08-07 검토 §50.3 P2).
+# → 사람이 눈으로 지키지 않는다. **유일성을 여기서 강제한다** — 열거를 검사기 안으로 옮기면
+#   목록과 구현이 갈라질 자리가 없어진다 (`AGENTS.md §3-10`-②).
+declare -A SEEN_ID=()
+ID_DUP=()
+register_id() {
+    local id="${1%% *}"
+    if [ -n "${SEEN_ID[$id]+x}" ]; then
+        SEEN_ID["$id"]=$(( SEEN_ID[$id] + 1 ))
+        ID_DUP+=("$id")
+    else
+        SEEN_ID["$id"]=1
+    fi
+}
+ok()  { register_id "$1"; PASS=$((PASS + 1)); echo "  PASS  $1"; }
+ng()  { register_id "$1"; FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
+
+# shake <k=v>... -- <명령...>  — git 렌더링 설정을 흔든 환경에서 명령을 돌린다.
+# `GIT_CONFIG_*` 는 저장소 파일을 안 건드리므로 작업 트리는 한 바이트도 안 변한다.
+shake() {
+    local -a cfg=()
+    local n=0
+    while [ "${1:-}" != "--" ]; do
+        cfg+=("GIT_CONFIG_KEY_$n=${1%%=*}" "GIT_CONFIG_VALUE_$n=${1#*=}")
+        n=$((n + 1)); shift
+    done
+    shift
+    env GIT_CONFIG_COUNT="$n" "${cfg[@]}" "$@"
+}
 
 # expect_rc <기대종료코드> <설명> -- <명령...>
 expect_rc() {
@@ -69,8 +99,12 @@ BASE="$(git -C "$REPO" rev-parse HEAD)"
 } > "$REPO/$INO"
 git -C "$REPO" add -A && git -C "$REPO" commit -qm "allowed firmware edit"
 
-PATCH_SHA="$(git -C "$REPO" diff --no-ext-diff --no-renames "$BASE" -- "$INO" | sha256sum | awk '{print $1}')"
-EXPECT="$INO=8,2,$PATCH_SHA"
+# 🔴 기대값은 **git 을 거치지 않고** 작업 트리 파일에서 직접 만든다.
+# 직전 판의 59/59 가 §50.1 을 원리적으로 못 잡은 이유가 바로 여기였다 — 기대 지문을
+# `git diff … | sha256sum` 으로, 즉 **검사기와 똑같은 렌더링 설정으로 그 자리에서** 계산했다.
+# 설정이 흔들리면 기대값도 같이 흔들려 둘이 늘 일치했고, 그래서 이 축에 회귀가 없었다.
+CONTENT_SHA="$(sha256sum "$REPO/$INO" | awk '{print $1}')"
+EXPECT="$INO=8,2,$CONTENT_SHA"
 run() { bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"; }
 
 echo "=== firmware_precheck 픽스처 ==="
@@ -141,7 +175,7 @@ rm -f "$REPO/$SKETCH/motor_override.h"
 for ext in pde c cc cpp cxx S hpp hh tpp ipp; do
     probe="$REPO/$SKETCH/root_probe.$ext"
     echo "// root extension probe" > "$probe"
-    expect_rc 1 "⑦-a root .$ext 미추적 소스 → FAIL" -- run
+    expect_rc 1 "⑦-a[$ext] root .$ext 미추적 소스 → FAIL" -- run
     rm -f "$probe"
 done
 
@@ -150,7 +184,7 @@ mkdir -p "$REPO/$SKETCH/src/deep/nested"
 for ext in c cc cpp cxx S h hpp hh tpp ipp; do
     probe="$REPO/$SKETCH/src/deep/nested/src_probe.$ext"
     echo "// recursive src extension probe" > "$probe"
-    expect_rc 1 "⑦-b src/** .$ext 미추적 소스 → FAIL" -- run
+    expect_rc 1 "⑦-b[$ext] src/** .$ext 미추적 소스 → FAIL" -- run
     rm -f "$probe"
 done
 
@@ -179,10 +213,10 @@ for probe in root_probe.INO nested/rogue.cpp src/rogue.ino data/rogue.cpp; do
         */*) mkdir -p "$REPO/$SKETCH/${probe%/*}" ;;
     esac
     echo "// non-build boundary probe" > "$REPO/$SKETCH/$probe"
-    expect_rc 0 "⑦-g 빌드 밖 $probe → PASS" -- run
+    expect_rc 0 "⑦-g[$probe] 빌드 밖 → PASS" -- run
     case "$LAST_OUT" in
-        *"$probe"*) ok "⑦-h 빌드 밖 $probe 는 [참고]에 보인다" ;;
-        *) ng "⑦-h 빌드 밖 $probe 가 [참고]에서 사라졌다" ;;
+        *"$probe"*) ok "⑦-h[$probe] 빌드 밖 파일이 [참고]에 보인다" ;;
+        *) ng "⑦-h[$probe] 빌드 밖 파일이 [참고]에서 사라졌다" ;;
     esac
     rm -f "$REPO/$SKETCH/$probe"
 done
@@ -208,7 +242,7 @@ rm -f "$REPO/$SKETCH/src/README.txt"
 mkdir -p "$REPO/$SKETCH/src/deep"
 echo "// committed recursive source" > "$REPO/$SKETCH/src/deep/committed.cpp"
 git -C "$REPO" add -A && git -C "$REPO" commit -qm "recursive source attack"
-expect_rc 1 "⑦-g committed src/** .cpp도 FAIL" -- run
+expect_rc 1 "⑦-l committed src/** .cpp도 FAIL" -- run
 git -C "$REPO" reset -q --hard HEAD~1
 
 # ── 8) 부정 회귀: 소스 삭제 ────────────────────────────────────────────────
@@ -232,16 +266,75 @@ expect_rc 2 "⑩-b git 저장소가 아니면 rc=2" -- bash "$CHECK" --repo "$TM
 expect_rc 2 "⑩-c --expect 형식이 틀리면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8"
 expect_rc 2 "⑩-d --expect 경로가 소스 범위 밖이면 rc=2" -- \
-    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "firmware/VENDOR_DROP.md=1,0,$PATCH_SHA"
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "firmware/VENDOR_DROP.md=1,0,$CONTENT_SHA"
 expect_rc 2 "⑩-e --expect 증감이 숫자가 아니면 rc=2" -- \
-    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=x,2,$PATCH_SHA"
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=x,2,$CONTENT_SHA"
 expect_rc 2 "⑩-f --expect SHA256이 아니면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8,2,xyz"
-expect_rc 2 "⑩-f --expect 경로가 중복되면 rc=2" -- \
+expect_rc 2 "⑩-g --expect 경로가 중복되면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT" --expect "$EXPECT"
 
 # ── 11) 진짜 저장소 역회귀 (read-only) ─────────────────────────────────────
 expect_rc 0 "⑪ 실제 저장소의 현행 상태는 PASS" -- bash "$CHECK" --repo "$ROOT"
+
+# ── 12) git 렌더링 설정을 흔들어도 판정이 안 흔들린다 (08-07 검토 §50.1 P1) ──
+# 직전 판은 기대 지문으로 `git diff` **출력 텍스트**를 해시했다. 그래서 작업 트리를 한 바이트도
+# 안 건드리고 설정만 줘도 `rc=1` "🔴 오염"이 떴다 — 굽기 직전 유일한 게이트가 진단 불가능하게
+# 멈추면 사람은 게이트를 건너뛴다. 그 축을 여기서 **양방향으로** 박는다:
+#   ① 깨끗한 트리는 설정을 흔들어도 PASS   (거짓 양성이 없다)
+#   ② 같은 설정에서 진짜 오염은 여전히 FAIL (거짓 음성도 없다 — 통과 조건을 넓힌 게 아니다)
+# ⚠ 아래 목록은 **전수가 아니라 공격 표본**이다. git 설정 전체를 세는 일은 원리적으로 못 하므로
+#   그 사실을 숨기지 않는다(`AGENTS.md §3-10`). 이 축을 실제로 닫는 것은 목록이 아니라
+#   **구조**다 — 판정 입력에서 diff 출력 텍스트를 통째로 뺐으므로 렌더링이 판정에 닿지 않는다.
+#   목록은 그 구조가 무너졌을 때 울리라고 두는 것이다.
+SHAKE=(core.abbrev=12 core.abbrev=40 diff.context=5 diff.noprefix=true
+       diff.mnemonicPrefix=true diff.algorithm=histogram diff.external=/bin/false)
+for knob in "${SHAKE[@]}"; do
+    expect_rc 0 "⑫-a[$knob] 깨끗한 트리는 $knob 를 줘도 PASS" -- \
+        shake "$knob" -- bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"
+done
+expect_rc 0 "⑫-b 렌더링 ${#SHAKE[@]}종을 한꺼번에 줘도 깨끗한 트리는 PASS" -- \
+    shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"
+
+#    같은 설정에서 진짜 오염이 여전히 걸리는지 — 이게 없으면 "다 통과"로 무르게 만든 것과 구별이 안 된다.
+{
+    for i in 1 2 3 4 5 6 7 8; do echo "// counterfeit edit $i"; done
+    for i in 3 4 5 6 7 8 9 10; do echo "// vendor line $i"; done
+} > "$REPO/$INO"
+expect_rc 1 "⑫-c 흔든 설정에서도 같은 8/2 위장 내용은 FAIL" -- \
+    shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"
+case "$LAST_OUT" in
+    *"내용 불일치"*) ok "⑫-d 흔든 설정에서도 사유가 '내용 불일치' 로 나온다" ;;
+    *) ng "⑫-d 흔든 설정에서 내용 위장 사유가 사라졌다" ;;
+esac
+git -C "$REPO" reset -q --hard
+echo "// uncommitted probe under shaken config" >> "$REPO/$INO"
+expect_rc 1 "⑫-e 흔든 설정에서도 unstaged 한 줄은 FAIL" -- \
+    shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"
+git -C "$REPO" reset -q --hard
+
+#    지문의 **의미**가 바뀌었다는 사실 자체를 박제한다 — 구판 patch 지문을 주면 이제 안 맞는다.
+#    (이 검사가 깨지면 누군가 판정을 렌더링 해시로 되돌린 것이다.)
+LEGACY_PATCH_SHA="$(git -C "$REPO" diff --no-ext-diff --no-renames "$BASE" -- "$INO" \
+    | sha256sum | awk '{print $1}')"
+if [ "$LEGACY_PATCH_SHA" = "$CONTENT_SHA" ]; then
+    ng "⑫-f 구판 patch 지문과 내용 지문이 같은 값이다 — 이 픽스처의 전제가 깨졌다"
+else
+    expect_rc 1 "⑫-f 구판 patch 지문을 --expect 로 주면 FAIL (지문이 이제 내용을 가리킨다)" -- \
+        bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8,2,$LEGACY_PATCH_SHA"
+fi
+
+#    실물 저장소에서도 같은 축을 확인한다 — §50.1 이 재현된 바로 그 대상이다.
+expect_rc 0 "⑫-g 실제 저장소도 렌더링 ${#SHAKE[@]}종을 흔든 채 PASS" -- \
+    shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$ROOT"
+
+# ── 13) 사례 ID 는 검사와 1:1 이어야 한다 (08-07 검토 §50.3 P2) ─────────────
+# 이 저장소는 결과를 ID 로 인용한다. 유일성이 깨지면 증거 한 줄을 되짚을 수 없다.
+if [ "${#ID_DUP[@]}" -eq 0 ]; then
+    ok "⑬ 앞선 모든 사례 ID 가 검사와 1:1 이다 (${#SEEN_ID[@]}개)"
+else
+    ng "⑬ 사례 ID 가 겹쳤다: $(printf '%s ' "${ID_DUP[@]}")"
+fi
 
 echo
 echo "PASS $PASS / FAIL $FAIL"

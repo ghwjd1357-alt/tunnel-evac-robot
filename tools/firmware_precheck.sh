@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # firmware_precheck.sh — 굽기 직전, **펌웨어 소스가 우리가 아는 그 상태인지**를 종료코드로 판정한다.
 #
-# 사용:  bash tools/firmware_precheck.sh [--repo PATH] [--baseline REV] [--expect P=A,D,SHA256]...
+# 사용:  bash tools/firmware_precheck.sh [--repo PATH] [--baseline REV] [--expect P=A,D,내용SHA256]...
 # 출력:  판정 근거 여러 줄 + 마지막에 `OK …` / `FAIL …` 한 줄.
 # 종료:  0 = 허용된 변경 그대로 / 1 = 오염(굽지 않는다) / 2 = **판정 불능**(사용법·저장소·기준점 오류)
 #        🔴 2 를 0 처럼 읽지 않는다 — "못 봤다"와 "봤는데 깨끗하다"는 다른 사실이다.
@@ -35,11 +35,35 @@
 # **매번** "멈춰라"가 떴다. 늘 울리는 경보는 사람이 곧 건너뛰고, 그때 진짜 오염이 지나간다.
 #   → 문서는 판정에서 빼되 **숨기지 않는다.** 아래 `[참고]` 절에 항상 같이 찍는다.
 #
+# ── 판정은 **내용**을 잰다, git 의 렌더링이 아니다 (08-07 검토 §50.1 P1) ──────
+# 직전 판까지 기대 지문은 `git diff … | sha256sum` — 즉 **diff 출력 텍스트**의 해시였다.
+# 그 텍스트에는 내용 말고 **이 기계의 git 설정**이 함께 들어간다. 작업 트리를 한 바이트도
+# 안 건드리고 `core.abbrev` · `diff.context` · `diff.noprefix` · `diff.mnemonicPrefix` 중
+# 아무거나 주면 `rc=1` **"오염"** 이 떴다. 게다가 `index c7cfbd4..764db98` 의 축약 자릿수는
+# `core.abbrev=auto` 가 객체 수에서 뽑으므로, **객체가 늘어나는 것만으로 지문이 스스로 만료**된다.
+#   → 굽기 직전 유일한 게이트가 진단 불가능하게 멈추면 사람은 게이트를 건너뛴다. 이것은
+#     §46.2 로 닫은 "늘 울리는 경보" 클래스의 재발이었다.
+#   → 그래서 판정 입력에서 **diff 출력 텍스트를 통째로 뺐다.** 기대 파일의 판정은 작업 트리
+#     **파일 내용의 sha256** 하나다. 렌더링 설정에 원리적으로 면역이고, `VENDOR_DROP §2` 가
+#     원래 주장하던 "허용 **내용** 일치"와 재는 것이 같아진다.
+#   ⚠ **느슨해진 게 아니라 강해졌다 — 논증을 정확히 쓴다.** 내용 해시가 맞으면 작업 트리
+#     파일의 **바이트가 기대값으로 완전히 결정**된다. 파일에서 파생되는 모든 성질(증감 포함)이
+#     따라서 결정되므로, 파일에 대해 증감이 추가로 말해 줄 수 있는 것은 없다. 반면 patch 해시는
+#     hunk 만 고정하면서 **환경까지 같이 고정**했다. 빠진 것은 파일에 대한 제약이 아니라
+#     **환경에 대한 제약**이고, 그건 애초에 판정할 대상이 아니었다.
+#   ⚠ 정확히 하자면 증감은 `(기준점 blob, 파일 내용, diff 알고리즘)` 의 함수다 — 앞의 둘이
+#     고정돼도 **알고리즘이 바뀌면 값이 달라질 수 있다.** 그래서 증감은 판정이 아니라 진단이다.
+#   → 그래서 증감(`8,2`)은 **진단 출력으로만** 남긴다.
+#
 # ── 이 검사가 증명하지 않는 것 (숨기지 않는다) ───────────────────────────────
 # - **보드에 올라가 있는 펌웨어**가 이 소스라는 증거가 아니다. 여긴 저장소만 본다.
 #   보드 쪽 대조 수단은 지금 없다 (`/firmware/info` 는 v1_3 시절 고정 문자열이라 못 쓴다).
-# - 기대 diff(`--expect`)는 **사람이 관리하는 계약**이다. 증감뿐 아니라 기준점→작업 트리의
-#   patch SHA256까지 같아야 한다. `.ino` 를 정당하게 고치면 둘 다 같이 옮겨야 한다.
+# - 기대 내용(`--expect`)은 **사람이 관리하는 계약**이다. `.ino` 를 정당하게 고치면
+#   `docs/FIRMWARE_REBUILD.md §4` 의 값과 여기 기본값을 **같이** 옮겨야 한다.
+#   그 값은 `sha256sum <파일>` 한 줄로 언제든 다시 만들 수 있다 — 정본에 64자리 전문이 있다.
+# - 🔴 **허용 파일의 판정은 이제 `--baseline` 과 무관하다** (숨기지 않는다). 기준점은
+#   *기대 밖 변경*을 찾는 데만 쓰인다. 즉 기준점을 잘못 주면 "허용 파일은 맞다"는 여전히
+#   참이지만 **그 기준점 이전에 들어온 다른 변경은 안 보인다.** 기본값을 바꿔 부를 이유는 없다.
 # - 외부 라이브러리·보드 core는 이 저장소의 스케치 소유 범위 밖이다. 빌드 환경 지문과 라이브러리
 #   해시는 `docs/FIRMWARE_REBUILD.md §2`~`§4`가 별도로 대조한다.
 #
@@ -65,9 +89,12 @@ done
 
 # 기대 목록의 기본값 = 2026-08-07 현재 **허용된 변경 딱 한 건**.
 #   `ESTOP_ACTIVE_LOW true→false` = `.ino:111` 과 그 위 주석. 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이
-#   재개방된다. 이 값을 옮길 땐 `docs/FIRMWARE_REBUILD.md §4` 의 증감과 patch SHA256도 같이 옮긴다.
+#   재개방된다.
+#   🔴 아래 64자리는 **파일 내용의 sha256** 이다(patch 가 아니다). 정본 `docs/FIRMWARE_REBUILD.md §4`
+#   가 같은 값을 64자리 전문으로 갖고 있고, 재생성은 그쪽에 적힌 `sha256sum <파일>` 한 줄이다.
+#   `.ino` 를 정당하게 고치면 **두 자리를 같이** 옮긴다.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
-    EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2,6afce0f2150b3e19cd62117a7713be217aa3ade905f5054e2b3cfa6888d87ad9")
+    EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2,1db24326ff1f4d8100e5a1fd99f77803a5f02e8c28a0aa0c0609d6d817a90bd8")
 fi
 
 # 이 설치본의 실제 권위 = arduino-cli 1.5.2-rc.1 + teensy:avr 1.58.2, Teensy 4.1의
@@ -171,22 +198,23 @@ declare -A EXPECT_HASH=()
 for spec in "${EXPECT_ARGS[@]}"; do
     case "$spec" in
         *=*,*,*) : ;;
-        *) echo "FAIL --expect 형식은 '경로=추가,삭제,patch-SHA256' 이다: $spec" >&2; exit 2 ;;
+        *) echo "FAIL --expect 형식은 '경로=추가,삭제,내용-SHA256' 이다: $spec" >&2; exit 2 ;;
     esac
     path="${spec%%=*}"; want="${spec#*=}"
     if ! is_sketch_source "$path"; then
         echo "FAIL --expect 경로가 Arduino 스케치 소스 범위가 아니다: $path" >&2; exit 2
     fi
     add="${want%%,*}"; rest="${want#*,}"; del="${rest%%,*}"; digest="${rest#*,}"
+    # 증감은 **진단용**이지만 형식은 계속 검증한다 — 계약 문자열이 깨진 채로 굽는 것도 판정 불능이다.
     case "$add,$del" in
         *[!0-9,]*|,*|*,|'')
             echo "FAIL --expect 증감은 음이 아닌 정수 두 개여야 한다: $spec" >&2; exit 2 ;;
     esac
     case "$digest" in
-        *[!0-9a-f]*|'') echo "FAIL --expect SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2 ;;
+        *[!0-9a-f]*|'') echo "FAIL --expect 내용 SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2 ;;
     esac
     if [ "${#digest}" -ne 64 ]; then
-        echo "FAIL --expect SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2
+        echo "FAIL --expect 내용 SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2
     fi
     if [ -n "${EXPECT_COUNT[$path]+x}" ]; then
         echo "FAIL --expect 경로가 중복됐다: $path" >&2; exit 2
@@ -199,33 +227,57 @@ echo "=== 펌웨어 사전검사 — 굽기 전 오염 판정 ==="
 echo "  저장소   : $REPO"
 echo "  기준점   : $BASELINE → **작업 트리**(커밋·staged·unstaged 전부. HEAD 로 끊지 않는다)"
 echo "  판정 범위: Teensy 실제 컴파일 root + sketch/src/** 재귀 소스 (ignore 여부 무관)"
+echo "  판정 근거: 허용 파일은 **내용 sha256**(git 렌더링 설정에 면역) · 그 밖은 존재 여부"
 echo
 
 FAIL=0
 echo "--- 기대한 변경 ---"
-for path in "${!EXPECT_COUNT[@]}"; do
+# 판정은 **작업 트리 파일 내용의 sha256** 하나다. 증감은 아래에서 진단으로만 찍는다 —
+# git 의 diff 알고리즘이 정하는 값을 판정에 쓰면 §50.1 의 거짓 양성이 그대로 돌아온다.
+for path in "${!EXPECT_HASH[@]}"; do
     want="${EXPECT_COUNT[$path]}"
+    want_hash="${EXPECT_HASH[$path]}"
     got="${ACTUAL[$path]-}"
-    if [ -z "$got" ]; then
-        echo "  🔴 없음  $path  (기대 ${want} · 실제 변경 없음 — 허용된 수정이 **되돌려졌다**)"
-        FAIL=1
-    elif [ "$got" != "$want" ]; then
-        echo "  🔴 불일치 $path  (기대 ${want} · 실제 ${got})"
-        FAIL=1
-    else
-        if ! git -C "$REPO" diff --no-ext-diff --no-renames "$BASELINE_OID" -- "$path" \
-            >"$TMP/expected.diff"; then
-            echo "FAIL 기대 diff 내용을 읽지 못했다: $path" >&2; exit 2
-        fi
-        got_hash="$(sha256sum "$TMP/expected.diff" | awk '{print $1}')"
-        if [ "$got_hash" != "${EXPECT_HASH[$path]}" ]; then
-            echo "  🔴 내용 불일치 $path  (증감 ${got}은 같지만 patch SHA256이 다르다)"
-            echo "     기대 ${EXPECT_HASH[$path]}"
-            echo "     실제 $got_hash"
-            FAIL=1
+    file="$REPO/$path"
+
+    if [ -L "$file" ]; then
+        echo "  🔴 symlink   $path  (기대 파일이 symlink 다 — 내용을 저장소 밖에서 끌어온다)"
+        FAIL=1; continue
+    fi
+    if [ ! -e "$file" ]; then
+        echo "  🔴 사라졌다 $path  (삭제·이름변경 — 있어야 할 파일이 없다)"
+        echo "     기대 내용 sha256 $want_hash"
+        FAIL=1; continue
+    fi
+    if [ ! -f "$file" ]; then
+        echo "  🔴 정규 파일이 아니다 $path"
+        FAIL=1; continue
+    fi
+    got_hash="$(sha256sum "$file" 2>/dev/null | awk '{print $1}')"
+    if [ "${#got_hash}" -ne 64 ]; then
+        echo "FAIL 기대 파일의 내용을 읽지 못했다: $path" >&2; exit 2
+    fi
+
+    if [ "$got_hash" != "$want_hash" ]; then
+        if [ -z "$got" ]; then
+            echo "  🔴 되돌려졌다 $path  (기준점 대비 변경이 없다 — 허용된 수정이 사라졌다)"
         else
-            echo "  ok     $path  (${got} · patch SHA256 ${got_hash})"
+            echo "  🔴 내용 불일치 $path  (증감이 ${got} 로 같아 보여도 내용이 다르면 오염이다)"
         fi
+        echo "     기대 내용 sha256 $want_hash"
+        echo "     실제 내용 sha256 $got_hash"
+        FAIL=1
+        continue
+    fi
+
+    echo "  ok     $path  (내용 sha256 $got_hash)"
+    if [ -z "$got" ]; then
+        echo "         진단: 기준점 대비 증감 없음 (기대 ${want})"
+    elif [ "$got" != "$want" ]; then
+        echo "         진단: 증감이 기대 ${want} 와 다르다 (실제 ${got}) — **판정은 내용이 했다.**"
+        echo "               증감은 diff 알고리즘이 정하는 값이라 판정에 쓰지 않는다."
+    else
+        echo "         진단: 기준점 대비 증감 ${got}"
     fi
 done
 
@@ -265,7 +317,8 @@ echo
 
 if [ "$FAIL" -ne 0 ]; then
     echo "FAIL 펌웨어 소스가 우리가 아는 상태가 아니다 — **compile·upload 전에 멈추고 사유를 찾는다.**"
-    echo "     정당한 변경이었다면 커밋한 뒤 docs/FIRMWARE_REBUILD.md §4 의 기대 증감도 같이 옮긴다."
+    echo "     정당한 변경이었다면 docs/FIRMWARE_REBUILD.md §4 의 기대 **내용 sha256**(64자리)을"
+    echo "     \`sha256sum <파일>\` 로 다시 만들어 정본과 이 스크립트 기본값 **두 자리**를 같이 옮긴다."
     exit 1
 fi
 
