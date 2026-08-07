@@ -223,4 +223,4 @@ git show 30c5e87:docs/CURRENT_HANDOFF.md
 - 펌웨어 재빌드·빌드 지문·**기대 내용 sha256** = `FIRMWARE_REBUILD §4`,`§5`
 - 실차 값 = `REAL_ROBOT_VALUES §1`,`§4`,`§5` · 실행 순서·TODO = `JETSON_SETUP §9`~`§11`
 - 검토 라우팅 = `TEST_GATES §7` · 사다리·예약·결정 = `MASTER_PLAN §3`,`§7`,`§8`
-- 검토 전문 = `~/Desktop/개발현황/CODEX 현황/0801검토현황.md §44`~`§50`
+- 검토 전문 = `~/Desktop/개발현황/CODEX 현황/0801-4검토현황.md §44`~`§50`
