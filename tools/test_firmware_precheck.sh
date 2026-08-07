@@ -12,8 +12,9 @@
 # 막는 것은 다른 일이고, 그 차이가 회차를 넘어 살아남았다.
 #   → 그래서 판정을 종료코드로 옮기고, **그 종료코드를 픽스처가 공격한다.**
 #
-# 케이스 1~3 은 §47.1 이 요구한 부정·역회귀 그대로다. 4~9 는 같은 자리에서 발견한 이웃
-# 구멍(미추적·`.h`·삭제·판정 불능)이고, 10 은 **진짜 저장소**에 대고 도는 역회귀다.
+# 케이스 1~3 은 §47.1 이 요구한 부정·역회귀 그대로다. 나머지는 같은 자리에서 발견한 이웃
+# 구멍(미추적·공식 확장자 전수·명시적 `src/`/`data/` 경계·ignore·삭제·판정 불능)이고, 마지막은
+# **진짜 저장소**에 대고 도는 역회귀다.
 #
 # ⚠ 합성 저장소는 실물 이력이 아니다 — 여기 통과는 실차 통과가 아니라 **판정기의 성질**만
 #   증명한다. 실물 대조는 케이스 10 하나뿐이고, 그것도 저장소만 본다(보드는 못 본다).
@@ -123,6 +124,48 @@ echo "#define MAX_SPEED 99" > "$REPO/$SKETCH/motor_override.h"
 expect_rc 1 "⑦ 스케치 폴더의 미추적 .h 도 FAIL (.ino 만 보면 뚫리는 자리)" -- run
 rm -f "$REPO/$SKETCH/motor_override.h"
 
+# ── 7-a) 공식 root 확장자 전수 — 목록과 구현의 항목별 대조 ─────────────────
+for ext in pde c cpp S hpp hh tpp ipp; do
+    probe="$REPO/$SKETCH/root_probe.$ext"
+    echo "// root extension probe" > "$probe"
+    expect_rc 1 "⑦-a root .$ext 미추적 소스 → FAIL" -- run
+    rm -f "$probe"
+done
+
+# ── 7-b) 공식 src/** 확장자 전수 — 재귀 깊이까지 대조 ───────────────────────
+mkdir -p "$REPO/$SKETCH/src/deep/nested"
+for ext in c cpp S h hpp hh tpp ipp; do
+    probe="$REPO/$SKETCH/src/deep/nested/src_probe.$ext"
+    echo "// recursive src extension probe" > "$probe"
+    expect_rc 1 "⑦-b src/** .$ext 미추적 소스 → FAIL" -- run
+    rm -f "$probe"
+done
+
+# ── 7-c) ignore는 컴파일 제외 규칙이 아니다 ─────────────────────────────────
+echo "*.cpp" > "$REPO/.gitignore"
+echo "// ignored root source" > "$REPO/$SKETCH/ignored_root.cpp"
+expect_rc 1 "⑦-c .gitignore에 걸린 root .cpp도 FAIL" -- run
+rm -f "$REPO/$SKETCH/ignored_root.cpp"
+echo "// ignored recursive source" > "$REPO/$SKETCH/src/deep/ignored_recursive.cpp"
+expect_rc 1 "⑦-d .gitignore에 걸린 src/** .cpp도 FAIL" -- run
+rm -f "$REPO/$SKETCH/src/deep/ignored_recursive.cpp" "$REPO/.gitignore"
+
+# ── 7-d) data/**는 공식적으로 컴파일하지 않는다 — 오탐 역회귀 ──────────────
+mkdir -p "$REPO/$SKETCH/data/deep"
+echo "// source-looking documentation" > "$REPO/$SKETCH/data/deep/notes.cpp"
+expect_rc 0 "⑦-e data/**의 source-looking 파일은 PASS (빌드 밖)" -- run
+case "$LAST_OUT" in
+    *"data/deep/notes.cpp"*) ok "⑦-f data/** 파일은 [참고]에 숨지 않고 나타난다" ;;
+    *) ng "⑦-f data/** 파일이 [참고] 출력에서 사라졌다" ;;
+esac
+rm -f "$REPO/$SKETCH/data/deep/notes.cpp"
+
+# ── 7-e) committed src/**도 기대 목록 밖이면 잡는다 ─────────────────────────
+echo "// committed recursive source" > "$REPO/$SKETCH/src/deep/committed.cpp"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "recursive source attack"
+expect_rc 1 "⑦-g committed src/** .cpp도 FAIL" -- run
+git -C "$REPO" reset -q --hard HEAD~1
+
 # ── 8) 부정 회귀: 소스 삭제 ────────────────────────────────────────────────
 rm -f "$REPO/$INO"
 expect_rc 1 "⑧ 소스가 사라져도 FAIL" -- run
@@ -143,6 +186,12 @@ expect_rc 2 "⑩ 기준점 커밋이 없으면 rc=2 (판정 불능)" -- \
 expect_rc 2 "⑩-b git 저장소가 아니면 rc=2" -- bash "$CHECK" --repo "$TMP" --baseline "$BASE"
 expect_rc 2 "⑩-c --expect 형식이 틀리면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8"
+expect_rc 2 "⑩-d --expect 경로가 소스 범위 밖이면 rc=2" -- \
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "firmware/VENDOR_DROP.md=1,0"
+expect_rc 2 "⑩-e --expect 증감이 숫자가 아니면 rc=2" -- \
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=x,2"
+expect_rc 2 "⑩-f --expect 경로가 중복되면 rc=2" -- \
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT" --expect "$EXPECT"
 
 # ── 11) 진짜 저장소 역회귀 (read-only) ─────────────────────────────────────
 expect_rc 0 "⑪ 실제 저장소의 현행 상태는 PASS" -- bash "$CHECK" --repo "$ROOT"

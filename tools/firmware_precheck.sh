@@ -20,11 +20,12 @@
 # `8 2` 를 눈으로 대조하는 절차는 사람이 "대충 맞네"로 넘길 수 있고, 무엇보다 **다음 세 가지를
 # 아예 보여 주지 않았다.** 그래서 판정을 종료코드로 옮긴다:
 #   ① **미추적 파일** — `git diff` 는 추적되지 않는 새 파일을 보지 못한다. 그런데
-#      `arduino-cli` 는 스케치 폴더의 소스를 **전부 이어 붙여** 컴파일한다. 폴더에 떨궈진
-#      `rogue.ino` 한 장은 diff 에 안 보이면서 바이너리에는 들어간다.
-#   ② **`.ino` 가 아닌 소스** — 같은 이유로 `.h`·`.cpp` 도 함께 굽힌다. `.ino` 만 보는
-#      판정기는 `motor_override.h` 한 장으로 뚫린다. 판정 범위는 확장자 목록(`SRC_EXT`)이지
-#      파일 이름 하나가 아니다.
+#      `arduino-cli` 는 스케치 폴더의 소스를 함께 컴파일한다. 폴더에 떨궈진 `rogue.ino`
+#      한 장은 diff 에 안 보이면서 바이너리에는 들어간다. `.gitignore`·전역 ignore에 걸려도
+#      컴파일 입력이라는 사실은 바뀌지 않으므로 `--exclude-standard` 없이 전부 센다.
+#   ② **공식 확장자·재귀 경계** — 루트의 `.hh/.tpp/.ipp`도 공식 지원인데 수동 목록에서
+#      빠졌고, Git pathspec `*`는 slash까지 잡아 `src/`뿐 아니라 비컴파일 `data/`도 암묵적으로
+#      섞었다. 판정 범위는 Arduino CLI sketch specification의 root/`src/**` 규칙이어야 한다.
 #   ③ **삭제·이름변경** — 기대 목록과 **양방향으로** 대조해야 "있어야 할 게 없음"도 잡힌다.
 #      그래서 `--no-renames` 다. 이름이 바뀐 것은 숨길 일이 아니라 멈출 일이다.
 #
@@ -39,7 +40,8 @@
 #   보드 쪽 대조 수단은 지금 없다 (`/firmware/info` 는 v1_3 시절 고정 문자열이라 못 쓴다).
 # - 기대 증감(`--expect`)은 **사람이 관리하는 계약**이다. `.ino` 를 정당하게 고치면 이 값도
 #   같이 옮겨야 한다 — 옮기지 않으면 FAIL 로 시끄럽게 막힌다(fail-closed, 의도한 방향이다).
-# - `git` 이 무시하도록 설정된 파일(`.gitignore`)은 미추적 검출에서도 빠진다.
+# - 외부 라이브러리·보드 core는 이 저장소의 스케치 소유 범위 밖이다. 빌드 환경 지문과 라이브러리
+#   해시는 `docs/FIRMWARE_REBUILD.md §2`~`§4`가 별도로 대조한다.
 #
 # 정본·맥락 = `docs/FIRMWARE_REBUILD.md §4` · 소유 경계 = `firmware/VENDOR_DROP.md §2`
 
@@ -68,8 +70,38 @@ if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2")
 fi
 
-# 굽히는 확장자. arduino-cli 는 스케치 폴더의 이것들을 한 덩어리로 컴파일한다.
-SRC_EXT=(ino pde h hpp c cc cpp cxx S)
+# Arduino CLI 1.5 sketch specification의 **전수 목록**.
+# - sketch root: .ino/.pde/.c/.cpp/.S + header 5종
+# - sketch/src/**: 재귀 컴파일. Arduino language(.ino/.pde)는 여기서 지원하지 않는다.
+# - data/**: 컴파일하지 않는다.
+# 공식 목록에 없는 .cc/.cxx를 임의로 보태지 않는다. 목록과 구현이 갈라지지 않게 이 함수 하나가
+# tracked diff·미추적 파일·기대값 검증의 공통 분류기다.
+is_sketch_source() {
+    local path="$1" rest sketch within
+    case "$path" in firmware/*/*) ;; *) return 1 ;; esac
+    rest="${path#firmware/}"
+    sketch="${rest%%/*}"
+    [ -n "$sketch" ] && [ "$rest" != "$sketch" ] || return 1
+    within="${rest#*/}"
+
+    case "$within" in
+        */*)
+            case "$within" in
+                src/*)
+                    case "$within" in
+                        *.c|*.cpp|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
+                    esac
+                    ;;
+            esac
+            ;;
+        *)
+            case "$within" in
+                *.ino|*.pde|*.c|*.cpp|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
+            esac
+            ;;
+    esac
+    return 1
+}
 
 # ── 사전 조건: 여기서 못 넘어가면 **판정 불능(2)** 이지 통과가 아니다 ────────────
 if [ ! -d "$REPO" ]; then
@@ -78,33 +110,55 @@ fi
 if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
     echo "FAIL git 저장소가 아니다: $REPO" >&2; exit 2
 fi
-if ! git -C "$REPO" rev-parse --verify --quiet "${BASELINE}^{commit}" >/dev/null; then
+BASELINE_OID="$(git -C "$REPO" rev-parse --verify --quiet --end-of-options \
+    "${BASELINE}^{commit}" 2>/dev/null)"
+if [ -z "$BASELINE_OID" ]; then
     echo "FAIL 기준점 커밋을 못 찾는다: $BASELINE  (얕은 clone 이면 전체 이력이 필요하다)" >&2
     exit 2
 fi
 
-SRC_SPEC=()   # 판정 대상   = 굽히는 소스
-DOC_SPEC=()   # 참고 대상   = firmware/ 아래 나머지(소유·기록 문서)
-for ext in "${SRC_EXT[@]}"; do
-    SRC_SPEC+=("firmware/*/*.$ext")
-    DOC_SPEC+=(":!firmware/*/*.$ext")
-done
+TMP="$(mktemp -d -t firmware-precheck.XXXXXX)" || {
+    echo "FAIL 임시 디렉터리를 만들지 못했다" >&2; exit 2; }
+trap 'rm -rf "$TMP"' EXIT
+DIFF_Z="$TMP/diff.z"
+UNTRACKED_Z="$TMP/untracked.z"
+
+# 먼저 firmware/ 전량을 Git에서 받고, 아래 공통 분류기로 소스/참고를 나눈다. pathspec을 확장자별로
+# 손으로 만들지 않으므로 root 목록과 src/** 재귀 목록이 서로 갈라질 자리가 없다.
+if ! git -C "$REPO" diff --numstat --no-renames -z "$BASELINE_OID" -- firmware/ >"$DIFF_Z"; then
+    echo "FAIL 기준점→작업 트리 diff를 읽지 못했다" >&2; exit 2
+fi
+if ! git -C "$REPO" ls-files --others -z -- firmware/ >"$UNTRACKED_Z"; then
+    echo "FAIL 미추적 firmware 파일 목록을 읽지 못했다" >&2; exit 2
+fi
 
 # ── 판정 입력 ①: 기준점 → **작업 트리** (끝점을 안 준다 = committed+staged+unstaged 전부) ──
 declare -A ACTUAL=()
+DOC_DIFF=()
 while IFS= read -r -d '' rec; do
     [ -n "$rec" ] || continue
     add="${rec%%	*}";  rest="${rec#*	}"
     del="${rest%%	*}"; path="${rest#*	}"
-    ACTUAL["$path"]="$add,$del"
-done < <(git -C "$REPO" diff --numstat --no-renames -z "$BASELINE" -- "${SRC_SPEC[@]}")
+    if is_sketch_source "$path"; then
+        ACTUAL["$path"]="$add,$del"
+    else
+        DOC_DIFF+=("$add" "$del" "$path")
+    fi
+done <"$DIFF_Z"
 
 # ── 판정 입력 ②: 미추적 소스 (git diff 가 못 보는 자리) ────────────────────────
+# ignore 규칙은 저장소 표시 정책이지 Arduino 컴파일 정책이 아니다. 그래서 일부러
+# `--exclude-standard`를 쓰지 않는다.
 UNTRACKED=()
+DOC_NEW=()
 while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
-    UNTRACKED+=("$path")
-done < <(git -C "$REPO" ls-files --others --exclude-standard -z -- "${SRC_SPEC[@]}")
+    if is_sketch_source "$path"; then
+        UNTRACKED+=("$path")
+    else
+        DOC_NEW+=("$path")
+    fi
+done <"$UNTRACKED_Z"
 
 declare -A EXPECT=()
 for spec in "${EXPECT_ARGS[@]}"; do
@@ -112,13 +166,24 @@ for spec in "${EXPECT_ARGS[@]}"; do
         *=*,*) : ;;
         *) echo "FAIL --expect 형식은 '경로=추가,삭제' 다: $spec" >&2; exit 2 ;;
     esac
-    EXPECT["${spec%%=*}"]="${spec#*=}"
+    path="${spec%%=*}"; want="${spec#*=}"
+    if ! is_sketch_source "$path"; then
+        echo "FAIL --expect 경로가 Arduino 스케치 소스 범위가 아니다: $path" >&2; exit 2
+    fi
+    case "$want" in
+        *[!0-9,]*|,*|*,*,*|*','|'')
+            echo "FAIL --expect 증감은 음이 아닌 정수 두 개여야 한다: $spec" >&2; exit 2 ;;
+    esac
+    if [ -n "${EXPECT[$path]+x}" ]; then
+        echo "FAIL --expect 경로가 중복됐다: $path" >&2; exit 2
+    fi
+    EXPECT["$path"]="$want"
 done
 
 echo "=== 펌웨어 사전검사 — 굽기 전 오염 판정 ==="
 echo "  저장소   : $REPO"
 echo "  기준점   : $BASELINE → **작업 트리**(커밋·staged·unstaged 전부. HEAD 로 끊지 않는다)"
-echo "  판정 범위: firmware/*/*.{$(IFS=,; echo "${SRC_EXT[*]}")}  = 굽히는 것만"
+echo "  판정 범위: sketch root 지원 확장자 + sketch/src/** 재귀 소스 (ignore 여부 무관)"
 echo
 
 FAIL=0
@@ -152,14 +217,16 @@ done
 [ "$FOUND_EXTRA" -eq 0 ] && echo "  ok     없음"
 
 echo
-echo "--- [참고] 판정에 넣지 않은 firmware/ 변경 (소유·기록 문서 — 고쳐도 되는 자리) ---"
-DOC_OUT="$(git -C "$REPO" diff --numstat --no-renames "$BASELINE" -- firmware/ "${DOC_SPEC[@]}")"
-DOC_NEW="$(git -C "$REPO" ls-files --others --exclude-standard -- firmware/ "${DOC_SPEC[@]}")"
-if [ -z "$DOC_OUT" ] && [ -z "$DOC_NEW" ]; then
+echo "--- [참고] 판정에 넣지 않은 firmware/ 파일 (소유 문서·data 등 빌드 밖) ---"
+if [ ${#DOC_DIFF[@]} -eq 0 ] && [ ${#DOC_NEW[@]} -eq 0 ]; then
     echo "  (없음)"
 else
-    [ -n "$DOC_OUT" ] && echo "$DOC_OUT" | sed 's/^/  /'
-    [ -n "$DOC_NEW" ] && echo "$DOC_NEW" | sed 's/^/  (미추적) /'
+    for ((i=0; i<${#DOC_DIFF[@]}; i+=3)); do
+        printf '  %s\t%s\t%s\n' "${DOC_DIFF[i]}" "${DOC_DIFF[i+1]}" "${DOC_DIFF[i+2]}"
+    done
+    for path in "${DOC_NEW[@]}"; do
+        printf '  (미추적) %s\n' "$path"
+    done
     echo "  ※ 이 줄들은 판정에 **영향을 주지 않는다** — 여기까지 오염으로 세면 경보가 늘 울린다."
 fi
 echo
