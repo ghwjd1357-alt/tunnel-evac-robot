@@ -69,13 +69,26 @@ BASE="$(git -C "$REPO" rev-parse HEAD)"
 } > "$REPO/$INO"
 git -C "$REPO" add -A && git -C "$REPO" commit -qm "allowed firmware edit"
 
-EXPECT="$INO=8,2"
+PATCH_SHA="$(git -C "$REPO" diff --no-ext-diff --no-renames "$BASE" -- "$INO" | sha256sum | awk '{print $1}')"
+EXPECT="$INO=8,2,$PATCH_SHA"
 run() { bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT"; }
 
 echo "=== firmware_precheck 픽스처 ==="
 
 # ── 1) 역회귀: 허용된 변경만 커밋된 상태는 통과한다 ─────────────────────────
 expect_rc 0 "① 허용된 committed 8/2 만 있으면 PASS" -- run
+
+# 같은 증감은 같은 내용이 아니다. 줄 수를 보존한 다른 patch는 업로드 허용 상태가 아니다.
+{
+    for i in 1 2 3 4 5 6 7 8; do echo "// counterfeit edit $i"; done
+    for i in 3 4 5 6 7 8 9 10; do echo "// vendor line $i"; done
+} > "$REPO/$INO"
+expect_rc 1 "①-b 같은 8/2라도 내용이 다르면 FAIL" -- run
+case "$LAST_OUT" in
+    *"내용 불일치"*) ok "①-c 같은 증감의 내용 위장이 별도 사유로 나온다" ;;
+    *) ng "①-c 내용 위장 사유가 출력에 없다" ;;
+esac
+git -C "$REPO" reset -q --hard
 
 # ── 2) 부정 회귀: unstaged 한 줄 (§47.1 이 재현한 바로 그 상태) ─────────────
 echo "// uncommitted probe" >> "$REPO/$INO"
@@ -124,17 +137,17 @@ echo "#define MAX_SPEED 99" > "$REPO/$SKETCH/motor_override.h"
 expect_rc 1 "⑦ 스케치 폴더의 미추적 .h 도 FAIL (.ino 만 보면 뚫리는 자리)" -- run
 rm -f "$REPO/$SKETCH/motor_override.h"
 
-# ── 7-a) 공식 root 확장자 전수 — 목록과 구현의 항목별 대조 ─────────────────
-for ext in pde c cpp S hpp hh tpp ipp; do
+# ── 7-a) 실제 Teensy root 확장자 전수 — compile_commands와 항목별 대조 ──────
+for ext in pde c cc cpp cxx S hpp hh tpp ipp; do
     probe="$REPO/$SKETCH/root_probe.$ext"
     echo "// root extension probe" > "$probe"
     expect_rc 1 "⑦-a root .$ext 미추적 소스 → FAIL" -- run
     rm -f "$probe"
 done
 
-# ── 7-b) 공식 src/** 확장자 전수 — 재귀 깊이까지 대조 ───────────────────────
+# ── 7-b) 실제 Teensy src/** 확장자 전수 — 재귀 깊이까지 대조 ────────────────
 mkdir -p "$REPO/$SKETCH/src/deep/nested"
-for ext in c cpp S h hpp hh tpp ipp; do
+for ext in c cc cpp cxx S h hpp hh tpp ipp; do
     probe="$REPO/$SKETCH/src/deep/nested/src_probe.$ext"
     echo "// recursive src extension probe" > "$probe"
     expect_rc 1 "⑦-b src/** .$ext 미추적 소스 → FAIL" -- run
@@ -160,7 +173,39 @@ case "$LAST_OUT" in
 esac
 rm -f "$REPO/$SKETCH/data/deep/notes.cpp"
 
+# 명세상/실측상 빌드 밖 네 경계는 계속 PASS하되 [참고]에는 보인다.
+for probe in root_probe.INO nested/rogue.cpp src/rogue.ino data/rogue.cpp; do
+    case "$probe" in
+        */*) mkdir -p "$REPO/$SKETCH/${probe%/*}" ;;
+    esac
+    echo "// non-build boundary probe" > "$REPO/$SKETCH/$probe"
+    expect_rc 0 "⑦-g 빌드 밖 $probe → PASS" -- run
+    case "$LAST_OUT" in
+        *"$probe"*) ok "⑦-h 빌드 밖 $probe 는 [참고]에 보인다" ;;
+        *) ng "⑦-h 빌드 밖 $probe 가 [참고]에서 사라졌다" ;;
+    esac
+    rm -f "$REPO/$SKETCH/$probe"
+done
+
+# Git은 링크만 보지만 Arduino CLI는 링크 밖의 src/**를 따라 컴파일한다.
+OUTSIDE_SRC="$TMP/outside-src"
+mkdir -p "$OUTSIDE_SRC"
+echo "// hidden compiled source" > "$OUTSIDE_SRC/hidden.cpp"
+rm -rf "$REPO/$SKETCH/src"
+ln -s "$OUTSIDE_SRC" "$REPO/$SKETCH/src"
+expect_rc 1 "⑦-i sketch/src 디렉터리 symlink → FAIL" -- run
+case "$LAST_OUT" in
+    *"symlink 빌드 경계 이탈"*) ok "⑦-j symlink 경계 이탈 사유가 출력된다" ;;
+    *) ng "⑦-j symlink 경계 이탈 사유가 출력에 없다" ;;
+esac
+rm -f "$REPO/$SKETCH/src"
+mkdir -p "$REPO/$SKETCH/src"
+echo "regular src reference" > "$REPO/$SKETCH/src/README.txt"
+expect_rc 0 "⑦-k 일반 src 디렉터리의 비소스 파일은 PASS" -- run
+rm -f "$REPO/$SKETCH/src/README.txt"
+
 # ── 7-e) committed src/**도 기대 목록 밖이면 잡는다 ─────────────────────────
+mkdir -p "$REPO/$SKETCH/src/deep"
 echo "// committed recursive source" > "$REPO/$SKETCH/src/deep/committed.cpp"
 git -C "$REPO" add -A && git -C "$REPO" commit -qm "recursive source attack"
 expect_rc 1 "⑦-g committed src/** .cpp도 FAIL" -- run
@@ -187,9 +232,11 @@ expect_rc 2 "⑩-b git 저장소가 아니면 rc=2" -- bash "$CHECK" --repo "$TM
 expect_rc 2 "⑩-c --expect 형식이 틀리면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8"
 expect_rc 2 "⑩-d --expect 경로가 소스 범위 밖이면 rc=2" -- \
-    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "firmware/VENDOR_DROP.md=1,0"
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "firmware/VENDOR_DROP.md=1,0,$PATCH_SHA"
 expect_rc 2 "⑩-e --expect 증감이 숫자가 아니면 rc=2" -- \
-    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=x,2"
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=x,2,$PATCH_SHA"
+expect_rc 2 "⑩-f --expect SHA256이 아니면 rc=2" -- \
+    bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$INO=8,2,xyz"
 expect_rc 2 "⑩-f --expect 경로가 중복되면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT" --expect "$EXPECT"
 

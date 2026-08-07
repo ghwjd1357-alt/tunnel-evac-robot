@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # firmware_precheck.sh — 굽기 직전, **펌웨어 소스가 우리가 아는 그 상태인지**를 종료코드로 판정한다.
 #
-# 사용:  bash tools/firmware_precheck.sh [--repo PATH] [--baseline REV] [--expect P=A,D]...
+# 사용:  bash tools/firmware_precheck.sh [--repo PATH] [--baseline REV] [--expect P=A,D,SHA256]...
 # 출력:  판정 근거 여러 줄 + 마지막에 `OK …` / `FAIL …` 한 줄.
 # 종료:  0 = 허용된 변경 그대로 / 1 = 오염(굽지 않는다) / 2 = **판정 불능**(사용법·저장소·기준점 오류)
 #        🔴 2 를 0 처럼 읽지 않는다 — "못 봤다"와 "봤는데 깨끗하다"는 다른 사실이다.
@@ -38,8 +38,8 @@
 # ── 이 검사가 증명하지 않는 것 (숨기지 않는다) ───────────────────────────────
 # - **보드에 올라가 있는 펌웨어**가 이 소스라는 증거가 아니다. 여긴 저장소만 본다.
 #   보드 쪽 대조 수단은 지금 없다 (`/firmware/info` 는 v1_3 시절 고정 문자열이라 못 쓴다).
-# - 기대 증감(`--expect`)은 **사람이 관리하는 계약**이다. `.ino` 를 정당하게 고치면 이 값도
-#   같이 옮겨야 한다 — 옮기지 않으면 FAIL 로 시끄럽게 막힌다(fail-closed, 의도한 방향이다).
+# - 기대 diff(`--expect`)는 **사람이 관리하는 계약**이다. 증감뿐 아니라 기준점→작업 트리의
+#   patch SHA256까지 같아야 한다. `.ino` 를 정당하게 고치면 둘 다 같이 옮겨야 한다.
 # - 외부 라이브러리·보드 core는 이 저장소의 스케치 소유 범위 밖이다. 빌드 환경 지문과 라이브러리
 #   해시는 `docs/FIRMWARE_REBUILD.md §2`~`§4`가 별도로 대조한다.
 #
@@ -65,17 +65,17 @@ done
 
 # 기대 목록의 기본값 = 2026-08-07 현재 **허용된 변경 딱 한 건**.
 #   `ESTOP_ACTIVE_LOW true→false` = `.ino:111` 과 그 위 주석. 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이
-#   재개방된다. 이 값을 옮길 땐 `docs/FIRMWARE_REBUILD.md §4` 의 숫자도 같이 옮긴다.
+#   재개방된다. 이 값을 옮길 땐 `docs/FIRMWARE_REBUILD.md §4` 의 증감과 patch SHA256도 같이 옮긴다.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
-    EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2")
+    EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2,6afce0f2150b3e19cd62117a7713be217aa3ade905f5054e2b3cfa6888d87ad9")
 fi
 
-# Arduino CLI 1.5 sketch specification의 **전수 목록**.
-# - sketch root: .ino/.pde/.c/.cpp/.S + header 5종
-# - sketch/src/**: 재귀 컴파일. Arduino language(.ino/.pde)는 여기서 지원하지 않는다.
+# 이 설치본의 실제 권위 = arduino-cli 1.5.2-rc.1 + teensy:avr 1.58.2, Teensy 4.1의
+# compile_commands.json 전수 관측(검토 §49.1). 공식 명세보다 실제 toolchain이 넓다.
+# - sketch root: .ino/.pde/.c/.cc/.cpp/.cxx/.S + header 5종
+# - sketch/src/**: .c/.cc/.cpp/.cxx/.S + header 5종을 재귀 컴파일.
 # - data/**: 컴파일하지 않는다.
-# 공식 목록에 없는 .cc/.cxx를 임의로 보태지 않는다. 목록과 구현이 갈라지지 않게 이 함수 하나가
-# tracked diff·미추적 파일·기대값 검증의 공통 분류기다.
+# 목록과 구현이 갈라지지 않게 이 함수 하나가 tracked diff·미추적 파일·기대값 검증의 공통 분류기다.
 is_sketch_source() {
     local path="$1" rest sketch within
     case "$path" in firmware/*/*) ;; *) return 1 ;; esac
@@ -89,14 +89,14 @@ is_sketch_source() {
             case "$within" in
                 src/*)
                     case "$within" in
-                        *.c|*.cpp|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
+                        *.c|*.cc|*.cpp|*.cxx|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
                     esac
                     ;;
             esac
             ;;
         *)
             case "$within" in
-                *.ino|*.pde|*.c|*.cpp|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
+                *.ino|*.pde|*.c|*.cc|*.cpp|*.cxx|*.S|*.h|*.hpp|*.hh|*.tpp|*.ipp) return 0 ;;
             esac
             ;;
     esac
@@ -122,6 +122,7 @@ TMP="$(mktemp -d -t firmware-precheck.XXXXXX)" || {
 trap 'rm -rf "$TMP"' EXIT
 DIFF_Z="$TMP/diff.z"
 UNTRACKED_Z="$TMP/untracked.z"
+SYMLINK_Z="$TMP/symlink.z"
 
 # 먼저 firmware/ 전량을 Git에서 받고, 아래 공통 분류기로 소스/참고를 나눈다. pathspec을 확장자별로
 # 손으로 만들지 않으므로 root 목록과 src/** 재귀 목록이 서로 갈라질 자리가 없다.
@@ -130,6 +131,11 @@ if ! git -C "$REPO" diff --numstat --no-renames -z "$BASELINE_OID" -- firmware/ 
 fi
 if ! git -C "$REPO" ls-files --others -z -- firmware/ >"$UNTRACKED_Z"; then
     echo "FAIL 미추적 firmware 파일 목록을 읽지 못했다" >&2; exit 2
+fi
+# Arduino CLI는 디렉터리 symlink를 따라 Git이 열거하지 않은 외부 소스까지 컴파일할 수 있다.
+# 링크 목적지를 추정해 일부만 허용하지 않고, 스케치 트리 안 symlink 전부를 fail-closed로 막는다.
+if ! find "$REPO/firmware" -mindepth 2 -type l -print0 >"$SYMLINK_Z"; then
+    echo "FAIL firmware symlink 목록을 읽지 못했다" >&2; exit 2
 fi
 
 # ── 판정 입력 ①: 기준점 → **작업 트리** (끝점을 안 준다 = committed+staged+unstaged 전부) ──
@@ -160,36 +166,45 @@ while IFS= read -r -d '' path; do
     fi
 done <"$UNTRACKED_Z"
 
-declare -A EXPECT=()
+declare -A EXPECT_COUNT=()
+declare -A EXPECT_HASH=()
 for spec in "${EXPECT_ARGS[@]}"; do
     case "$spec" in
-        *=*,*) : ;;
-        *) echo "FAIL --expect 형식은 '경로=추가,삭제' 다: $spec" >&2; exit 2 ;;
+        *=*,*,*) : ;;
+        *) echo "FAIL --expect 형식은 '경로=추가,삭제,patch-SHA256' 이다: $spec" >&2; exit 2 ;;
     esac
     path="${spec%%=*}"; want="${spec#*=}"
     if ! is_sketch_source "$path"; then
         echo "FAIL --expect 경로가 Arduino 스케치 소스 범위가 아니다: $path" >&2; exit 2
     fi
-    case "$want" in
-        *[!0-9,]*|,*|*,*,*|*','|'')
+    add="${want%%,*}"; rest="${want#*,}"; del="${rest%%,*}"; digest="${rest#*,}"
+    case "$add,$del" in
+        *[!0-9,]*|,*|*,|'')
             echo "FAIL --expect 증감은 음이 아닌 정수 두 개여야 한다: $spec" >&2; exit 2 ;;
     esac
-    if [ -n "${EXPECT[$path]+x}" ]; then
+    case "$digest" in
+        *[!0-9a-f]*|'') echo "FAIL --expect SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2 ;;
+    esac
+    if [ "${#digest}" -ne 64 ]; then
+        echo "FAIL --expect SHA256은 소문자 64자리여야 한다: $spec" >&2; exit 2
+    fi
+    if [ -n "${EXPECT_COUNT[$path]+x}" ]; then
         echo "FAIL --expect 경로가 중복됐다: $path" >&2; exit 2
     fi
-    EXPECT["$path"]="$want"
+    EXPECT_COUNT["$path"]="$add,$del"
+    EXPECT_HASH["$path"]="$digest"
 done
 
 echo "=== 펌웨어 사전검사 — 굽기 전 오염 판정 ==="
 echo "  저장소   : $REPO"
 echo "  기준점   : $BASELINE → **작업 트리**(커밋·staged·unstaged 전부. HEAD 로 끊지 않는다)"
-echo "  판정 범위: sketch root 지원 확장자 + sketch/src/** 재귀 소스 (ignore 여부 무관)"
+echo "  판정 범위: Teensy 실제 컴파일 root + sketch/src/** 재귀 소스 (ignore 여부 무관)"
 echo
 
 FAIL=0
 echo "--- 기대한 변경 ---"
-for path in "${!EXPECT[@]}"; do
-    want="${EXPECT[$path]}"
+for path in "${!EXPECT_COUNT[@]}"; do
+    want="${EXPECT_COUNT[$path]}"
     got="${ACTUAL[$path]-}"
     if [ -z "$got" ]; then
         echo "  🔴 없음  $path  (기대 ${want} · 실제 변경 없음 — 허용된 수정이 **되돌려졌다**)"
@@ -198,14 +213,26 @@ for path in "${!EXPECT[@]}"; do
         echo "  🔴 불일치 $path  (기대 ${want} · 실제 ${got})"
         FAIL=1
     else
-        echo "  ok     $path  (${got})"
+        if ! git -C "$REPO" diff --no-ext-diff --no-renames "$BASELINE_OID" -- "$path" \
+            >"$TMP/expected.diff"; then
+            echo "FAIL 기대 diff 내용을 읽지 못했다: $path" >&2; exit 2
+        fi
+        got_hash="$(sha256sum "$TMP/expected.diff" | awk '{print $1}')"
+        if [ "$got_hash" != "${EXPECT_HASH[$path]}" ]; then
+            echo "  🔴 내용 불일치 $path  (증감 ${got}은 같지만 patch SHA256이 다르다)"
+            echo "     기대 ${EXPECT_HASH[$path]}"
+            echo "     실제 $got_hash"
+            FAIL=1
+        else
+            echo "  ok     $path  (${got} · patch SHA256 ${got_hash})"
+        fi
     fi
 done
 
 echo "--- 기대 밖의 소스 변경 ---"
 FOUND_EXTRA=0
 for path in "${!ACTUAL[@]}"; do
-    if [ -z "${EXPECT[$path]-}" ]; then
+    if [ -z "${EXPECT_COUNT[$path]-}" ]; then
         echo "  🔴 기대에 없는 변경  $path  (${ACTUAL[$path]})"
         FAIL=1; FOUND_EXTRA=1
     fi
@@ -214,6 +241,11 @@ for path in "${UNTRACKED[@]}"; do
     echo "  🔴 미추적 소스        $path  (git diff 엔 안 보이지만 **함께 컴파일된다**)"
     FAIL=1; FOUND_EXTRA=1
 done
+while IFS= read -r -d '' link; do
+    rel="${link#"$REPO"/}"
+    echo "  🔴 symlink 빌드 경계 이탈  $rel  (Git 밖 소스를 따라갈 수 있어 허용하지 않는다)"
+    FAIL=1; FOUND_EXTRA=1
+done <"$SYMLINK_Z"
 [ "$FOUND_EXTRA" -eq 0 ] && echo "  ok     없음"
 
 echo
@@ -237,6 +269,6 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK   펌웨어 소스 = 기준점 + 허용된 변경 ${#EXPECT[@]}건 그대로. 굽어도 된다."
+echo "OK   펌웨어 소스 = 기준점 + 허용된 내용 ${#EXPECT_COUNT[@]}건 그대로. 굽어도 된다."
 echo "     ⚠ 이것은 **저장소**가 깨끗하다는 뜻이다 — 보드에 올라가 있는 펌웨어의 증거가 아니다."
 exit 0

@@ -1020,3 +1020,15 @@ profile-only 앵커는 `FIRMWARE_REBUILD §4`의
 AI context **36/36**, `doc_check --strict` 통과. `src/**`·`.ino`·보드 업로드는 건드리지 않았다.
 
 ⚠ 이것은 구현자 주장이다. `7267829..보완커밋`을 Claude가 독립 검토하기 전 승인으로 읽지 않는다.
+
+### 10.18 검토 §49 — 실제 Teensy 빌드 입력·내용·symlink 폐포 (2026-08-07, **동결 예외 아님**)
+
+Claude가 `7267829..c462d73`을 **불승인(P0 0 · P1 1 · P2 2)**했다. 실제 설치 toolchain은
+root·`src/**`의 `.cc/.cxx`를 컴파일했지만 검사기는 통과시켰고, 같은 줄 증감의 다른 내용과
+외부 소스를 가리키는 `src` symlink도 통과했다(전문 = Desktop 검토현황 §49).
+
+사용자 명시로 이 보완 diff만 **구현자 = Codex / 최종 검토자 = Claude**다. 검사기는 실제
+Teensy 4.1 `compile_commands.json` 관측 확장자를 포함하고, 기대 증감과 patch SHA256을 함께
+대조하며, 스케치 트리 symlink 전부를 fail-closed로 거부한다. 역회귀는 빌드 밖 네 경계와 실제
+저장소 통과를 고정한다. 구현자 검증 기준 = 펌웨어 픽스처 **59/59**, inventory **83→84**.
+`src/**`·`.ino`·보드 업로드는 건드리지 않았다. 독립 재검토 전 승인으로 읽지 않는다.

@@ -119,7 +119,7 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 
 🔴 **2026-08-06 이후 이 `sha256sum -c` 는 `실패` 를 낸다 — 그게 정상이다.** `SHA256SUMS.txt` 는
 **수령 원본**의 해시라, 우리가 `ESTOP_ACTIVE_LOW` 한 줄을 고친 지금은 안 맞는 것이 맞다.
-**"실패" 를 오염으로 읽지 말고 무엇이 달라졌는지로 읽는다** — 판정은 해시가 아니라 diff 다:
+**"실패" 를 오염으로 읽지 말고 무엇이 달라졌는지로 읽는다** — 판정은 허용 diff 내용 지문이다:
 
 ```bash
 bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1 = 멈춘다 / 2 = 판정 불능
@@ -129,7 +129,7 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 `8   2   firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino`
 (`ESTOP_ACTIVE_LOW true→false` = `.ino:111` 과 그 위 주석 · 1307→1313줄 ·
 37,965→38,458 bytes · 현재 해시 `1db24326…0bd8`). 🔴 **`.ino` 를 정당하게 고치면 이 숫자와
-`firmware_precheck.sh` 의 기대 증감을 같이 옮긴다** — 안 옮기면 FAIL 로 시끄럽게 막힌다.
+`firmware_precheck.sh` 의 기대 patch SHA256을 같이 옮긴다** — 같은 `8/2`라도 내용이 다르면 FAIL이다.
 
 🔴 **08-07 검토 §47.1 P1 정정 — 사람이 눈으로 대조하던 절차를 종료코드로 옮겼다.** 구판 정본은
 `git diff --numstat f57d454 HEAD -- 'firmware/*/*.ino'` 한 줄이었는데, **끝점을 `HEAD` 로 못
@@ -143,11 +143,13 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 
 🔴 **08-07 검토 §48.1 P1 — ignore 규칙은 컴파일 제외 규칙이 아니다 — 숨은 소스도 판정 입력이다.**
 §47 보완은 `--exclude-standard` 때문에 ignore된 `.cpp`를 `rc=0`으로 통과시켰고,
-수동 확장자 목록에서 Arduino 공식 `.hh/.tpp/.ipp`도 빠졌다. 이제
-[Arduino CLI 1.5 sketch specification](https://arduino.github.io/arduino-cli/1.5/sketch-specification/)
-그대로 root `.ino/.pde/.c/.cpp/.S/.h/.hpp/.hh/.tpp/.ipp`, `src/**` 재귀 소스를 공통 분류기
-한 곳에서 판정한다(`src/`의 `.ino/.pde`는 미지원, `data/**`는 비컴파일). 미추적 열거는 ignore
-여부를 묻지 않는다. 🔴 **`2`를 `0`처럼 읽지 않는다** — 못 본 것과 깨끗함은 다르다.
+수동 확장자 목록에서 Arduino 공식 `.hh/.tpp/.ipp`도 빠졌다. 그러나 §49 재측정으로
+**실제 Teensy toolchain은 공식 sketch 명세보다 넓다**는 것이 확인됐다. 설치본
+`arduino-cli 1.5.2-rc.1` + `teensy:avr 1.58.2`, Teensy 4.1의 `compile_commands.json`에서
+root와 `src/**`의 `.cc/.cxx`도 실제 컴파일됐다. 따라서 root 12종·`src/**` 10종을 공통 분류기로
+판정하며 `data/**`·비-`src` 중첩·대문자 `.INO`·`src/*.ino`는 빌드 밖 참고로 고정한다.
+스케치 트리 symlink는 Git 밖 입력을 따라갈 수 있으므로 전부 거부한다.
+🔴 **`2`를 `0`처럼 읽지 않는다** — 못 본 것과 깨끗함은 다르다.
 
 🔴 **08-07 검토 §46.2 P2 — 소유 문서를 판정에서 빼는 이유(그대로 유지).** 구판은 범위를
 `-- firmware/` 로 잡아 **허용된 소유 문서 변경(`firmware/VENDOR_DROP.md` 3+/2-)까지 끌어왔다.**
@@ -156,8 +158,8 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 **숨기지는 않는다** — 검사기가 `[참고]` 절에 **항상 같이 찍는다**(회귀 케이스 ⑨).
 
 이 검사가 증명하지 않는 것: **보드에 올라가 있는 펌웨어**가 이 소스라는 증거가 아니다. 저장소만
-본다. 회귀 = `bash tools/test_firmware_precheck.sh` (**41 검사** — 공식 root 10종·`src/**` 8종,
-ignore 양쪽, `data/**` 역회귀, 판정 불능 포함).
+본다. 회귀 = `bash tools/test_firmware_precheck.sh` (**59 검사** — 실제 root 12종·`src/**` 10종,
+같은 증감의 다른 내용·symlink 부정 회귀, 빌드 밖 네 경계·실제 저장소 역회귀 포함).
 소유 경계·되돌리면 안 되는 이유 = `firmware/VENDOR_DROP.md §2`·`§4`.
 
 ⚠ 산출물(`--output-dir`)은 **저장소 밖**으로 뺀다. 빌드물은 소스에서 다시 만들어지므로 커밋하지 않는다.
