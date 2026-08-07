@@ -74,5 +74,6 @@
   {"id":"0801-upload-step-is-one-word-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"\"업로드\" 라는 한 단어는 실행 절차가 아니다"},
   {"id":"0801-cmdvel-ban-violated-by-e10-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"차단 시험이 상위 안전 불변조건을 어기면 그 시험이 틀린 자리에 있는 것이다"},
   {"id":"0801-continuity-silence-not-short-test-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"완성된 회로에서 (+)↔(−) 연속성 \"무음\" 은 단락 판정법이 아니다"},
-  {"id":"0801-spare-relay-count-policy-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"\"둘 다 교체\" 정책은 예비 두 개가 있어야 실행된다"}
+  {"id":"0801-spare-relay-count-policy-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"\"둘 다 교체\" 정책은 예비 두 개가 있어야 실행된다"},
+  {"id":"0801-limit-status-vs-limit-fired-39r","path":"tools/d0_check.sh","anchor":"상한 상태값은 상한이 발동했다는 증거가 아니다"}
 ]

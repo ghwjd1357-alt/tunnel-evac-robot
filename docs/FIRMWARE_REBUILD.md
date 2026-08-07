@@ -108,7 +108,7 @@ EOF
 > **왜 이 순서인가**: 나중에 `re-arm` 을 구현하고 문제가 생겼을 때 **"내 코드 탓인가 환경
 > 탓인가"** 를 갈라야 한다(`AGENTS.md §3-6`). 기준점을 안 만들면 그 분류를 영영 못 한다.
 
-★ **작업본은 저장소 `firmware/teensy_integrated_base/` 다** (08-05 신설). Desktop 수령본은
+★ **작업본은 저장소 `firmware/teensy_integrated_base_v1_4/` 다** (08-05 신설). Desktop 수령본은
 독립 대조군으로 남겨 두고 건드리지 않는다 — 소유 경계·수정 규칙 = `firmware/VENDOR_DROP.md`.
 
 ```bash
@@ -116,6 +116,19 @@ cd ~/ros2_ws/firmware/teensy_integrated_base_v1_4 && sha256sum -c SHA256SUMS.txt
 cd ~/ros2_ws/firmware
 arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integrated_base_v1_4
 ```
+
+🔴 **2026-08-06 이후 이 `sha256sum -c` 는 `실패` 를 낸다 — 그게 정상이다.** `SHA256SUMS.txt` 는
+**수령 원본**의 해시라, 우리가 `ESTOP_ACTIVE_LOW` 한 줄을 고친 지금은 안 맞는 것이 맞다.
+**"실패" 를 오염으로 읽지 말고 무엇이 달라졌는지로 읽는다** — 판정은 해시가 아니라 diff 다:
+
+```bash
+git -C ~/ros2_ws diff f57d454 HEAD -- firmware/   # 원본 대비 우리 변경 전량
+```
+
+**2026-08-07 기준 원본 대비 변경 = `.ino:111` 한 줄과 그 위 주석뿐**이다
+(`ESTOP_ACTIVE_LOW true→false` · 1307→1313줄 · 37,965→38,458 bytes ·
+현재 해시 `1db24326…0bd8`). 🔴 **이 diff 가 이 한 줄보다 커지면 재빌드 전에 멈추고 사유를
+찾는다.** 소유 경계·되돌리면 안 되는 이유 = `firmware/VENDOR_DROP.md §2`·`§4`.
 
 ⚠ 산출물(`--output-dir`)은 **저장소 밖**으로 뺀다. 빌드물은 소스에서 다시 만들어지므로 커밋하지 않는다.
 

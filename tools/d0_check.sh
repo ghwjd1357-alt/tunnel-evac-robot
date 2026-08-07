@@ -87,6 +87,25 @@
 #   ★ 표와 구현이 갈라질 자리를 없앴다 (`§3-10 ★②`): 8자리 전부 **같은 두 함수**
 #     (`clock_begin`/`clock_end`)로 재고, 실패 문장도 `why_snapshot()` 한 곳에서만 쓴다.
 #     자리마다 손으로 초를 적던 것이 정확히 이 결함의 근인이었다.
+#
+# [08-07 검토 §39-R.1 보완 — 같은 8자리에 **세 번째 축**을 준다: rc 를 무엇의 근거로 쓰는가]
+#   08-05 판은 '재는가'·'원인을 남기는가'까지 닫고도 **'무엇으로 판정하는가'** 를 안 물었다.
+#   `why_snapshot()` 은 실측 경과를 **찍기만** 하고 분류에는 안 썼다 — rc 가 124/137 이면
+#   무조건 *"상한이 실제로 발동했다"*. 자식이 즉시 `exit 124` 하는 입력에서 스냅샷 6자리가
+#   **3~4ms** 만에 그 문장을 냈다. 관측 창 3자리는 §30.3 의 벽시계 덕분에 같은 입력을 거부했다.
+#
+#     자리(현재 줄)      | 판정 근거(구판) | 08-07 이후
+#     -------------------|-----------------|------------------------------------------
+#     topic hz ⓪ rc      | rc              | 유지 (다음 줄이 벽시계를 본다)
+#     topic hz ⓪ 벽시계  | 경과            | `clock_reached_limit()` 로 규칙 일원화
+#     echo --field 부호  | rc **만**       | `limit_actually_fired()` — 짧은 124 도 경고
+#     부호 STILL/READ    | rc + 경과       | 같은 함수로 통일 (부등식 손으로 안 적는다)
+#     why_snapshot 6자리 | rc **만**       | rc + 경과. 짧은 124 는 '상한 상태값 + 시각 이상'
+#
+#   ⚠ 이웃 클래스도 세어 봤다(숨기고 '전수'라고 쓰지 않는다): `tools/lib_e2e.sh:267` 은
+#     124/137 을 **시간상자의 정상 종료**로 받아들일 뿐 시간을 주장하지 않고, 판정은 별도
+#     판독기가 한다. `tools/test_harness_guards.sh:185` 는 이미 rc 와 경과를 **함께** 본다.
+#     그래서 이 결함은 `d0_check.sh` 안 2자리로 좁혀졌다.
 #   마지막 자리도 원 명령 rc를 먼저 확인한다. rc 0이 아닌 잘린 스냅샷은 EKF 행이 보여도
 #   유지 판정에 사용하지 않는다.
 #
@@ -173,6 +192,25 @@ clock_end() {   # $1=rc(바로 다음 줄에서 $? 를 넘긴다) $2=상한(초)
   CLK_MS=$(( ($(date +%s%N) - CLK_T0) / 1000000 ))
 }
 
+# --- ★ 08-07 검토 §39-R.1 — **'상한 상태값'은 '상한이 발동한 사실'이 아니다** ------------
+# rc 124/137 은 timeout 이 발동했을 때 *나오는 값*이지 발동했다는 *증거*가 아니다.
+# 자식이 스스로 `exit 124` 해도 똑같은 값이 온다 — 검토자 재현에서 스냅샷 6자리가 **3~4ms**
+# 만에 끝나고도 *"상한이 실제로 발동했다"* 를 출력했다(관측 창 3자리는 §30.3 에서 이미 벽시계를
+# 받았기 때문에 같은 입력에서 정상적으로 거부했다). 그래서 근거는 **둘**이어야 한다:
+#   ① 종료 상태가 상한값인가(124/137)  ② 벽시계가 계약 상한을 실제로 채웠는가.
+#
+# ⚠ **허용 오차는 0 이다.** `t0` 은 `timeout` 을 부르기 **전에** 찍히므로 진짜 발동은 언제나
+#   계약 상한 이상으로 측정된다(프로세스 기동 몫이 여유로 들어간다 — 실측 20002ms/12002ms).
+#   오차를 두는 순간 이 검토가 잡은 '짧은 124' 가 그 폭만큼 다시 통과한다.
+# ⚠ 비교 규칙을 여기 **한 곳**에만 둔다. 자리마다 부등식을 손으로 적으면 여섯 호출자가 서로
+#   다른 판정을 쓰게 된다 — 그 갈라짐이 §39.2·§39-R.1 두 번의 근인이었다.
+clock_reached_limit() {  # $1=실측 경과ms $2=상한(초) — 벽시계가 계약 상한을 채웠는가
+  [ "$1" -ge "$(( $2 * 1000 ))" ]
+}
+limit_actually_fired() { # $1=rc $2=실측 경과ms $3=상한(초) — 상한이 **정말** 발동했는가
+  window_completed "$1" && clock_reached_limit "$2" "$3"
+}
+
 # 스냅샷 실패 분기의 **유일한** 설명자. 여기서 말하는 것은 전부 관측된 사실이다:
 #   실측 rc · 실측 경과 · 그리고 상한은 '주장'이 아니라 **계약값**으로만 표기한다.
 # 원인 문자열을 반드시 남긴다 — rc 124(상한 발동 = DDS 지연)와 rc 1(타입 판별 실패 =
@@ -180,7 +218,15 @@ clock_end() {   # $1=rc(바로 다음 줄에서 $? 를 넘긴다) $2=상한(초)
 why_snapshot() {
   ng "  → rc=$CLK_RC · 실측 경과 ${CLK_MS}ms · 이 검사의 상한 계약 ${CLK_LIMIT}초"
   case "$CLK_RC" in
-    124|137) ng "     rc 124/137 = 상한이 **실제로 발동**했다 — 상대가 끝까지 응답하지 않았다" ;;
+    124|137)
+      # ★ 여기서 rc 하나로 단정하던 것이 검토 §39-R.1 이다. 두 근거를 함께 본다.
+      if clock_reached_limit "$CLK_MS" "$CLK_LIMIT"; then
+        ng "     rc $CLK_RC + 경과가 계약 상한 이상 = 상한이 **실제로 발동**했다 — 상대가 끝까지 응답하지 않았다"
+      else
+        ng "     rc $CLK_RC 는 상한 **상태값**이지만 벽시계가 모자라다 — 상한은 **발동하지 않았다**"
+        ng "     → 자식이 스스로 그 값으로 끝났거나 시각이 이상하다. DDS 장기 응답 정지로 기록하지 않는다"
+        ng "     → 아래 원문과 CLI 오류·토픽 부재부터 본다 (원인도 조치도 다르다)"
+      fi ;;
     0)       ng "     rc 0 = 명령 자체는 성공했다 — 실패 원인은 아래 출력 내용 쪽이다" ;;
     *)       ng "     rc $CLK_RC = 상한 전에 **스스로** 끝났다 — 토픽 부재·타입 판별 실패·CLI 오류" ;;
   esac
@@ -240,14 +286,34 @@ next_idx() { IDX=$((IDX + 1)); }
 # ★ 08-05 검토 §39.3 P2-1 — 구판 머리말은 `"주기 ${HZ_SECS}초 × 2회"` 만 말해서 실제 예산을
 #   **축소 표기**했다(스냅샷 상한 9자리가 빠져 있었다). 숫자를 손으로 적지 않고 실제 상한
 #   변수로 계산한다 — 그래야 `--secs` 를 바꾸든 상수를 바꾸든 문장이 사실과 갈라지지 않는다.
-BUDGET=$(( HZ_SECS * 2 + SNAP_ECHO_SECS * 2 + SNAP_INFO_SECS * 4 + FW_INFO_SECS ))
-[ "$SKIP_SIGN" = "1" ]  || BUDGET=$(( BUDGET + HZ_SECS ))
-[ "$SKIP_ESTOP" = "1" ] || BUDGET=$(( BUDGET + SNAP_ECHO_SECS * 2 ))
+# ★★ 08-07 검토 §39-R.2 P2-A — **명목 상한 합계는 최악이 아니다.** `hard_timeout` 은
+#   `timeout --kill-after="$D0_KILL_GRACE"` 라, TERM 을 무시하는 자식은 상한 **+ 유예**까지 산다
+#   (검토자 실측: `--kill-after=2s 1s` → rc=137 · **3002ms**). 그래서 유예를 호출 수만큼 더한다.
+#   ⚠ 호출 수도 손으로 적지 않는다 — **도달 가능한 호출을 목록으로 한 번 적고** 합계·개수를
+#     그 목록에서 센다. 수를 따로 적으면 목록과 갈라진다(`AGENTS.md §3-10 ★①`).
+plan_calls() {   # 이 실행에서 실제로 도달하는 hard_timeout 호출의 상한(초)을 한 줄씩
+  printf '%s\n' "$HZ_SECS" "$HZ_SECS"                # [2][3] 관측 창
+  printf '%s\n' "$SNAP_ECHO_SECS" "$SNAP_ECHO_SECS"  # [2][3] 창 끝 수신 확인
+  printf '%s\n' "$SNAP_INFO_SECS" "$SNAP_INFO_SECS"  # [4][5] QoS
+  [ "$SKIP_SIGN" = "1" ]  || printf '%s\n' "$HZ_SECS"                          # [6] 부호
+  printf '%s\n' "$FW_INFO_SECS"                                                # [7] 펌웨어
+  [ "$SKIP_ESTOP" = "1" ] || printf '%s\n' "$SNAP_ECHO_SECS" "$SNAP_ECHO_SECS" # [8] 평상시·누름
+  printf '%s\n' "$SNAP_INFO_SECS" "$SNAP_INFO_SECS"  # [재확인] 두 토픽
+}
+BUDGET=0; CALLS=0
+while read -r _dur; do
+  CALLS=$(( CALLS + 1 )); BUDGET=$(( BUDGET + _dur ))
+done < <(plan_calls)
+BUDGET_WORST=$(( BUDGET + CALLS * D0_KILL_GRACE ))
 
 echo "=== D+0 연결 판정 ($(date '+%Y-%m-%d %H:%M:%S')) ==="
 echo "    관측 창: ${HZ_SECS}초 (--secs) × 2회"
 echo "    스냅샷 상한: echo ${SNAP_ECHO_SECS}초 · info ${SNAP_INFO_SECS}초 · 펌웨어 ${FW_INFO_SECS}초"
-echo "    → 사람이 손을 쓰는 시간을 뺀 **최악 ${BUDGET}초**. 실제 경과는 각 검사가 ms 로 찍는다"
+echo "    → 사람이 손을 쓰는 시간을 뺀 **최악 ${BUDGET_WORST}초**"
+echo "       = 명목 상한 합 ${BUDGET}초 + TERM 무시 유예 ${D0_KILL_GRACE}초 × 도달 가능 호출 ${CALLS}회"
+echo "       (프로세스 기동·파싱 몫은 여기 없다 — 그만큼 실제는 조금 더 걸릴 수 있다)"
+echo "    실측 경과는 관측 창·창 끝 수신과 **실패한** 스냅샷이 ms 로 찍는다"
+echo "       (성공한 QoS·펌웨어·E-stop·재확인은 ms 를 찍지 않는다)"
 echo
 
 # ── [1] 시리얼 장치 ─────────────────────────────────────────────────────────
@@ -305,7 +371,7 @@ check_hz() {  # $1=토픽 $2=기대 주기(참고용) $3=검사 번호
     head -3 "$out" | sed 's/^/       /'
     echo; return
   fi
-  if [ "$elapsed_ms" -lt "$need_ms" ]; then
+  if ! clock_reached_limit "$elapsed_ms" "$HZ_SECS"; then
     ng "$topic 관측이 ${elapsed_ms}ms 만에 끝났다 (요구 ${need_ms}ms) — **창을 다 안 썼다**"
     ng "  → 종료 상태는 상한 발동인데 벽시계가 모자라다. 시스템 시각 또는 CLI 를 의심한다"
     echo; return
@@ -586,7 +652,8 @@ else
   case "$SIGN" in
     OK*)
       ok "앞으로 굴릴 때 linear.x 최대 $(echo "$SIGN" | cut -d' ' -f2) m/s > 0 (부호 정상)"
-      window_completed "$SIGN_RC" \
+      # ★ 08-07 §39-R.1 — 여기도 rc 만 보면 즉시 124 를 뱉는 상대에게 속아 경고가 안 뜬다.
+      limit_actually_fired "$SIGN_RC" "$SIGN_MS" "$HZ_SECS" \
         || warn "  ⚠ 관측자는 ${SIGN_MS}ms 만에 rc=$SIGN_RC 로 일찍 끝났다 — 부호는 관측된 사실이라 유효하다" ;;
     REVERSED*)
       ng "부호가 **반대**다 — 앞으로 굴렸는데 linear.x 최소 $(echo "$SIGN" | cut -d' ' -f2) m/s"
@@ -599,7 +666,7 @@ else
       # ★ 08-05 — 관측 창 클래스의 나머지 한 자리에도 §30.3 의 **벽시계** 규칙을 준다.
       #   `topic hz` 자리는 rc 와 벽시계를 둘 다 보는데 여기는 rc 만 봤다. 결론이
       #   '안 움직였다'(= 못 본 것)일 때는 창이 실제로 채워졌는지가 판정의 전제다.
-      elif [ "$SIGN_MS" -lt "$(( HZ_SECS * 1000 ))" ]; then
+      elif ! clock_reached_limit "$SIGN_MS" "$HZ_SECS"; then
         ng "/odom 관측이 ${SIGN_MS}ms 만에 끝났다 (요구 $(( HZ_SECS * 1000 ))ms) — **창을 다 안 썼다**"
         ng "  → 종료 상태는 상한 발동인데 벽시계가 모자라다. 시스템 시각 또는 CLI 를 의심한다"
       elif [ "$SIGN" = "READFAIL" ]; then
