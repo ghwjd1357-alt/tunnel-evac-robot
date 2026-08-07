@@ -122,13 +122,27 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 **"실패" 를 오염으로 읽지 말고 무엇이 달라졌는지로 읽는다** — 판정은 해시가 아니라 diff 다:
 
 ```bash
-git -C ~/ros2_ws diff f57d454 HEAD -- firmware/   # 원본 대비 우리 변경 전량
+# 판정 대상은 **굽는 것**뿐이다 — 소스 한 파일. 소유 문서는 이 범위에 들어오지 않는다
+git -C ~/ros2_ws diff --numstat f57d454 HEAD -- 'firmware/*/*.ino'
 ```
 
-**2026-08-07 기준 원본 대비 변경 = `.ino:111` 한 줄과 그 위 주석뿐**이다
-(`ESTOP_ACTIVE_LOW true→false` · 1307→1313줄 · 37,965→38,458 bytes ·
-현재 해시 `1db24326…0bd8`). 🔴 **이 diff 가 이 한 줄보다 커지면 재빌드 전에 멈추고 사유를
-찾는다.** 소유 경계·되돌리면 안 되는 이유 = `firmware/VENDOR_DROP.md §2`·`§4`.
+**2026-08-07 기준 이 명령의 정답은 딱 한 줄이다** —
+`8   2   firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino`
+(`ESTOP_ACTIVE_LOW true→false` = `.ino:111` 과 그 위 주석 · 1307→1313줄 ·
+37,965→38,458 bytes · 현재 해시 `1db24326…0bd8`). 🔴 **다른 `.ino` 가 나오거나 숫자가
+이보다 커지면 재빌드 전에 멈추고 사유를 찾는다.**
+
+🔴 **08-07 검토 §46.2 P2 정정 — 판정 범위를 `.ino` 로 좁힌 이유.** 구판은 범위를
+`-- firmware/` 로 잡아 **허용된 소유 문서 변경(`firmware/VENDOR_DROP.md` 3+/2-)까지 끌어왔다.**
+그래서 정상 작업본에서도 매번 "한 줄보다 크다"가 되어, **멈추라는 지시가 항상 발동**했다.
+늘 울리는 경보는 사람이 곧 무시한다 — 그러면 진짜 펌웨어 오염을 놓친다. 문서 쪽 변경은
+고쳐도 되는 자리이므로 판정에서 빼되 **숨기지는 않는다.** 궁금하면 따로 본다:
+
+```bash
+git -C ~/ros2_ws diff --numstat f57d454 HEAD -- firmware/ ':!firmware/*/*.ino'
+```
+
+소유 경계·되돌리면 안 되는 이유 = `firmware/VENDOR_DROP.md §2`·`§4`.
 
 ⚠ 산출물(`--output-dir`)은 **저장소 밖**으로 뺀다. 빌드물은 소스에서 다시 만들어지므로 커밋하지 않는다.
 

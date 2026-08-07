@@ -291,6 +291,12 @@ next_idx() { IDX=$((IDX + 1)); }
 #   (검토자 실측: `--kill-after=2s 1s` → rc=137 · **3002ms**). 그래서 유예를 호출 수만큼 더한다.
 #   ⚠ 호출 수도 손으로 적지 않는다 — **도달 가능한 호출을 목록으로 한 번 적고** 합계·개수를
 #     그 목록에서 센다. 수를 따로 적으면 목록과 갈라진다(`AGENTS.md §3-10 ★①`).
+# ★★★ 08-07 검토 §46.1 P2 — 유예를 더해도 **그 값은 여전히 "최악"이 아니다.** 호출마다
+#   프로세스 기동·파이썬 임포트·DDS discovery·파싱 몫이 더 붙는데, 그건 `timeout` 이 세는
+#   시간 밖이라 우리가 상한을 걸지 않았다. 상한을 못 거는 시간을 포함해 놓고 "최악"이라
+#   부르면, 그 이름을 믿은 사람이 실제로 더 오래 걸릴 때 이상으로 읽는다.
+#   🔴 **상한을 못 걸면 이름을 정직하게 바꾼다** — `최악` → `timeout+유예 명목 예산`.
+#   "최악"이라는 낱말을 다시 쓰려면 **기동 지연까지 상한 안에 넣은 뒤에만** 쓴다.
 plan_calls() {   # 이 실행에서 실제로 도달하는 hard_timeout 호출의 상한(초)을 한 줄씩
   printf '%s\n' "$HZ_SECS" "$HZ_SECS"                # [2][3] 관측 창
   printf '%s\n' "$SNAP_ECHO_SECS" "$SNAP_ECHO_SECS"  # [2][3] 창 끝 수신 확인
@@ -304,14 +310,15 @@ BUDGET=0; CALLS=0
 while read -r _dur; do
   CALLS=$(( CALLS + 1 )); BUDGET=$(( BUDGET + _dur ))
 done < <(plan_calls)
-BUDGET_WORST=$(( BUDGET + CALLS * D0_KILL_GRACE ))
+BUDGET_NOMINAL=$(( BUDGET + CALLS * D0_KILL_GRACE ))
 
 echo "=== D+0 연결 판정 ($(date '+%Y-%m-%d %H:%M:%S')) ==="
 echo "    관측 창: ${HZ_SECS}초 (--secs) × 2회"
 echo "    스냅샷 상한: echo ${SNAP_ECHO_SECS}초 · info ${SNAP_INFO_SECS}초 · 펌웨어 ${FW_INFO_SECS}초"
-echo "    → 사람이 손을 쓰는 시간을 뺀 **최악 ${BUDGET_WORST}초**"
+echo "    → 사람이 손을 쓰는 시간을 뺀 **timeout+유예 명목 예산 ${BUDGET_NOMINAL}초**"
 echo "       = 명목 상한 합 ${BUDGET}초 + TERM 무시 유예 ${D0_KILL_GRACE}초 × 도달 가능 호출 ${CALLS}회"
-echo "       (프로세스 기동·파싱 몫은 여기 없다 — 그만큼 실제는 조금 더 걸릴 수 있다)"
+echo "       🔴 이것은 **벽시계 최악 상한이 아니다** — 프로세스 기동·임포트·discovery·파싱이"
+echo "          호출 ${CALLS}회마다 더 붙는다. 그 몫엔 상한을 걸지 않았다"
 echo "    실측 경과는 관측 창·창 끝 수신과 **실패한** 스냅샷이 ms 로 찍는다"
 echo "       (성공한 QoS·펌웨어·E-stop·재확인은 ms 를 찍지 않는다)"
 echo
@@ -726,10 +733,17 @@ echo
 
 # ── [8] E-stop 배선 ─────────────────────────────────────────────────────────
 # [08-02 신설] 최종 회신 PDF 8쪽에는 E-stop 이 한 번도 안 나왔지만 **소스에는 있다**
-#   (ESTOP_PIN=21, INPUT_PULLUP, active-low, 차단 5지점).
-# ★ 이 검사가 필요한 이유: 핀에 아무것도 안 물려 있으면 풀업이 HIGH 로 띄워서
-#   **"안 눌림"으로 읽힌다.** 배선이 없어도 소프트웨어는 아무 이상을 보고하지 않는다.
-#   그래서 '토픽이 온다'로는 아무것도 증명되지 않고, **눌러서 바뀌는지**만이 증거다.
+#   (ESTOP_PIN=21, INPUT_PULLUP, 차단 5지점).
+# 🔴 [08-07 검토 §45.3 P2 정정] **극성은 active-HIGH 다.** 구판 주석은 `active-low` 라고
+#   적어 실제 펌웨어와 **반대**였다 — `.ino:117` 이 `ESTOP_ACTIVE_LOW = false` 이고
+#   (2026-08-06 PIN21 2단계에서 뒤집었다 · `ELECTRICAL_BASELINE.md §4-c`), 판정은 `.ino:337`:
+#     rawHigh = (digitalRead(ESTOP_PIN)==HIGH) ; pressed = ESTOP_ACTIVE_LOW ? !rawHigh : rawHigh
+# ★ 이 검사가 필요한 이유 — **극성이 뒤집히면서 이유도 뒤집혔다**: 핀에 아무것도 안 물려
+#   있으면 INPUT_PULLUP 이 HIGH 로 띄우는데, active-high 에서 그 HIGH 는 **"눌림 = 정지"** 다.
+#   즉 미배선은 08-06 부터 "안 눌림"이 아니라 **항상 정지**로 굳는다(안전 쪽 실패라 정상이며,
+#   `ELECTRICAL_BASELINE.md §7` 이 이를 상태 ③ 으로 적어 둔 그 값이다).
+#   ⚠ 어느 극성이든 **'토픽이 온다'로는 배선이 증명되지 않는다.** 평상시 false 를 먼저 보고
+#   눌러서 **false→true 로 실제 바뀌는지**만이 증거다 — 아래가 그 순서다.
 # ⚠ 발행 주기 1Hz(DIAGNOSTIC_PERIOD_MS) — 합의서의 10Hz 가 아니다. 최대 1초 기다린다.
 next_idx; echo "[$IDX] E-stop 배선 (/estop/state · 1Hz)"
 if [ "$SKIP_ESTOP" = "1" ]; then
