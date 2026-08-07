@@ -79,5 +79,6 @@
   {"id":"0801-shutdown-order-two-branches-44","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"퓨즈홀더는 부하 차단기가 아니다 — 종료 순서는 한 곳만 가리켜야 한다"},
   {"id":"0801-normal-margin-is-not-fault-protection-44","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"정상전류가 퓨즈보다 작다는 계산은 운전 여유이지 고장 보호 증명이 아니다"},
   {"id":"0801-series-contacts-do-not-split-voltage-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"단일 융착에서 남은 접점은 전압 전부를 혼자 끊는다 — 반씩이 아니다"},
-  {"id":"0801-datasheet-model-mismatch-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"모델·제조사가 다른 데이터시트의 정격은 실물의 차단능력 증거가 아니다"}
+  {"id":"0801-datasheet-model-mismatch-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"모델·제조사가 다른 데이터시트의 정격은 실물의 차단능력 증거가 아니다"},
+  {"id":"0801-diff-endpoint-hides-worktree-47","path":"tools/firmware_precheck.sh","anchor":"비교 끝점을 HEAD 로 박으면, 아직 커밋하지 않은 오염은 판정에서 통째로 빠진다"}
 ]

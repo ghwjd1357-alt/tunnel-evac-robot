@@ -178,7 +178,12 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "src/tunnel_interfaces/**", "**/*detection*", "**/*perception*",
         "console/**",
     )),
-    ("firmware", ("firmware/**", "firmware/*")),
+    # 검토 §47.1: 굽기 전 오염 판정기는 `firmware/` 밖(`tools/`)에 있지만 계약은
+    # `FIRMWARE_REBUILD §4` 가 소유한다 — 기대 증감을 이 둘이 따로 들면 곧 갈라진다.
+    ("firmware", (
+        "firmware/**", "firmware/*",
+        "tools/firmware_precheck.sh", "tools/test_firmware_precheck.sh",
+    )),
     ("docs", ("docs/*.md",)),
 )
 
