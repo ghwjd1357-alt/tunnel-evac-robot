@@ -26,6 +26,12 @@ REVIEW_HISTORY_SPECIALS = (
     ("0720검토현황.md", "| P2→P1 — service ready 후 Future 영구 미완료 |"),
     ("0720검토현황.md", "### 10.2 P1 재현 경로"),
 )
+# ── cold-start 예산 (08-07 사용자 결정 — 비율 폐기, 절대 상한) ─────────────
+# 차가운 세션이 강제로 읽는 세 파일. 여기 안 들어가는 사실은 정본으로 보내고 링크한다.
+COLD_START_PATHS = ("AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md")
+COLD_START_BYTE_BUDGET = 42_000
+COLD_START_TOKEN_BUDGET = 13_500
+
 WATCHDOG_ORIGIN = re.compile(r"(?:구동부(?:의)?\s*)?(?:\d+차\s*)?회신(?:값|수치)?")
 WATCHDOG_AUTHORITY = re.compile(r"(?:충족|통과(?:\s*처리)?|확정|해소)")
 WATCHDOG_SCOPE = re.compile(r"(?:watchdog|정지\s*조건|물리\s*증거|조건부\s*수용)", re.I)
@@ -352,6 +358,12 @@ class ContextRouterTest(unittest.TestCase):
         self.assertIn("SOURCE `docs/TEST_GATES.md §2`", packet)
 
     def test_06_platform_and_real_robot_surfaces_keep_freeze_evidence(self):
+        """08-07: 통째→절 단위로 좁힌 뒤에도 **동결 증거의 실질**이 남는지 본다.
+
+        구판은 `SOURCE …FREEZE_MANIFEST.md\\`` 라는 **표기**를 봤다. 절 단위로 바꾸자
+        `…md §10\\`` 가 되어 검사가 깨졌는데, 정작 내용은 그대로였다 — 표기를 보는
+        검사는 라우팅 모양이 바뀔 때마다 부서진다. 그래서 **실질**로 바꾼다.
+        """
         for path in (
             "src/mission_manager/mission_manager/mission_node.py",
             "src/tunnel_bringup/launch/real_bringup.launch.py",
@@ -360,13 +372,15 @@ class ContextRouterTest(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 packet = ai_context.build_packet([path], "implement")
-                self.assertIn("SOURCE `docs/FREEZE_MANIFEST.md`", packet)
+                self.assertIn("SOURCE `docs/FREEZE_MANIFEST.md", packet)
+                # 동결 예외 기록의 존재 이유 — 이 문장이 빠지면 증거절이 안 실린 것이다.
+                self.assertIn("열 때마다 누가·무엇을·어디까지 열었는지 남긴다", packet)
 
     def test_07_real_bringup_keeps_measured_values(self):
         packet = ai_context.build_packet(
             ["src/tunnel_bringup/launch/real_bringup.launch.py"], "implement"
         )
-        self.assertIn("SOURCE `docs/REAL_ROBOT_VALUES.md`", packet)
+        self.assertIn("SOURCE `docs/REAL_ROBOT_VALUES.md", packet)
         self.assertIn("실효 0.62", packet)
 
     def test_08_role_gate_is_not_swapped(self):
@@ -431,26 +445,29 @@ class ContextRouterTest(unittest.TestCase):
             reservation(new_handoff, "- **⚠ 미해결 보류 — 예약 23", r"^- \*\*"),
         )
 
-    def test_14_cold_start_repository_input_is_at_least_30_percent_smaller(self):
-        old = "".join(
-            git("show", f"ef25ad3:{path}")
-            for path in ("AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md")
+    def test_14_cold_start_repository_input_fits_the_absolute_budget(self):
+        """Cold start must fit a fixed budget — not a ratio against a 08-03 snapshot.
+
+        08-07 개정 (사용자 결정). 구판은 `ef25ad3` 대비 **30% 작을 것**을 요구했다.
+        기준점이 고정이라 프로젝트가 사실을 쌓을수록 **구조적으로 반드시 실패**하고,
+        그때 압력이 "문서를 줄여라"로 오는데 같은 저장소의 다른 게이트는 정반대를
+        요구한다 — `doc_check` 는 특정 개수 주장 자리를 **유지**하라 하고,
+        `test_13` 은 예약 23 블록을 **바이트 동일**로 얼려 둔다. 실제로 08-07 에
+        여유가 **41 바이트**까지 몰려 규칙 개정문 한 줄을 못 쓰는 상태가 됐다.
+        → 재는 대상을 바꾼다: 비율이 아니라 **절대 상한**. 우리가 실제로 신경 쓰는 것은
+          "차가운 세션이 얼마를 읽고 시작하는가"이지 6월 어느 날과의 비율이 아니다.
+        ⚠ 이는 `ef25ad3` 대비 30% → 약 25% 로 **완화**다. 숨기지 않는다 —
+          결정 = 사용자(2026-08-07), 색인 = `MASTER_PLAN.md §8`.
+        상한을 지탱하는 규약은 `AGENTS.md §5` 의 "핸드오프는 현재 묶음 + 미해결 보류만".
+        """
+        text = "".join(
+            (ROOT / path).read_text() for path in COLD_START_PATHS
         )
-        new = "".join(
-            (ROOT / path).read_text()
-            for path in ("AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md")
+        self.assertLessEqual(
+            len(text.encode()), COLD_START_BYTE_BUDGET,
+            f"cold-start {len(text.encode()):,} bytes > {COLD_START_BYTE_BUDGET:,} — "
+            "완료된 서사를 정본으로 보내라 (AGENTS.md §5)",
         )
-        metrics = {
-            "utf8_bytes": (len(old.encode()), len(new.encode())),
-            "unicode_chars": (len(old), len(new)),
-            "whitespace_words": (len(old.split()), len(new.split())),
-        }
-        failures = {
-            name: (before, after, 1 - after / before)
-            for name, (before, after) in metrics.items()
-            if after > before * 0.70
-        }
-        self.assertEqual({}, failures, f"less than 30% reduction: {failures}")
 
     @unittest.skipUnless(
         shutil.which("node")
@@ -458,20 +475,24 @@ class ContextRouterTest(unittest.TestCase):
         .joinpath("o200k_base.tiktoken").exists(),
         "local o200k tokenizer is not installed",
     )
-    def test_15_local_o200k_raw_tokens_are_at_least_30_percent_smaller(self):
-        paths = ("AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md")
-        old = "".join(git("show", f"ef25ad3:{path}") for path in paths)
-        new = "".join((ROOT / path).read_text() for path in paths)
+    def test_15_local_o200k_raw_tokens_fit_the_absolute_budget(self):
+        """토큰도 같은 이유로 절대 상한이다 (test_14 docstring 참조).
 
-        def count(text: str) -> int:
-            result = subprocess.run(
-                ["node", "tools/local_token_count.js"], cwd=ROOT, input=text,
-                text=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
-            return int(result.stdout.strip())
-
-        before, after = count(old), count(new)
-        self.assertLessEqual(after, before * 0.70, (before, after, 1 - after / before))
+        바이트와 토큰을 **둘 다** 재는 이유: 한글은 바이트/토큰 비가 영문과 달라
+        한쪽만 재면 다른 쪽이 조용히 넘칠 수 있다. 토큰이 실제 문맥 비용이고,
+        바이트는 토크나이저 없이도 도는 값이라 fail-closed 용으로 남긴다.
+        """
+        text = "".join((ROOT / path).read_text() for path in COLD_START_PATHS)
+        result = subprocess.run(
+            ["node", "tools/local_token_count.js"], cwd=ROOT, input=text,
+            text=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        tokens = int(result.stdout.strip())
+        self.assertLessEqual(
+            tokens, COLD_START_TOKEN_BUDGET,
+            f"cold-start {tokens:,} o200k tokens > {COLD_START_TOKEN_BUDGET:,} — "
+            "완료된 서사를 정본으로 보내라 (AGENTS.md §5)",
+        )
 
     def test_16_missing_local_tokenizer_assets_fail_closed(self):
         result = subprocess.run(

@@ -57,7 +57,11 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/PROJECT_CONTEXT.md", "6"),
         Ref("docs/MASTER_PLAN.md", "8"),
         Ref("docs/PITFALLS.md", "8"),
-        Ref("docs/FREEZE_MANIFEST.md"),
+        # 08-07: 통째 로딩을 절 단위로 좁혔다. 앵커 실측(§6·§8·§10)이 판정 근거이며
+        # test_02 의 profile-only 회수 100% 가 이 목록의 전수성을 강제한다.
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
     ),
     "bringup": (
         Ref("docs/PROJECT_CONTEXT.md", "3"),
@@ -72,8 +76,14 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/PITFALLS.md", "5"),
         Ref("docs/PITFALLS.md", "6"),
         Ref("docs/PITFALLS.md", "7"),
-        Ref("docs/REAL_ROBOT_VALUES.md"),
-        Ref("docs/FREEZE_MANIFEST.md"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "1"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "2"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "4"),
+        # 08-07: 통째 로딩을 절 단위로 좁혔다. 앵커 실측(§6·§8·§10)이 판정 근거이며
+        # test_02 의 profile-only 회수 100% 가 이 목록의 전수성을 강제한다.
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
     ),
     "nav2": (
         Ref("docs/PROJECT_CONTEXT.md", "5"),
@@ -84,8 +94,14 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/PITFALLS.md", "5"),
         Ref("docs/PITFALLS.md", "6"),
         Ref("docs/PITFALLS.md", "7"),
-        Ref("docs/REAL_ROBOT_VALUES.md"),
-        Ref("docs/FREEZE_MANIFEST.md"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "1"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "2"),
+        Ref("docs/REAL_ROBOT_VALUES.md", "4"),
+        # 08-07: 통째 로딩을 절 단위로 좁혔다. 앵커 실측(§6·§8·§10)이 판정 근거이며
+        # test_02 의 profile-only 회수 100% 가 이 목록의 전수성을 강제한다.
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
     ),
     "e2e": (
         Ref("docs/MASTER_PLAN.md", "8"),
@@ -112,7 +128,11 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/TEST_GATES.md", "4"),
         Ref("docs/PITFALLS.md", "4"),
         Ref("docs/PITFALLS.md", "7"),
-        Ref("docs/FREEZE_MANIFEST.md"),
+        # 08-07: 통째 로딩을 절 단위로 좁혔다. 앵커 실측(§6·§8·§10)이 판정 근거이며
+        # test_02 의 profile-only 회수 100% 가 이 목록의 전수성을 강제한다.
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
     ),
     "perception": (
         Ref("docs/PROJECT_CONTEXT.md", "2"),
@@ -128,7 +148,11 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
         Ref("docs/PITFALLS.md", "4"),
         Ref("docs/PITFALLS.md", "6"),
         Ref("docs/PITFALLS.md", "7"),
-        Ref("docs/FREEZE_MANIFEST.md"),
+        # 08-07: 통째 로딩을 절 단위로 좁혔다. 앵커 실측(§6·§8·§10)이 판정 근거이며
+        # test_02 의 profile-only 회수 100% 가 이 목록의 전수성을 강제한다.
+        Ref("docs/FREEZE_MANIFEST.md", "6"),
+        Ref("docs/FREEZE_MANIFEST.md", "8"),
+        Ref("docs/FREEZE_MANIFEST.md", "10"),
     ),
 }
 
