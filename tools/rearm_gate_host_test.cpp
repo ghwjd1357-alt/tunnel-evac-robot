@@ -1,8 +1,9 @@
 // ============================================================================
-// rearm_gate_host_test.cpp — re-arm 래치 상태 전이 결정론 harness (PC 전용)
+// rearm_gate_host_test.cpp — re-arm 래치 상태 전이 + 정지 배선 결정론 harness (PC 전용)
 //
 // 실행:  bash tools/rearm_gate_host_test.sh
-// 대상:  firmware/teensy_integrated_base_v1_4/rearm_gate.h  (그 파일을 직접 include)
+// 대상:  firmware/teensy_integrated_base_v1_4/rearm_gate.h    (전이)
+//        firmware/teensy_integrated_base_v1_4/drive_wiring.h  (전이 + 정지)
 //
 // 왜 이 파일이 있나 (검토 §54.7):
 //   "첫 diff 에서 상태 전이 클래스 전체를 닫는다 … 하나의 상태 전이표와 host-side
@@ -10,15 +11,25 @@
 //   보드 없이·대기 없이 전이 경계를 재현한다. 시각을 인자로 주므로 500ms 경계의
 //   앞뒤 1ms 를 정확히 찍을 수 있다 — 실기 시험으로는 못 하는 일이다.
 //
+// 왜 대상이 두 파일이 됐나 (검토 §55.2):
+//   초판은 rearm_gate.h 만 봤다. 그래서 §54.1 의 **진짜** 구판 —
+//   .ino 의 disarmDrive() 에서 stopAllMotors() 를 빼고 출력단 가드를 지우는 것 —
+//   을 되돌려도 412/412 로 통과했다. 안전 출력 경로의 자동 방어가 0 이었는데
+//   정본은 "세 P1 변이 전부 FAIL" 이라고 적고 있었다. 정지를 drive_wiring.h 로
+//   옮기고, 여기에 가짜 모터를 붙여 그 변이가 죽게 했다.
+//
 // 🔴 이 harness 가 증명하지 않는 것 (숨기지 않는다):
-//   - 스케치의 **배선**은 여기서 안 본다. rearm_gate.h 의 전이만 본다.
-//     stopAllMotors() 호출 여부·publish 내용은 .ino 쪽이고, 그것은 실기
-//     JETSON_SETUP §7-c-E 가 관측한다.
-//   - millis() 32bit 랩어라운드는 부호 없는 뺄셈이라 원리적으로 안전하지만,
-//     그 성질을 여기서 별도 케이스로 확인한다 (T21).
+//   - 스케치가 drive_wiring.h 의 함수들을 **부르는가**. 아래 SketchModel 은 .ino 의
+//     네 호출 지점을 모사한 것이지 .ino 자신이 아니다. 그 대조는 실행 스크립트의
+//     2단계 **구조 검사**(텍스트)가 하며, 동작 검사보다 약한 증거다.
+//   - stopAllMotors() 가 실제로 PWM 을 0 으로 쓰는가, publish 내용이 맞는가.
+//     그건 실기 JETSON_SETUP §7-c-E 가 관측한다.
+//   - 응답 바이트가 **클라이언트에 도달한** 시각. 펌웨어가 관측할 수 없는 값이다
+//     (§55.1 의 남은 전제 = agent→client 전송, 미실측).
 // ============================================================================
 
 #include "../firmware/teensy_integrated_base_v1_4/rearm_gate.h"
+#include "../firmware/teensy_integrated_base_v1_4/drive_wiring.h"
 
 #include <cstdio>
 #include <cstring>
@@ -34,6 +45,7 @@ static const char* stateName(uint8_t s)
         case DRIVE_READY:    return "READY";
         case DRIVE_ARMED:    return "ARMED";
         case DRIVE_PENDING:  return "PENDING";
+        case DRIVE_ARMING:   return "ARMING";
         default:             return "???";
     }
 }
@@ -76,6 +88,93 @@ static void expectU32(const char* what, uint32_t got, uint32_t want)
     }
 }
 
+// ── 가짜 모터 (검토 §55.2) ───────────────────────────────────────────────────
+// .ino 의 TeensyDriveSink 와 같은 자리에 꽂힌다. stopAllMotors() 가 실제로 불렸는지,
+// 그 순간 수신 플래그가 내려갔는지를 host 에서 관측한다.
+struct FakeDriveSink {
+    int stopCalls = 0;
+    int acceptCalls = 0;
+    bool cmdVelReceived = false;
+    uint32_t lastCmdVelMs = 0;
+    // 실물 PWM 대응물. applySkidSteerCommand() 가 목표를 넣으면 true, 정지하면 false.
+    bool motorsCommanded = false;
+
+    void stopAllMotors()
+    {
+        ++stopCalls;
+        motorsCommanded = false;
+    }
+    void setCmdVelReceived(bool value) { cmdVelReceived = value; }
+    void noteCommandAccepted(uint32_t nowMs)
+    {
+        ++acceptCalls;
+        lastCmdVelMs = nowMs;
+        cmdVelReceived = true;
+    }
+};
+
+// ── .ino 네 호출 지점의 모사 (검토 §55.2) ────────────────────────────────────
+// 🔴 이것은 .ino 가 아니다. 스케치가 실제로 이 순서대로 부르는지는 실행 스크립트의
+//    구조 검사가 텍스트로 본다. 여기서 얻는 것은 "이 배선이면 어떤 순서로도 모터가
+//    ARMED 밖에서 못 돈다"는 성질이다.
+struct SketchModel {
+    RearmGate gate;
+    FakeDriveSink sink;
+    bool estop = false;
+
+    SketchModel() { rearmGateInit(&gate); }
+
+    // cmdVelCallback()
+    void onCmdVel(double lin, double ang, uint32_t nowMs)
+    {
+        if (estop) {
+            driveDisarm(&gate, sink);
+            return;
+        }
+        if (!driveOnCommand(&gate, lin, ang, nowMs, sink)) {
+            return;
+        }
+        // applySkidSteerCommand() 대응물
+        sink.motorsCommanded = (lin != 0.0 || ang != 0.0);
+    }
+
+    // driveEnableCallback()
+    bool onService(bool enable) { return driveOnServiceRequest(&gate, enable, estop, sink); }
+
+    // loop(): spin 이 응답 전송까지 마치고 돌아온 뒤
+    void afterSpin(uint32_t nowMs) { rearmGateArmBarrierStart(&gate, nowMs); }
+
+    // checkSafety()
+    void safetyTick(uint32_t nowMs)
+    {
+        if (estop) {
+            driveDisarm(&gate, sink);
+            return;
+        }
+        rearmGateTick(&gate, nowMs);
+    }
+
+    // updateMotorOutputs()
+    void updateOutputs()
+    {
+        if (!driveOutputAllowed(&gate, estop, sink)) {
+            return;
+        }
+        // ARMED 이고 명령이 있으면 그대로 나간다.
+    }
+
+    // 🔴 불변조건: ARMED 가 아닌데 모터가 돌면 안 된다.
+    void expectInvariant(const char* what)
+    {
+        ++g_checks;
+        if (gate.state != DRIVE_ARMED && sink.motorsCommanded) {
+            std::printf("  FAIL %-58s state=%s 인데 모터가 돈다\n",
+                        what, stateName(gate.state));
+            ++g_failures;
+        }
+    }
+};
+
 // 관용 조작 — zero 를 dt 간격으로 흘려 hold 를 채운다.
 static void feedZeros(RearmGate& g, uint32_t startMs, uint32_t untilMs, uint32_t stepMs)
 {
@@ -84,12 +183,16 @@ static void feedZeros(RearmGate& g, uint32_t startMs, uint32_t untilMs, uint32_t
     }
 }
 
-// DISARMED → READY → PENDING → ARMED 전 과정. 반환 = ARMED 가 된 시각.
+// DISARMED → READY → ARMING → PENDING → ARMED 전 과정. 반환 = ARMED 가 된 시각.
+// 🔴 응답 전송 시각(respAt)과 콜백 시각을 여기서는 같게 둔다. 둘을 **분리**해서
+//    보는 것이 T24 의 일이다.
 static uint32_t armFully(RearmGate& g, uint32_t t0)
 {
     feedZeros(g, t0, t0 + REARM_ZERO_HOLD_MS, 50);
-    rearmGateOnService(&g, true, false, t0 + REARM_ZERO_HOLD_MS);
-    const uint32_t armedAt = t0 + REARM_ZERO_HOLD_MS + REARM_POST_ARM_QUIET_MS;
+    rearmGateOnService(&g, true, false);
+    const uint32_t respAt = t0 + REARM_ZERO_HOLD_MS;
+    rearmGateArmBarrierStart(&g, respAt);
+    const uint32_t armedAt = respAt + REARM_POST_ARM_QUIET_MS;
     rearmGateTick(&g, armedAt);
     return armedAt;
 }
@@ -128,7 +231,7 @@ static void t03_never_stopping_publisher()
                      rearmGateOnCommand(&g, 0.1, 0.0, t), DRIVE_EFFECT_HOLD);
     }
     expectState("T03 5초 뒤에도", g, DRIVE_DISARMED);
-    expectBool("T03 서비스 거절", rearmGateOnService(&g, true, false, 5000), false);
+    expectBool("T03 서비스 거절", rearmGateOnService(&g, true, false), false);
     expectU32("T03 사유 = ZERO_HOLD", g.rejectReason, REARM_REJECT_ZERO_HOLD);
 }
 
@@ -177,7 +280,7 @@ static void t05_nan_breaks_hold()
             expectState(label, g, DRIVE_DISARMED);
 
             expectBool("T05 그 시점 서비스는 거절",
-                       rearmGateOnService(&g, true, false, 500), false);
+                       rearmGateOnService(&g, true, false), false);
             expectU32("T05 사유 = ZERO_HOLD", g.rejectReason, REARM_REJECT_ZERO_HOLD);
         }
     }
@@ -205,7 +308,7 @@ static void t07_nan_while_armed_disarms()
                  rearmGateOnCommand(&g, 0.05, NAN, armedAt + 10), DRIVE_EFFECT_HOLD);
     expectState("T07 → DISARMED (사용자 결정 ⓐ)", g, DRIVE_DISARMED);
     expectBool("T07 즉시 재무장 시도는 거절",
-               rearmGateOnService(&g, true, false, armedAt + 20), false);
+               rearmGateOnService(&g, true, false), false);
     expectU32("T07 사유 = ZERO_HOLD", g.rejectReason, REARM_REJECT_ZERO_HOLD);
 }
 
@@ -216,15 +319,16 @@ static void t08_service_does_not_arm_directly()
     rearmGateInit(&g);
     feedZeros(g, 0, 500, 50);
     expectState("T08 서비스 직전", g, DRIVE_READY);
-    expectBool("T08 서비스 성공", rearmGateOnService(&g, true, false, 500), true);
-    // 🔴 구판은 여기서 이미 ARMED 였고, 그래서 응답 전에 큐에 있던 명령이
-    //    다음 spin 에서 그대로 구동에 들어갔다.
-    expectState("T08 성공 응답 시점", g, DRIVE_PENDING);
+    expectBool("T08 서비스 성공", rearmGateOnService(&g, true, false), true);
+    // 🔴 구판(§54)은 여기서 이미 ARMED 였다. 그 다음 판(§55.1 이전)은 PENDING —
+    //    즉 장벽 시계가 응답보다 이르게 돌기 시작했다. 이제는 ARMING 이다:
+    //    시계 자체가 아직 없다.
+    expectState("T08 콜백 반환 시점", g, DRIVE_ARMING);
     expectU32("T08 사유 = OK", g.rejectReason, REARM_OK);
 }
 
 // ── T09 §54.2 부정회귀 ① — take 스냅샷 뒤·응답 전 비영 도착 ────────────────
-// ② 서비스 콜백 중 도착, ③ 응답 직전 큐 적재 — 셋 다 "PENDING 중 도착하는
+// ② 서비스 콜백 중 도착, ③ 응답 직전 큐 적재 — 셋 다 "장벽 중 도착하는
 // 비영 명령"으로 귀결된다. 도착 시각을 장벽 안 전 구간에 걸쳐 훑는다.
 static void t09_pre_response_command_cannot_drive()
 {
@@ -232,7 +336,8 @@ static void t09_pre_response_command_cannot_drive()
         RearmGate g;
         rearmGateInit(&g);
         feedZeros(g, 0, 500, 50);
-        rearmGateOnService(&g, true, false, 500);
+        rearmGateOnService(&g, true, false);
+        rearmGateArmBarrierStart(&g, 500);
 
         char label[96];
         std::snprintf(label, sizeof(label), "T09 장벽 +%ums 잔류 비영 명령", delay);
@@ -253,7 +358,8 @@ static void t10_zero_during_barrier_is_harmless()
     RearmGate g;
     rearmGateInit(&g);
     feedZeros(g, 0, 500, 50);
-    rearmGateOnService(&g, true, false, 500);
+    rearmGateOnService(&g, true, false);
+    rearmGateArmBarrierStart(&g, 500);
     feedZeros(g, 510, 990, 20);                      // 장벽 내내 zero 발행
     rearmGateTick(&g, 999);
     expectState("T10 장벽 999ms", g, DRIVE_PENDING);
@@ -267,7 +373,8 @@ static void t11_silence_completes_barrier()
     RearmGate g;
     rearmGateInit(&g);
     feedZeros(g, 0, 500, 50);
-    rearmGateOnService(&g, true, false, 500);
+    rearmGateOnService(&g, true, false);
+    rearmGateArmBarrierStart(&g, 500);
     // cmd_vel 이 한 건도 안 온다 → tick 만으로 승격돼야 한다.
     rearmGateTick(&g, 999);
     expectState("T11 침묵 999ms", g, DRIVE_PENDING);
@@ -291,13 +398,16 @@ static void t12_post_response_command_drives()
 // ── T13 §54.1 — disable 은 어느 상태에서든 DISARMED 로 간다 ────────────────
 static void t13_disable_from_every_state()
 {
-    const uint8_t targets[3] = {DRIVE_READY, DRIVE_PENDING, DRIVE_ARMED};
-    for (int i = 0; i < 3; ++i) {
+    const uint8_t targets[4] = {DRIVE_READY, DRIVE_ARMING, DRIVE_PENDING, DRIVE_ARMED};
+    for (int i = 0; i < 4; ++i) {
         RearmGate g;
         rearmGateInit(&g);
         feedZeros(g, 0, 500, 50);
         if (targets[i] != DRIVE_READY) {
-            rearmGateOnService(&g, true, false, 500);
+            rearmGateOnService(&g, true, false);
+        }
+        if (targets[i] == DRIVE_PENDING || targets[i] == DRIVE_ARMED) {
+            rearmGateArmBarrierStart(&g, 500);
         }
         if (targets[i] == DRIVE_ARMED) {
             rearmGateTick(&g, 1000);
@@ -305,7 +415,7 @@ static void t13_disable_from_every_state()
         expectState("T13 사전 상태", g, targets[i]);
 
         expectBool("T13 disable 은 항상 성공",
-                   rearmGateOnService(&g, false, false, 1100), true);
+                   rearmGateOnService(&g, false, false), true);
         expectState("T13 disable 뒤", g, DRIVE_DISARMED);
         expectU32("T13 사유 = OK", g.rejectReason, REARM_OK);
         expectBool("T13 hold 플래그도 해제", g.zeroHolding, false);
@@ -317,8 +427,8 @@ static void t14_disable_succeeds_under_estop()
 {
     RearmGate g;
     rearmGateInit(&g);
-    const uint32_t armedAt = armFully(g, 0);
-    expectBool("T14 E-stop 중 disable", rearmGateOnService(&g, false, true, armedAt + 5), true);
+    armFully(g, 0);
+    expectBool("T14 E-stop 중 disable", rearmGateOnService(&g, false, true), true);
     expectState("T14 → DISARMED", g, DRIVE_DISARMED);
 }
 
@@ -329,7 +439,7 @@ static void t15_enable_under_estop()
     rearmGateInit(&g);
     feedZeros(g, 0, 500, 50);
     expectState("T15 서비스 직전", g, DRIVE_READY);
-    expectBool("T15 E-stop 중 enable", rearmGateOnService(&g, true, true, 500), false);
+    expectBool("T15 E-stop 중 enable", rearmGateOnService(&g, true, true), false);
     expectU32("T15 사유 = ESTOP", g.rejectReason, REARM_REJECT_ESTOP);
     expectState("T15 READY 도 잃는다", g, DRIVE_DISARMED);
 }
@@ -340,15 +450,16 @@ static void t16_duplicate_enable()
     RearmGate g;
     rearmGateInit(&g);
     feedZeros(g, 0, 500, 50);
-    rearmGateOnService(&g, true, false, 500);
-    expectBool("T16 PENDING 중 재호출", rearmGateOnService(&g, true, false, 600), false);
+    rearmGateOnService(&g, true, false);
+    rearmGateArmBarrierStart(&g, 500);
+    expectBool("T16 PENDING 중 재호출", rearmGateOnService(&g, true, false), false);
     expectU32("T16 사유 = ALREADY", g.rejectReason, REARM_REJECT_ALREADY);
     expectState("T16 PENDING 유지", g, DRIVE_PENDING);
     // 🔴 거절이 장벽을 리셋하면 안 된다 — 원래 시각 기준으로 승격돼야 한다.
     rearmGateTick(&g, 1000);
     expectState("T16 원래 시각 기준 승격", g, DRIVE_ARMED);
 
-    expectBool("T16 ARMED 중 재호출", rearmGateOnService(&g, true, false, 1100), false);
+    expectBool("T16 ARMED 중 재호출", rearmGateOnService(&g, true, false), false);
     expectU32("T16 사유 = ALREADY", g.rejectReason, REARM_REJECT_ALREADY);
     expectState("T16 ARMED 유지", g, DRIVE_ARMED);
 }
@@ -358,12 +469,12 @@ static void t17_service_counter_counts_rejections()
 {
     RearmGate g;
     rearmGateInit(&g);
-    rearmGateOnService(&g, true, false, 10);         // 1 거절 ZERO_HOLD
-    rearmGateOnService(&g, true, true, 20);          // 2 거절 ESTOP
-    rearmGateOnService(&g, false, false, 30);        // 3 성공 disable
+    rearmGateOnService(&g, true, false);             // 1 거절 ZERO_HOLD
+    rearmGateOnService(&g, true, true);              // 2 거절 ESTOP
+    rearmGateOnService(&g, false, false);            // 3 성공 disable
     feedZeros(g, 100, 600, 50);
-    rearmGateOnService(&g, true, false, 600);        // 4 성공 → PENDING
-    rearmGateOnService(&g, true, false, 610);        // 5 거절 ALREADY
+    rearmGateOnService(&g, true, false);             // 4 성공 → ARMING
+    rearmGateOnService(&g, true, false);             // 5 거절 ALREADY
     expectU32("T17 누계", g.serviceCalls, 5);
 }
 
@@ -374,7 +485,7 @@ static void t18_ready_is_stable()
     rearmGateInit(&g);
     feedZeros(g, 0, 5000, 50);
     expectState("T18 zero 5초", g, DRIVE_READY);
-    expectBool("T18 서비스 성공", rearmGateOnService(&g, true, false, 5000), true);
+    expectBool("T18 서비스 성공", rearmGateOnService(&g, true, false), true);
 }
 
 // ── T19 READY 에서 비영이 오면 READY 를 잃는다 ─────────────────────────────
@@ -411,7 +522,8 @@ static void t21_millis_wraparound()
     rearmGateOnCommand(&g, 0.0, 0.0, (uint32_t)(nearMax + 500));
     expectState("T21 랩 넘어 500ms", g, DRIVE_READY);
 
-    rearmGateOnService(&g, true, false, (uint32_t)(nearMax + 500));
+    rearmGateOnService(&g, true, false);
+    rearmGateArmBarrierStart(&g, (uint32_t)(nearMax + 500));
     rearmGateTick(&g, (uint32_t)(nearMax + 999));
     expectState("T21 랩 넘어 장벽 499ms", g, DRIVE_PENDING);
     rearmGateTick(&g, (uint32_t)(nearMax + 1000));
@@ -432,13 +544,17 @@ static void t22_field_procedure()
     feedZeros(g, 1000, 1500, 100);
     expectState("T22 ② zero 0.5초", g, DRIVE_READY);
 
-    // ③ 서비스
-    expectBool("T22 ③ enable", rearmGateOnService(&g, true, false, 1500), true);
-    expectState("T22 ③ 응답 시점", g, DRIVE_PENDING);
+    // ③ 서비스 (콜백 반환 = ARMING, 아직 응답 전)
+    expectBool("T22 ③ enable", rearmGateOnService(&g, true, false), true);
+    expectState("T22 ③ 콜백 반환 시점", g, DRIVE_ARMING);
 
-    // ④ 장벽 0.5초 (zero 를 계속 줘도 되고 안 줘도 된다)
+    // ④ 응답 전송 뒤 장벽 시작 → 0.5초
+    rearmGateArmBarrierStart(&g, 1502);
+    expectState("T22 ④ 응답 전송 직후", g, DRIVE_PENDING);
     feedZeros(g, 1600, 1900, 100);
-    rearmGateTick(&g, 2000);
+    rearmGateTick(&g, 2001);
+    expectState("T22 ④ 응답+499ms 는 아직", g, DRIVE_PENDING);
+    rearmGateTick(&g, 2002);                         // 1502 + 500
     expectState("T22 ④ 장벽 완주", g, DRIVE_ARMED);
 
     // ⑤ 주행
@@ -452,9 +568,477 @@ static void t22_field_procedure()
                  rearmGateOnCommand(&g, 0.05, 0.0, 2100), DRIVE_EFFECT_HOLD);
 }
 
+// ============================================================================
+// §55.1 — 장벽 시계가 서비스 응답 **전송 뒤**에 시작한다
+// ============================================================================
+
+// ── T23 콜백만으로는 시계가 없다. tick 을 아무리 줘도 무장되지 않는다 ──────
+static void t23_arming_has_no_clock()
+{
+    RearmGate g;
+    rearmGateInit(&g);
+    feedZeros(g, 0, 500, 50);
+    expectBool("T23 서비스 성공", rearmGateOnService(&g, true, false), true);
+    expectState("T23 콜백 반환 = ARMING", g, DRIVE_ARMING);
+
+    // 🔴 구판(§55.1 이전)은 여기서 이미 PENDING 이라 아래 tick 이 무장시켰다.
+    for (uint32_t t = 500; t <= 60000; t += 500) {
+        rearmGateTick(&g, t);
+    }
+    expectState("T23 tick 60초 — 여전히 ARMING", g, DRIVE_ARMING);
+
+    // 응답이 나가야 비로소 시계가 돈다.
+    rearmGateArmBarrierStart(&g, 60000);
+    expectState("T23 응답 전송 직후", g, DRIVE_PENDING);
+    rearmGateTick(&g, 60499);
+    expectState("T23 장벽 499ms", g, DRIVE_PENDING);
+    rearmGateTick(&g, 60500);
+    expectState("T23 장벽 500ms", g, DRIVE_ARMED);
+}
+
+// ── T24 §55.1 P1 — 콜백↔응답 지연 δ 를 주입해도 장벽은 **응답 기준** 500ms ─
+// 검토가 요구한 필수 부정 회귀: δ 를 1ms·경계값·큰 값으로 주입하고, 각 경우
+// 응답 기준 +499ms 비영은 전부 거절 · +500ms 뒤 새 비영은 주행이어야 한다.
+static void t24_barrier_is_measured_from_response()
+{
+    const uint32_t deltas[7] = {0, 1, 2, 50, 499, 500, 5000};
+    const uint32_t tCallback = 500;
+
+    for (int i = 0; i < 7; ++i) {
+        const uint32_t delta = deltas[i];
+        const uint32_t tResponse = tCallback + delta;
+        char label[128];
+
+        // ── ① 응답 기준 +499ms 의 잔류 비영은 반드시 거절 ──
+        {
+            RearmGate g;
+            rearmGateInit(&g);
+            feedZeros(g, 0, tCallback, 50);
+            rearmGateOnService(&g, true, false);
+            rearmGateArmBarrierStart(&g, tResponse);
+
+            // 구판은 시계가 tCallback 부터라 여기서 이미 ARMED 가 될 수 있었다.
+            rearmGateTick(&g, tResponse + REARM_POST_ARM_QUIET_MS - 1);
+            std::snprintf(label, sizeof(label),
+                          "T24 δ=%ums · 응답+499ms 는 아직 장벽 안", delta);
+            expectState(label, g, DRIVE_PENDING);
+
+            std::snprintf(label, sizeof(label),
+                          "T24 δ=%ums · 응답+499ms 잔류 비영은 거절", delta);
+            expectEffect(label,
+                         rearmGateOnCommand(&g, 0.05, 0.0,
+                                            tResponse + REARM_POST_ARM_QUIET_MS - 1),
+                         DRIVE_EFFECT_HOLD);
+            expectState("T24 → DISARMED", g, DRIVE_DISARMED);
+        }
+
+        // ── ② 응답 기준 +500ms 뒤 새 비영은 주행 (역회귀) ──
+        {
+            RearmGate g;
+            rearmGateInit(&g);
+            feedZeros(g, 0, tCallback, 50);
+            rearmGateOnService(&g, true, false);
+            rearmGateArmBarrierStart(&g, tResponse);
+            rearmGateTick(&g, tResponse + REARM_POST_ARM_QUIET_MS);
+
+            std::snprintf(label, sizeof(label),
+                          "T24 δ=%ums · 응답+500ms 에 무장", delta);
+            expectState(label, g, DRIVE_ARMED);
+
+            std::snprintf(label, sizeof(label),
+                          "T24 δ=%ums · 그 뒤 새 비영은 주행", delta);
+            expectEffect(label,
+                         rearmGateOnCommand(&g, 0.05, 0.0,
+                                            tResponse + REARM_POST_ARM_QUIET_MS + 1),
+                         DRIVE_EFFECT_DRIVE);
+        }
+
+        // ── ③ 장벽 전 구간(응답 기준 0~499ms) 훑기 ──
+        for (uint32_t at = 0; at < REARM_POST_ARM_QUIET_MS; at += 50) {
+            RearmGate g;
+            rearmGateInit(&g);
+            feedZeros(g, 0, tCallback, 50);
+            rearmGateOnService(&g, true, false);
+            rearmGateArmBarrierStart(&g, tResponse);
+
+            std::snprintf(label, sizeof(label),
+                          "T24 δ=%ums · 응답+%ums 비영", delta, at);
+            expectEffect(label,
+                         rearmGateOnCommand(&g, 0.05, 0.0, tResponse + at),
+                         DRIVE_EFFECT_HOLD);
+            expectState("T24 → DISARMED", g, DRIVE_DISARMED);
+        }
+    }
+}
+
+// ── T25 콜백↔응답 **사이**에 도착한 비영은 장벽을 시작조차 못 하게 한다 ────
+static void t25_command_between_callback_and_response()
+{
+    RearmGate g;
+    rearmGateInit(&g);
+    feedZeros(g, 0, 500, 50);
+    rearmGateOnService(&g, true, false);
+    expectState("T25 ARMING", g, DRIVE_ARMING);
+
+    expectEffect("T25 응답 전 잔류 비영",
+                 rearmGateOnCommand(&g, 0.05, 0.0, 501), DRIVE_EFFECT_HOLD);
+    expectState("T25 → DISARMED", g, DRIVE_DISARMED);
+
+    // 🔴 그 뒤 응답이 나가도 되살아나면 안 된다.
+    rearmGateArmBarrierStart(&g, 502);
+    expectState("T25 응답 전송해도 DISARMED", g, DRIVE_DISARMED);
+    rearmGateTick(&g, 10000);
+    expectState("T25 tick 을 줘도 DISARMED", g, DRIVE_DISARMED);
+}
+
+// ── T26 ARMING 중 zero 는 무해하고, 장벽은 여전히 응답 시각 기준 ───────────
+static void t26_zero_during_arming_is_harmless()
+{
+    RearmGate g;
+    rearmGateInit(&g);
+    feedZeros(g, 0, 500, 50);
+    rearmGateOnService(&g, true, false);
+    feedZeros(g, 501, 600, 10);                      // 응답 전 zero 폭격
+    expectState("T26 ARMING 유지", g, DRIVE_ARMING);
+
+    rearmGateArmBarrierStart(&g, 600);
+    rearmGateTick(&g, 1099);
+    expectState("T26 응답+499ms", g, DRIVE_PENDING);
+    rearmGateTick(&g, 1100);
+    expectState("T26 응답+500ms", g, DRIVE_ARMED);
+}
+
+// ── T27 barrierStart 는 멱등하다 — 매 루프 불러도 장벽이 안 늘어난다 ───────
+static void t27_barrier_start_is_idempotent()
+{
+    RearmGate g;
+    rearmGateInit(&g);
+    feedZeros(g, 0, 500, 50);
+    rearmGateOnService(&g, true, false);
+    rearmGateArmBarrierStart(&g, 500);
+    expectU32("T27 장벽 시작 시각", g.quietSinceMs, 500);
+
+    // 스케치는 매 루프 부른다. 두 번째부터는 아무 일도 없어야 한다 —
+    // 그렇지 않으면 장벽이 영원히 뒤로 밀려 무장이 안 된다.
+    for (uint32_t t = 501; t <= 999; ++t) {
+        rearmGateArmBarrierStart(&g, t);
+    }
+    expectU32("T27 반복 호출 뒤에도 같은 시각", g.quietSinceMs, 500);
+    rearmGateTick(&g, 1000);
+    expectState("T27 원래 시각 기준 승격", g, DRIVE_ARMED);
+
+    // ARMED 에서 불려도 상태를 안 흔든다.
+    rearmGateArmBarrierStart(&g, 2000);
+    expectState("T27 ARMED 에서 호출", g, DRIVE_ARMED);
+}
+
+// ── T28 ARMING 중 E-stop·disable·중복 enable ───────────────────────────────
+static void t28_arming_interruptions()
+{
+    {   // disable
+        RearmGate g;
+        rearmGateInit(&g);
+        feedZeros(g, 0, 500, 50);
+        rearmGateOnService(&g, true, false);
+        expectBool("T28 ARMING 중 disable", rearmGateOnService(&g, false, false), true);
+        expectState("T28 → DISARMED", g, DRIVE_DISARMED);
+        rearmGateArmBarrierStart(&g, 510);
+        expectState("T28 그 뒤 응답 전송해도 DISARMED", g, DRIVE_DISARMED);
+    }
+    {   // E-stop (호출자가 disarm 을 부른다)
+        RearmGate g;
+        rearmGateInit(&g);
+        feedZeros(g, 0, 500, 50);
+        rearmGateOnService(&g, true, false);
+        rearmGateDisarm(&g);
+        expectState("T28 ARMING 중 E-stop", g, DRIVE_DISARMED);
+        rearmGateArmBarrierStart(&g, 510);
+        expectState("T28 E-stop 뒤 응답 전송해도 DISARMED", g, DRIVE_DISARMED);
+    }
+    {   // 중복 enable
+        RearmGate g;
+        rearmGateInit(&g);
+        feedZeros(g, 0, 500, 50);
+        rearmGateOnService(&g, true, false);
+        expectBool("T28 ARMING 중 재호출", rearmGateOnService(&g, true, false), false);
+        expectU32("T28 사유 = ALREADY", g.rejectReason, REARM_REJECT_ALREADY);
+        expectState("T28 ARMING 유지", g, DRIVE_ARMING);
+    }
+}
+
+// ── T29 ARMING 상태에서는 어떤 명령도 구동이 아니다 ────────────────────────
+static void t29_arming_never_drives()
+{
+    for (uint32_t at = 500; at <= 600; at += 10) {
+        RearmGate g;
+        rearmGateInit(&g);
+        feedZeros(g, 0, 500, 50);
+        rearmGateOnService(&g, true, false);
+        expectEffect("T29 ARMING 중 비영은 HOLD",
+                     rearmGateOnCommand(&g, 0.05, 0.0, at), DRIVE_EFFECT_HOLD);
+    }
+}
+
+// ============================================================================
+// §55.2 — 정지 배선 (drive_wiring.h) · 가짜 모터로 관측
+// ============================================================================
+
+// ── T30 driveDisarm 은 전이 + 정지 + 플래그 해제를 한 번에 한다 ────────────
+static void t30_disarm_stops_motors()
+{
+    const uint8_t targets[5] = {DRIVE_DISARMED, DRIVE_READY, DRIVE_ARMING,
+                                DRIVE_PENDING, DRIVE_ARMED};
+    for (int i = 0; i < 5; ++i) {
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        if (targets[i] != DRIVE_DISARMED) {
+            feedZeros(g, 0, 500, 50);
+        }
+        if (targets[i] == DRIVE_ARMING || targets[i] == DRIVE_PENDING ||
+            targets[i] == DRIVE_ARMED) {
+            rearmGateOnService(&g, true, false);
+        }
+        if (targets[i] == DRIVE_PENDING || targets[i] == DRIVE_ARMED) {
+            rearmGateArmBarrierStart(&g, 500);
+        }
+        if (targets[i] == DRIVE_ARMED) {
+            rearmGateTick(&g, 1000);
+        }
+        expectState("T30 사전 상태", g, targets[i]);
+
+        sink.cmdVelReceived = true;
+        sink.motorsCommanded = true;
+        const int before = sink.stopCalls;
+
+        driveDisarm(&g, sink);
+
+        // 🔴 §54.1 의 진짜 구판은 이 세 줄이 안 나는 것이었다.
+        expectState("T30 disarm 뒤 상태", g, DRIVE_DISARMED);
+        expectU32("T30 stopAllMotors 가 불렸다",
+                  (uint32_t)(sink.stopCalls - before), 1);
+        expectBool("T30 수신 플래그 해제", sink.cmdVelReceived, false);
+        expectBool("T30 모터 정지", sink.motorsCommanded, false);
+    }
+}
+
+// ── T31 출력단 가드는 ARMED + E-stop 해제일 때만 통과한다 ──────────────────
+static void t31_output_guard()
+{
+    const uint8_t states[5] = {DRIVE_DISARMED, DRIVE_READY, DRIVE_ARMING,
+                               DRIVE_PENDING, DRIVE_ARMED};
+    for (int i = 0; i < 5; ++i) {
+        for (int estop = 0; estop < 2; ++estop) {
+            RearmGate g;
+            FakeDriveSink sink;
+            rearmGateInit(&g);
+            g.state = states[i];
+            sink.cmdVelReceived = true;
+            sink.motorsCommanded = true;
+
+            const bool want = (states[i] == DRIVE_ARMED) && (estop == 0);
+            char label[128];
+            std::snprintf(label, sizeof(label), "T31 %s · estop=%d 출력 허용",
+                          stateName(states[i]), estop);
+            const bool got = driveOutputAllowed(&g, estop != 0, sink);
+            expectBool(label, got, want);
+
+            if (want) {
+                expectU32("T31 허용이면 정지를 안 부른다",
+                          (uint32_t)sink.stopCalls, 0);
+            } else {
+                // 🔴 §54.1 의 두 번째 겹. 이 분기를 지우는 것이 검토자의 변이 ②였다.
+                expectU32("T31 불허면 그 자리에서 정지", (uint32_t)sink.stopCalls, 1);
+                expectBool("T31 불허면 수신 플래그 해제", sink.cmdVelReceived, false);
+                expectBool("T31 불허면 모터 정지", sink.motorsCommanded, false);
+            }
+        }
+    }
+}
+
+// ── T32 거절된 /cmd_vel 은 그 자리에서 정지한다 ────────────────────────────
+static void t32_rejected_command_stops()
+{
+    {   // 비유한 입력
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        armFully(g, 0);
+        sink.motorsCommanded = true;
+        sink.cmdVelReceived = true;
+        expectBool("T32 NaN 은 거절", driveOnCommand(&g, NAN, 0.0, 1100, sink), false);
+        expectU32("T32 정지 호출", (uint32_t)sink.stopCalls, 1);
+        expectBool("T32 수신 플래그 해제", sink.cmdVelReceived, false);
+        expectBool("T32 모터 정지", sink.motorsCommanded, false);
+    }
+    {   // 무장 전 비영
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        expectBool("T32 DISARMED 에서 비영은 거절",
+                   driveOnCommand(&g, 0.05, 0.0, 10, sink), false);
+        expectU32("T32 정지 호출", (uint32_t)sink.stopCalls, 1);
+    }
+    {   // 정상 주행 (역회귀)
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        const uint32_t armedAt = armFully(g, 0);
+        expectBool("T32 ARMED 에서 비영은 수용",
+                   driveOnCommand(&g, 0.05, 0.0, armedAt + 1, sink), true);
+        expectU32("T32 정지를 안 부른다", (uint32_t)sink.stopCalls, 0);
+        expectBool("T32 수신 플래그 설정", sink.cmdVelReceived, true);
+        expectU32("T32 마지막 명령 시각", sink.lastCmdVelMs, armedAt + 1);
+    }
+}
+
+// ── T33 서비스 응답 **전에** 정지가 끝나 있다 ──────────────────────────────
+static void t33_service_stops_before_response()
+{
+    {   // disable — 검토 §55.2 완료판정의 그 자리
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        armFully(g, 0);
+        sink.motorsCommanded = true;
+        sink.cmdVelReceived = true;
+
+        const bool success = driveOnServiceRequest(&g, false, false, sink);
+        // 반환값을 응답에 넣기 **전에** 이미 관측되는 사실들:
+        expectBool("T33 disable 성공", success, true);
+        expectState("T33 → DISARMED", g, DRIVE_DISARMED);
+        expectU32("T33 응답 전 정지 호출", (uint32_t)sink.stopCalls, 1);
+        expectBool("T33 응답 전 모터 0", sink.motorsCommanded, false);
+        expectBool("T33 응답 전 수신 플래그 0", sink.cmdVelReceived, false);
+    }
+    {   // enable 성공 — ARMING 이므로 여전히 정지 상태여야 한다
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        feedZeros(g, 0, 500, 50);
+        const bool success = driveOnServiceRequest(&g, true, false, sink);
+        expectBool("T33 enable 성공", success, true);
+        expectState("T33 → ARMING", g, DRIVE_ARMING);
+        expectU32("T33 무장 성공해도 응답 전 정지", (uint32_t)sink.stopCalls, 1);
+        expectBool("T33 모터 0 유지", sink.motorsCommanded, false);
+    }
+    {   // enable 거절
+        RearmGate g;
+        FakeDriveSink sink;
+        rearmGateInit(&g);
+        const bool success = driveOnServiceRequest(&g, true, false, sink);
+        expectBool("T33 zero-hold 없이 enable 은 거절", success, false);
+        expectU32("T33 거절도 정지", (uint32_t)sink.stopCalls, 1);
+    }
+}
+
+// ── T34 스케치 모사 — 전 과정에서 ARMED 밖에서는 모터가 안 돈다 ────────────
+// 🔴 이것이 검토 §55.2 가 요구한 "두 정지 강제점을 되돌리면 FAIL" 의 본체다.
+//    disarmDrive 의 정지를 빼면 ⑤·⑧ 에서, 출력단 가드를 빼면 ④·⑥ 에서 죽는다.
+static void t34_sketch_model_invariant()
+{
+    SketchModel m;
+
+    // ① 부팅 — 명령을 아무리 줘도 안 돈다
+    for (uint32_t t = 0; t < 300; t += 20) {
+        m.onCmdVel(0.2, 0.1, t);
+        m.updateOutputs();
+        m.expectInvariant("T34 ① 부팅 직후");
+    }
+
+    // ② zero 0.5초 → READY
+    for (uint32_t t = 1000; t <= 1500; t += 50) {
+        m.onCmdVel(0.0, 0.0, t);
+        m.updateOutputs();
+        m.expectInvariant("T34 ② zero-hold 중");
+    }
+    expectState("T34 ② READY", m.gate, DRIVE_READY);
+
+    // ③ enable — 콜백 반환은 ARMING, 응답 전이라 아직 못 돈다
+    expectBool("T34 ③ enable 성공", m.onService(true), true);
+    expectState("T34 ③ ARMING", m.gate, DRIVE_ARMING);
+    m.updateOutputs();
+    m.expectInvariant("T34 ③ 응답 전");
+
+    // ④ 응답 전송 전에 도착한 잔류 비영 → 떨어진다
+    m.onCmdVel(0.3, 0.0, 1501);
+    m.updateOutputs();
+    expectState("T34 ④ 잔류 명령 → DISARMED", m.gate, DRIVE_DISARMED);
+    m.expectInvariant("T34 ④ 잔류 명령 뒤");
+    expectBool("T34 ④ 모터 0", m.sink.motorsCommanded, false);
+
+    // ⑤ 다시 처음부터 — zero → enable → 응답 → 장벽 완주
+    for (uint32_t t = 2000; t <= 2500; t += 50) {
+        m.onCmdVel(0.0, 0.0, t);
+        m.updateOutputs();
+        m.expectInvariant("T34 ⑤ 재시도 zero-hold");
+    }
+    expectBool("T34 ⑤ enable", m.onService(true), true);
+    m.afterSpin(2502);
+    expectState("T34 ⑤ 응답 뒤 PENDING", m.gate, DRIVE_PENDING);
+    for (uint32_t t = 2510; t < 3002; t += 10) {
+        m.onCmdVel(0.0, 0.0, t);
+        m.safetyTick(t);
+        m.updateOutputs();
+        m.expectInvariant("T34 ⑤ 장벽 중");
+    }
+    expectState("T34 ⑤ 응답+499ms 는 아직", m.gate, DRIVE_PENDING);
+    m.safetyTick(3002);                              // 2502 + 500
+    expectState("T34 ⑤ 장벽 완주", m.gate, DRIVE_ARMED);
+
+    // ⑥ 주행 — 여기서만 돈다
+    m.onCmdVel(0.2, 0.0, 3010);
+    m.updateOutputs();
+    expectBool("T34 ⑥ ARMED 에서 모터가 돈다", m.sink.motorsCommanded, true);
+    m.expectInvariant("T34 ⑥ 주행 중");
+
+    // ⑦ E-stop → 그 자리에서 0
+    m.estop = true;
+    m.safetyTick(3020);
+    expectState("T34 ⑦ E-stop → DISARMED", m.gate, DRIVE_DISARMED);
+    expectBool("T34 ⑦ 모터 0", m.sink.motorsCommanded, false);
+    m.updateOutputs();
+    m.expectInvariant("T34 ⑦ E-stop 뒤");
+
+    // ⑧ E-stop 해제 — 자동 재가동은 없다
+    m.estop = false;
+    for (uint32_t t = 3100; t < 5000; t += 20) {
+        m.onCmdVel(0.2, 0.0, t);       // 계속 비영을 쏜다
+        m.safetyTick(t);
+        m.updateOutputs();
+        m.expectInvariant("T34 ⑧ E-stop 해제 뒤 비영 폭격");
+    }
+    expectState("T34 ⑧ 여전히 DISARMED", m.gate, DRIVE_DISARMED);
+    expectBool("T34 ⑧ 모터 0", m.sink.motorsCommanded, false);
+}
+
+// ── T35 주행 중 disable — 응답 전에 모터가 0 이다 ──────────────────────────
+static void t35_disable_while_driving()
+{
+    SketchModel m;
+    for (uint32_t t = 0; t <= 500; t += 50) {
+        m.onCmdVel(0.0, 0.0, t);
+    }
+    m.onService(true);
+    m.afterSpin(500);
+    m.safetyTick(1000);
+    expectState("T35 무장", m.gate, DRIVE_ARMED);
+
+    m.onCmdVel(0.2, 0.0, 1010);
+    m.updateOutputs();
+    expectBool("T35 주행 중", m.sink.motorsCommanded, true);
+
+    const int before = m.sink.stopCalls;
+    expectBool("T35 disable 성공", m.onService(false), true);
+    expectU32("T35 응답 전 정지 호출", (uint32_t)(m.sink.stopCalls - before), 1);
+    expectBool("T35 응답 전 모터 0", m.sink.motorsCommanded, false);
+    expectBool("T35 응답 전 수신 플래그 0", m.sink.cmdVelReceived, false);
+    m.expectInvariant("T35 disable 뒤");
+}
+
 int main()
 {
-    std::printf("=== re-arm 래치 상태 전이 harness (검토 §54 보완) ===\n");
+    std::printf("=== re-arm 래치 상태 전이 + 정지 배선 harness (검토 §54·§55) ===\n");
     std::printf("  zero-hold %ums · post-response quiet %ums\n\n",
                 REARM_ZERO_HOLD_MS, REARM_POST_ARM_QUIET_MS);
 
@@ -480,13 +1064,29 @@ int main()
     t20_tiny_nonzero_is_nonzero();
     t21_millis_wraparound();
     t22_field_procedure();
+    // §55.1 — 장벽 시계의 기준점
+    t23_arming_has_no_clock();
+    t24_barrier_is_measured_from_response();
+    t25_command_between_callback_and_response();
+    t26_zero_during_arming_is_harmless();
+    t27_barrier_start_is_idempotent();
+    t28_arming_interruptions();
+    t29_arming_never_drives();
+    // §55.2 — 정지 배선
+    t30_disarm_stops_motors();
+    t31_output_guard();
+    t32_rejected_command_stops();
+    t33_service_stops_before_response();
+    t34_sketch_model_invariant();
+    t35_disable_while_driving();
 
     std::printf("\n검사 %d건 · 실패 %d건\n", g_checks, g_failures);
     if (g_failures != 0) {
-        std::printf("FAIL 상태 전이 계약이 깨졌다 — 굽지 않는다.\n");
+        std::printf("FAIL 상태 전이·정지 배선 계약이 깨졌다 — 굽지 않는다.\n");
         return 1;
     }
-    std::printf("OK   전이표 전량 통과. ⚠ 이것은 rearm_gate.h 의 증거이지\n");
-    std::printf("     .ino 배선·모터 출력의 증거가 아니다 (JETSON_SETUP §7-c-E).\n");
+    std::printf("OK   전이표 + 정지 배선 전량 통과.\n");
+    std::printf("     ⚠ 스케치가 이 함수들을 부르는지는 2단계 구조 검사가 본다.\n");
+    std::printf("     ⚠ PWM 파형·publish 내용은 실기 JETSON_SETUP §7-c-E 가 본다.\n");
     return 0;
 }

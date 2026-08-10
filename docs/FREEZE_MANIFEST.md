@@ -1152,3 +1152,63 @@ B 는 `0.05 m/s` 전류(1~3A)의 증명이지 **끼임 11A 의 증명이 아니�
 ⚠ **이번 회차에서 검토자가 승인하지 않은 것** — 빌드 성공은 구현자 주장이고(§54.6),
 harness 통과는 **`rearm_gate.h` 의 증거이지 `.ino` 배선의 증거가 아니다.** 배선은 실기
 `JETSON_SETUP §7-c-E` 가 관측한다. 실차 통전·배선 변경·펌웨어 업로드는 하지 않았다.
+
+## 10.23 검토 §55 회수 — §54 보완이 남긴 P1 2건 (2026-08-11)
+
+**대상 = `firmware/**` + `tools/` + 문서. `src/**` 는 한 글자도 안 건드렸다.**
+동결 무접촉 증거 = `git diff --name-only 0784ad6..<이 커밋> | grep ^src/` **0건**.
+
+🔴 **두 P1 은 §54 지적의 재개방이 아니라 §54 보완이 새로 만든 표면이다** — §54 시점에는
+존재하지 않던 코드(`rearm_gate.h`·새 harness·새 배선)를 본 것이다. 재개방 0건 = 수렴 중.
+
+| | 결함 | 반영 |
+|---|---|---|
+| §55.1 P1 | quiet 장벽 시계가 서비스 **응답 전송보다 이르게** 시작한다 (`rclc` 는 콜백 반환 뒤 `rcl_send_response` 를 부른다) | ✅ `ARMING` 상태 신설 — 콜백은 표식만, 시계는 spin 이 응답 전송까지 마치고 돌아온 뒤 `loop()` 이 `rearmGateArmBarrierStart()` 로 시작. 🔴 **`rearmGateOnService()` 에서 시각 인자를 삭제**해 콜백 안에서는 시작이 불가능하게 만들었다 |
+| §55.2 P1 | `.ino` 정지 배선을 구판으로 되돌려도 harness 가 **412/412 통과** | ✅ 정지를 `drive_wiring.h`(순수 헤더)로 옮기고 host 에 **가짜 모터**(`FakeDriveSink`)를 꽂았다. + 스케치가 그 함수들을 부르는지 보는 **구조 검사 7건** 추가 |
+| §55.3 P2 | 핸드오프 금지범위·완료판정이 이전 Tier B 묶음 | ✅ 네 자리를 §55 Tier A 로 이동. 🔴 **`handoff_single_check.sh`·`doc_check --strict` 는 이 모순에 OK 를 냈다** — 예약 23 상한의 재관측이며 새 P1 로 중복 계수하지 않는다 |
+
+### 🔴 정본이 거짓을 말하고 있었다 — 그 정정이 이 묶음의 절반이다
+
+`TEST_GATES §7` 과 `REAL_ROBOT_VALUES §1-f` ⓹ 는 **"세 P1 을 각각 구판으로 되돌리면 FAIL 이
+20·67·24줄 난다"** 고 적고 있었다. §54.1 자리(24줄)는 **진짜 구판이 아니라** 헤더 안의 타이머
+초기화를 지운 **대역**이었고, 검토자가 실제 `.ino` 배선(`disarmDrive()` 의 정지 · 출력단 가드)을
+되돌리자 harness 는 **rc=0 으로 통과**했다. 대역을 죽여 놓고 본체를 죽였다고 쓴 것이다.
+
+⚠ **같은 종류의 실패가 이 저장소에 이미 박제돼 있다** — `TEST_GATES §21 P2-①`("채점자가 답안을
+안 보고 자기 답을 채점"). 08-11 에 같은 자리에서 재발했다.
+
+### 변이 시험 재현 절차 (검토자용)
+
+저장소를 건드리지 않고 임시 사본에서 돌린다. **M0 만 rc=0 이어야 한다.**
+
+```bash
+W=$(mktemp -d); mkdir -p "$W/tools" "$W/firmware"
+cp -r firmware/teensy_integrated_base_v1_4 "$W/firmware/"
+cp tools/rearm_gate_host_test.cpp tools/rearm_gate_host_test.sh "$W/tools/"
+# 아래 8종 중 하나를 "$W/firmware/teensy_integrated_base_v1_4/" 에 가한 뒤
+bash "$W/tools/rearm_gate_host_test.sh"; echo "rc=$?"
+```
+
+| 변이 | 파일 | 관측값 |
+|---|---|---|
+| M0 무변이 | — | rc=0 · FAIL 0줄 |
+| M1 `driveDisarm` 의 `stopAllMotors`·플래그 제거 | `drive_wiring.h` | **rc=1 · 16줄** |
+| M2 `driveOutputAllowed` 가드 제거(항상 true) | `drive_wiring.h` | **rc=1 · 36줄** |
+| M3 M1+M2 | `drive_wiring.h` | **rc=1 · 53줄** |
+| M4 `rearmGateTick` 이 `ARMING` 도 승격 | `rearm_gate.h` | **rc=1 · 3줄** |
+| M5 장벽 시작을 서비스 콜백 안으로 되돌림 | `.ino` | **rc=1 · 구조 검사 3줄** |
+| M6 서비스 성공이 곧바로 `ARMED` | `rearm_gate.h` | **rc=1 · 266줄** |
+| M7 비유한 입력이 조기 `return` | `rearm_gate.h` | **rc=1 · 20줄** |
+
+🔴 **M1·M2·M3 이 검토자가 실제로 가한 변이다** — 08-11 이전 판에서는 이 셋이 전부 rc=0 이었다.
+⚠ **M5 는 구조 검사에서만 죽는다.** 동작 검사는 초록이다. 스케치가 헤더를 부르는지는 텍스트로만
+보므로 **약한 증거**이고, 약한 줄 알고 쓴다.
+
+🔴 **지문 대상이 2개 → 3개가 됐다** (`drive_wiring.h` 추가). 세 sha256 = `FIRMWARE_REBUILD §4-a`.
+🔴 **지문은 아직 안 옮겼다. `firmware_precheck` `rc=1` 이 정상이고 굽지 않는다.**
+
+⚠ **이번 회차에도 승인되지 않은 것** — 빌드 성공은 구현자 주장이다. harness 는 두 헤더의
+증거이지 `.ino` 배선의 **동작** 증거가 아니고(구조 검사는 호출 여부만 본다), PWM 파형·publish
+내용은 실기 `JETSON_SETUP §7-c-E` 몫이다. 응답이 **클라이언트에 닿은** 시각은 펌웨어가 관측할
+수 없어 §55.1 보완 뒤에도 **agent→client 전송 지연은 미실측**으로 남는다. 실차 통전·배선
+변경·펌웨어 업로드는 하지 않았다.

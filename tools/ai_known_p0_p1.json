@@ -97,5 +97,7 @@
   {"id":"0801-spare-relay-count-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"},
   {"id":"0811-disarm-must-stop-motors-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"`[DISARMED]` 진입은 그 자리에서 모터를 세우는 것까지가 한 동작이다"},
   {"id":"0811-service-response-barrier-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"성공 응답은 무장이 아니라 **장벽의 시작**이다"},
-  {"id":"0811-nonfinite-breaks-zero-hold-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"}
+  {"id":"0811-nonfinite-breaks-zero-hold-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"},
+  {"id":"0811-quiet-clock-starts-after-response-55","path":"firmware/teensy_integrated_base_v1_4/rearm_gate.h","anchor":"콜백은 `[ARMING]` 만 표식하고, 시계는 spin 이 응답 전송까지 마치고 돌아온 뒤"},
+  {"id":"0811-harness-must-see-motor-wiring-55","path":"firmware/teensy_integrated_base_v1_4/drive_wiring.h","anchor":"안전 출력 경로의 자동 방어가 0 이었는데"}
 ]

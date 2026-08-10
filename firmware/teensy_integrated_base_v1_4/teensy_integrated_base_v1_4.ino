@@ -25,6 +25,7 @@
 #include <rosidl_runtime_c/string_functions.h>
 
 #include "rearm_gate.h"
+#include "drive_wiring.h"
 
 // ============================================================================
 // Firmware identity
@@ -210,6 +211,12 @@ static const uint32_t ODOM_PERIOD_US = 20000;
 // transition on a PC with no board and no waiting. What lives in this file is
 // only the wiring: read the clock, ask the gate, and act on the answer.
 // (2026-08-11, review §54.7 — states/rejects/timings all moved into that header.)
+//
+// 🔴 The motor-stop side of each transition is not here either — it is
+// drive_wiring.h (2026-08-11, review §55.2). Keeping it in this file meant the
+// host test could not see it, so reverting the safety wiring left the gate green.
+// Everything below asks drive_wiring.h and does what it is told; the only thing
+// this file still owns is what a stop physically means on this board.
 // ============================================================================
 
 // ============================================================================
@@ -348,6 +355,28 @@ void publishImu(uint64_t timestampNs,
                 double accelX,
                 double accelY,
                 double accelZ);
+
+// ============================================================================
+// Drive sink — what a stop means on this board (review §55.2)
+// ============================================================================
+//
+// drive_wiring.h decides *when* to stop; this decides *what* stopping is. The
+// host test substitutes FakeDriveSink for this struct and gets the same
+// decisions, so reverting either enforcement point now fails on a PC.
+//
+// It is three one-line forwarders on purpose: anything with a branch in here
+// would be logic that the host test cannot see again.
+struct TeensyDriveSink {
+  void stopAllMotors() { ::stopAllMotors(); }
+  void setCmdVelReceived(bool value) { cmdVelReceived = value; }
+  void noteCommandAccepted(uint32_t nowMs)
+  {
+    lastCmdVelMs = nowMs;
+    cmdVelReceived = true;
+  }
+};
+
+TeensyDriveSink driveSink;
 
 // ============================================================================
 // Utilities
@@ -662,9 +691,9 @@ void updateMotorOutputs()
   // /drive/enable) let the motors keep their PWM until the watchdog expired.
   // Motion is now structurally impossible outside DRIVE_ARMED: even a path that
   // forgets to stop cannot produce output, because this is the only writer.
-  if (isEstopActive() || driveGate.state != DRIVE_ARMED) {
-    stopAllMotors();
-    cmdVelReceived = false;
+  // 🔴 Review §55.2 — the guard itself lives in drive_wiring.h so that deleting
+  // it is a host-test failure and not a silent one.
+  if (!driveOutputAllowed(&driveGate, isEstopActive(), driveSink)) {
     return;
   }
 
@@ -703,11 +732,12 @@ void updateMotorOutputs()
 // the caller has to remember. Callers that skipped it left the motors running to
 // the watchdog while the state topic already read false. Both effects now happen
 // in one function, so all call sites get the invariant whether they knew it or not.
+// 🔴 Review §55.2 — that function is driveDisarm() in drive_wiring.h, not this
+// one. This is a name the sketch already used; the invariant it carries is now
+// somewhere the host test can revert and observe.
 void disarmDrive()
 {
-  rearmGateDisarm(&driveGate);
-  stopAllMotors();
-  cmdVelReceived = false;
+  driveDisarm(&driveGate, driveSink);
 }
 
 void checkSafety()
@@ -1058,25 +1088,25 @@ void cmdVelCallback(const void* messageInput)
   const uint32_t nowMs = millis();
 
   // The whole decision — including the non-finite case, the zero hold, and the
-  // post-response quiet barrier — is rearm_gate.h. Anything but DRIVE stops.
-  if (rearmGateOnCommand(&driveGate, linearX, angularZ, nowMs) !=
-      DRIVE_EFFECT_DRIVE) {
-    stopAllMotors();
-    cmdVelReceived = false;
+  // post-response quiet barrier — is rearm_gate.h, and the stop that goes with a
+  // rejected command is drive_wiring.h. Anything but true has already stopped.
+  if (!driveOnCommand(&driveGate, linearX, angularZ, nowMs, driveSink)) {
     return;
   }
 
-  lastCmdVelMs = nowMs;
-  cmdVelReceived = true;
   applySkidSteerCommand(linearX, angularZ);
 }
 
-// /drive/enable — the explicit arming step. std_srvs/SetBool: data=true starts
-// the post-response quiet barrier (it does NOT arm on its own — see §54.2 in
-// rearm_gate.h), data=false disarms. The response message string is
-// intentionally left empty: assigning it would allocate on every call, and the
-// reason code is published on /drive/diag where it can be watched without
-// polling the service.
+// /drive/enable — the explicit arming step. std_srvs/SetBool: data=true enters
+// ARMING (it does NOT arm on its own — see §54.2 and §55.1 in rearm_gate.h),
+// data=false disarms. The response message string is intentionally left empty:
+// assigning it would allocate on every call, and the reason code is published on
+// /drive/diag where it can be watched without polling the service.
+//
+// 🔴 Review §55.1 — there is no millis() in this function any more. rclc calls
+// rcl_send_response only after this callback returns, so any clock started here
+// runs before the response goes out and shortens the barrier by that much. The
+// barrier clock starts in loop(), after spin_some() has done the sending.
 void driveEnableCallback(const void* requestInput, void* responseOutput)
 {
   const auto* request =
@@ -1084,18 +1114,13 @@ void driveEnableCallback(const void* requestInput, void* responseOutput)
   auto* response =
       static_cast<std_srvs__srv__SetBool_Response*>(responseOutput);
 
-  const bool success =
-      rearmGateOnService(&driveGate, request->data, isEstopActive(), millis());
-
   // 🔴 Review §54.1 — the cleanup happens before the response is written, not
   // after. An operator who reads success:true on a disable has to be able to
   // treat it as "the motors are already at zero", and the only way to promise
-  // that is to do the stopping first. The gate never returns to ARMED here, so
-  // any outcome other than staying armed leaves this line stopping the motors.
-  if (driveGate.state != DRIVE_ARMED) {
-    stopAllMotors();
-    cmdVelReceived = false;
-  }
+  // that is to do the stopping first. driveOnServiceRequest() owns that order
+  // (review §55.2) so this file cannot get it wrong later.
+  const bool success = driveOnServiceRequest(
+      &driveGate, request->data, isEstopActive(), driveSink);
 
   response->success = success;
 }
@@ -1447,6 +1472,13 @@ void loop()
   checkSafety();
 
   RCSOFTCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(2)));
+
+  // 🔴 Review §55.1 — the quiet barrier clock starts HERE, not in the service
+  // callback. rclc runs the callback and only then calls rcl_send_response, both
+  // inside the spin above; by the time this line runs the response has been
+  // sent. Calling it every loop is intentional — it is a no-op unless the gate
+  // is in ARMING, and a gate left in ARMING never arms (fail-closed).
+  rearmGateArmBarrierStart(&driveGate, millis());
 
   checkSafety();
   updateMotorOutputs();

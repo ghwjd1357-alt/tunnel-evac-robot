@@ -141,38 +141,44 @@ sha256sum firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino  
 
 ### 🔴 4-a. 2026-08-11 현재 — 지문은 **아직 구판이다. `rc=1` 이 정상이고, 굽지 않는다**
 
-re-arm 래치(§54 보완)가 스케치를 고쳤고 **파일이 하나 늘었다**. 지문은 **독립 검토 승인 뒤에만**
-옮긴다(`REAL_ROBOT_VALUES §1-f` ⓷ — 6 을 5 보다 먼저 하면 지문이 새 내용을 스스로 승인한다).
+re-arm 래치(§54 보완 → §55 보완)가 스케치를 고쳤고 **파일이 둘 늘었다**. 지문은 **독립 검토
+승인 뒤에만** 옮긴다(`REAL_ROBOT_VALUES §1-f` ⓷ — 6 을 5 보다 먼저 하면 지문이 새 내용을 스스로
+승인한다).
 
 | 파일 | 현재 작업 트리 내용 sha256 | 지문 등록 |
 |---|---|---|
-| `teensy_integrated_base_v1_4.ino` | `79860d3805ac43c0463001f55d03224bca04f89be1e0b32d44094eecdef932b0` | ❌ 승인 대기 |
-| 🔴 `rearm_gate.h` **(신규)** | `03f1d23c1082a9eadbc7c115a53f0824fecba9eae6b80533b83bb0c8e4f91678` | ❌ 승인 대기 |
+| `teensy_integrated_base_v1_4.ino` | `aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02` | ❌ 승인 대기 |
+| 🔴 `rearm_gate.h` **(신규)** | `7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978` | ❌ 승인 대기 |
+| 🔴 `drive_wiring.h` **(신규)** | `f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663` | ❌ 승인 대기 |
 
-⚠ **`rearm_gate.h` 도 판정 대상이다** — `arduino-cli` 는 스케치 root 의 헤더를 함께 컴파일하고
+⚠ **root `.h` 도 판정 대상이다** — `arduino-cli` 는 스케치 root 의 헤더를 함께 컴파일하고
 `firmware_precheck.sh` 의 `is_sketch_source()` 가 root `.h` 를 소스로 분류한다. 지금은
 **미추적 소스**로 잡혀 `rc=1` 이 뜬다. 그게 맞다 — 아직 승인 전이다.
 
-승인이 나면 `--expect` 를 **두 개** 준다(기본값과 이 표를 같이 옮긴다):
+승인이 나면 `--expect` 를 **세 개** 준다(기본값과 이 표를 같이 옮긴다):
 ```bash
 bash tools/firmware_precheck.sh \
-  --expect firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=<추가>,<삭제>,79860d38... \
-  --expect firmware/teensy_integrated_base_v1_4/rearm_gate.h=<추가>,<삭제>,03f1d23c...
+  --expect firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=<추가>,<삭제>,aa8e75ec... \
+  --expect firmware/teensy_integrated_base_v1_4/rearm_gate.h=<추가>,<삭제>,7b3a0462... \
+  --expect firmware/teensy_integrated_base_v1_4/drive_wiring.h=<추가>,<삭제>,f4b6d65e...
 ```
 
 **2026-08-11 빌드 실측** (`arduino-cli compile -b teensy:avr:teensy41`, 링크 성공):
 
-| | 08-11 re-arm 구현 | **08-11 §54 보완(현재)** | 증감 |
-|---|---|---|---|
-| FLASH code | 294,112 | **294,112** | 0 |
-| RAM1 variables | 62,624 | **62,656** | +32 |
-| RAM1 free for locals | 297,824 | **297,792** | −32 |
-| RAM2 variables | 12,448 | **12,448** | 0 |
-| `.ino` 줄수 / bytes | 1,487 / — | **1,459 / 45,638** | −28줄 |
-| `rearm_gate.h` | — | **207 / 10,367** | 신규 |
+| | 08-11 re-arm 구현 | 08-11 §54 보완 | **08-11 §55 보완(현재)** | §54 대비 |
+|---|---|---|---|---|
+| FLASH code | 294,112 | 294,112 | **294,176** | +64 |
+| FLASH headers | 8,504 | 8,504 | **8,440** | −64 |
+| RAM1 variables | 62,624 | 62,656 | **62,656** | **0** |
+| RAM1 free for locals | 297,824 | 297,792 | **297,792** | 0 |
+| RAM2 variables | 12,448 | 12,448 | **12,448** | 0 |
+| `.ino` 줄수 / bytes | 1,487 / — | 1,459 / 45,638 | **1,491 / 47,808** | +32줄 |
+| `rearm_gate.h` | — | 207 / 10,367 | **247 / 13,693** | +40줄 |
+| `drive_wiring.h` | — | — | **101 / 5,196** | 신규 |
 
-🔴 **`.ino` 가 28줄 줄어든 것은 기능이 빠져서가 아니다** — 전이가 `rearm_gate.h` 로 옮겨갔고
-스케치에는 배선만 남았다. 두 파일 합은 늘었다. RAM +32 bytes 는 `RearmGate` 구조체 하나다.
+🔴 **RAM 증감이 0 인 것이 §55 보완의 성질을 그대로 보여준다.** `drive_wiring.h` 는 템플릿이고
+`TeensyDriveSink` 는 멤버가 없는 빈 구조체라 **런타임 비용도 데이터도 0** 이다 — 함수 포인터
+대신 템플릿을 쓴 이유가 이것이다. FLASH code +64 는 `DRIVE_ARMING` 분기 몇 개다.
 
 ### 4-b. 지문 갱신 규칙 (상시)
 
