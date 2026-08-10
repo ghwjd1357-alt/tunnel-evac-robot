@@ -94,5 +94,8 @@
   {"id":"0801-switch-breaker-load-break-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"통전 정격은 부하개폐 능력이 아니다"},
   {"id":"0801-lipo-alarm-warns-not-blocks-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"알람은 경고 장치이지 차단 장치가 아니다"},
   {"id":"0801-pin21-two-active-circuits-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"PIN21 회로를 지시하는 활성 문장은 하나여야 한다"},
-  {"id":"0801-spare-relay-count-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"}
+  {"id":"0801-spare-relay-count-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"},
+  {"id":"0811-disarm-must-stop-motors-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"`[DISARMED]` 진입은 그 자리에서 모터를 세우는 것까지가 한 동작이다"},
+  {"id":"0811-service-response-barrier-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"성공 응답은 무장이 아니라 **장벽의 시작**이다"},
+  {"id":"0811-nonfinite-breaks-zero-hold-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"}
 ]

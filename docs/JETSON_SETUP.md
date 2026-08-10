@@ -703,29 +703,60 @@ bag 3회(`~/Desktop/d0_evidence/d0_watchdog_0807_15{19,21,22}`, 노트북 보존
 
 ⚠ **전량 바퀴를 띄운 채로 한다.** 통과한 뒤에 내린다.
 
+🔴 **08-11 개정 — 상태가 4개가 됐고 무장에 단계가 하나 늘었다** (검토 §54).
+**전이 자체는 이 절에서 판정하지 않는다** — 그건 PC 에서 `bash tools/rearm_gate_host_test.sh`
+가 결정론적으로 끝냈다(412건). **이 절이 보는 것은 오직 배선이다**: 상태에 맞게 *모터가
+실제로 서는가*, *토픽이 실제로 나오는가*. 실기로 500ms 경계를 재려 들지 않는다.
+
 **준비** — 터미널 3개
 ```bash
 # T1  상태 관측 (이 창을 보면서 진행한다)
-ros2 topic echo /drive/enabled          # true/false
-# T2  진단 — x=서비스 호출수 · y=거절사유 · z=상태(0 DISARMED / 1 READY / 2 ARMED)
+ros2 topic echo /drive/enabled          # std_msgs/Bool — true 면 ARMED
+# T2  진단 — geometry_msgs/Vector3
+#     x = 서비스 호출수(거절 포함) · y = 거절사유 · z = 상태
+#     🔴 z: 0 DISARMED / 1 READY / 2 ARMED / 3 PENDING(08-11 신설)
 ros2 topic echo /drive/diag
 # T3  명령·서비스
 ```
 
-🔴 **먼저 볼 것 — 새 펌웨어가 실제로 올라갔는가.** `/drive/enabled` 토픽이 **존재하면**
-새 펌웨어다. 구판에는 없다. 없으면 업로드가 안 된 것이므로 여기서 멈춘다.
+🔴 **먼저 볼 것 — 새 펌웨어가 실제로 올라갔는가.** 두 단계다:
+```bash
+ros2 topic type /drive/enabled    # → std_msgs/msg/Bool           없으면 구판이다. 멈춘다
+ros2 topic type /drive/diag       # → geometry_msgs/msg/Vector3
+```
+
+🔴 **무장 절차가 4단계다** (`REAL_ROBOT_VALUES §1-f` ⓵):
+```
+① zero 를 0.5초 이상 발행    → z=1 (READY)
+② /drive/enable true 호출     → success:true, 🔴 z=3 (PENDING) — 아직 무장 아니다
+③ 0.5초 더 기다린다           → z=2 (ARMED), /drive/enabled=true
+     (그동안 zero 를 계속 줘도 되고 아예 안 줘도 된다. 비영을 주면 처음으로 돌아간다)
+④ 주행 명령
+```
+⚠ **②에서 `z=2` 가 바로 뜨면 그건 구판이다** — 장벽이 없는 펌웨어이므로 멈추고 §5 를 본다.
 
 | # | 넣는 것 (T3) | 기대 | 실패 시 뜻 |
 |---|---|---|---|
 | **부정 1** 🔴 | E-stop 누름 → `0.05` 연속 발행을 **켜 둔 채** E-stop 해제 | 바퀴 **안 돎**. `z` 가 0 에서 안 올라감 | 🔴 **이 래치의 존재 이유가 무너졌다. 즉시 중단** |
 | **부정 2** | 위 상태에서 `ros2 service call /drive/enable std_srvs/srv/SetBool "{data: true}"` | `success: false` · `y=2` | `x` 가 안 오르면 **서비스가 안 온 것**(로직 문제 아님) |
-| **부정 3** | E-stop 누른 채 같은 서비스 호출 | `success: false` · `y=1` | — |
-| **전환** | 발행 중지 → zero 를 0.5초 이상 → `z` 가 **1(READY)** 로 | `z=1` | zero 가 안 들어가고 있다 |
-| **역회귀 1** | READY 에서 서비스 호출 | `success: true` · `z=2` · `/drive/enabled` = **true** | — |
-| **역회귀 2** 🔴 | ARMED 에서 `0.05` 발행 → **발행을 끊는다** | **0.5초 안에 정지**(watchdog 이 산다) | 🔴 **re-arm 이 watchdog 을 가렸다 — R0 가 다시 깨진다** |
+| **부정 3** | E-stop 누른 채 같은 서비스 호출 | `success: false` · `y=1` · `z=0` | — |
+| **전환 1** | 발행 중지 → zero 를 0.5초 이상 | `z=1` (READY) | zero 가 안 들어가고 있다 |
+| **전환 2** 🔴 | READY 에서 서비스 호출 | `success: true` · **`z=3`(PENDING)** · `/drive/enabled` = **아직 false** | `z=2` 면 **장벽이 없는 구판**이다 |
+| **전환 3** 🔴 | 아무것도 안 하고 0.5초 기다림 | `z=2` · `/drive/enabled` = **true** | 장벽이 안 끝난다 |
+| **부정 6** 🔴 | 다시 처음부터: READY → 서비스 → **곧바로(0.5초 안에) `0.05` 발행** | 바퀴 **안 돎** · `z=0` 으로 떨어짐 · 그 뒤 기다려도 ARMED 안 됨 | 🔴 **§54.2 장벽이 배선되지 않았다** |
+| **역회귀 1** | 정상 4단계로 ARMED 만든 뒤 `0.05` 발행 | 주행 | — |
+| **역회귀 2** 🔴 | ARMED 주행 중 **발행을 끊는다** | **0.5초 안에 정지**(watchdog 이 산다) | 🔴 **re-arm 이 watchdog 을 가렸다 — R0 가 다시 깨진다** |
 | **부정 4** | 다시 ARMED 로 만든 뒤 주행 중 **E-stop 누름** | 즉시 정지 · `z=0` · `/drive/enabled` = false | — |
 | **부정 5** | ARMED 상태에서 서비스 재호출 | `success: false` · `y=3` | 멱등이 아니라 거절이다(설계 그대로) |
-| **해제** | `"{data: false}"` 호출 | `success: true` · `z=0` | 명시적 해제는 언제나 허용 |
+| **부정 7** 🔴 | **ARMED 로 `0.05` 주행 중** `"{data: false}"` 호출 (§54.1) | 🔴 **응답이 오는 순간 이미 바퀴가 서 있다** · `z=0` | 🔴 **응답 뒤에도 도는 시간이 있으면 §54.1 이 안 고쳐졌다** |
+| **부정 8** 🔴 | ARMED 주행 중 `linear.x: .nan` 발행 (§54.3) | 즉시 정지 · `z=0` · **재무장 필요** | 결정 ⓐ 대로다. `z` 가 2 로 남으면 안 고쳐졌다 |
+| **해제** | 어느 상태에서든 `"{data: false}"` | `success: true` · `z=0` | 명시적 해제는 언제나 허용 |
+
+> **부정 8 의 NaN 발행법** — YAML 은 `.nan` 이다:
+> ```bash
+> ros2 topic pub --times 3 -w 1 /cmd_vel geometry_msgs/msg/Twist \
+>   '{linear: {x: .nan, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+> ```
 
 ⚠ **`x`(서비스 호출수)를 매번 본다.** 굽기를 1회로 합친 대가를 이 숫자가 갚는다 —
 호출했는데 `x` 가 그대로면 **로직이 아니라 서비스 전달**이 문제다(`§5` 버전 정합).

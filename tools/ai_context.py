@@ -180,7 +180,8 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "tools/d0_check.sh", "tools/bag_gap_report.py", "tools/todo_d0_scan.py",
         # 검토 §52: R0 watchdog 판정기. 판정 기준은 `JETSON_SETUP §7-c-0` 이 소유하고
         # 이 도구는 그 기준에 넣을 수치를 만든다 — 둘을 같은 프로필에 둔다.
-        "tools/watchdog_report.py",
+        # 회귀도 같은 자리다 — 08-10 에 판정기만 넣고 그 테스트를 빠뜨렸다.
+        "tools/watchdog_report.py", "tools/test_watchdog_report.py",
     )),
     ("nav2", (
         "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",
@@ -207,9 +208,12 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     # 검토 §47.1: 굽기 전 오염 판정기는 `firmware/` 밖(`tools/`)에 있지만 계약은
     # `FIRMWARE_REBUILD §4` 가 소유한다 — 기대 증감을 이 둘이 따로 들면 곧 갈라진다.
+    # 검토 §54.7: re-arm 상태 전이 harness 도 같은 모양이다 — 파일은 `tools/` 에 있지만
+    # 계약은 `REAL_ROBOT_VALUES §1-f` 가 소유하고 대상은 스케치 헤더다.
     ("firmware", (
         "firmware/**", "firmware/*",
         "tools/firmware_precheck.sh", "tools/test_firmware_precheck.sh",
+        "tools/rearm_gate_host_test.cpp", "tools/rearm_gate_host_test.sh",
     )),
     ("docs", ("docs/*.md",)),
 )

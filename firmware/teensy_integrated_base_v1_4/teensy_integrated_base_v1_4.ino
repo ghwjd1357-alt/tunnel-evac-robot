@@ -24,6 +24,8 @@
 #include <std_srvs/srv/set_bool.h>
 #include <rosidl_runtime_c/string_functions.h>
 
+#include "rearm_gate.h"
+
 // ============================================================================
 // Firmware identity
 // Replace the zero SHA values with the real Git values before handover.
@@ -202,25 +204,13 @@ static const uint32_t ODOM_PERIOD_US = 20000;
 //
 // It does NOT replace the watchdog. WATCHDOG_TIMEOUT_MS still stops the motors
 // on command dropout while armed; see checkSafety().
+//
+// 🔴 The transition table itself is NOT here — it is rearm_gate.h, a pure header
+// with no Arduino dependency, so tools/rearm_gate_host_test.cpp can drive every
+// transition on a PC with no board and no waiting. What lives in this file is
+// only the wiring: read the clock, ask the gate, and act on the answer.
+// (2026-08-11, review §54.7 — states/rejects/timings all moved into that header.)
 // ============================================================================
-
-static const uint32_t REARM_ZERO_HOLD_MS = 500;
-
-enum DriveState : uint8_t {
-  DRIVE_DISARMED = 0,  // boot / E-stop. Non-zero commands are discarded.
-  DRIVE_READY = 1,     // E-stop clear and zero hold satisfied. Waiting on service.
-  DRIVE_ARMED = 2,     // Commands accepted.
-};
-
-// Reason the most recent /drive/enable call was refused. Published for
-// diagnosis: a burn that ships the latch and the service together cannot
-// otherwise separate "the call never arrived" from "the logic refused it".
-enum DriveReject : uint8_t {
-  REARM_OK = 0,
-  REARM_REJECT_ESTOP = 1,        // E-stop is active
-  REARM_REJECT_ZERO_HOLD = 2,    // zero commands not yet held long enough
-  REARM_REJECT_ALREADY = 3,      // already armed
-};
 
 // ============================================================================
 // BNO055 IMU configuration
@@ -311,14 +301,9 @@ bool cmdVelReceived = false;
 bool imuInitialized = false;
 bool gyroBiasCalibrated = false;
 
-// Re-arm latch state. driveZeroHolding is a separate flag rather than a
-// sentinel value of driveZeroSinceMs, because millis() is legitimately 0 for
-// the first millisecond after boot.
-DriveState driveState = DRIVE_DISARMED;
-bool driveZeroHolding = false;
-uint32_t driveZeroSinceMs = 0;
-uint32_t driveServiceCalls = 0;
-uint8_t driveRejectReason = REARM_OK;
+// Re-arm latch state. One struct, so there is exactly one place a transition
+// can be written and exactly one place the host test has to construct.
+RearmGate driveGate;
 
 uint32_t lastCmdVelMs = 0;
 uint32_t lastPwmUpdateMs = 0;
@@ -671,7 +656,13 @@ int movePwmTowardTarget(int currentPwm, int targetPwm)
 
 void updateMotorOutputs()
 {
-  if (isEstopActive()) {
+  // 🔴 Review §54.1 — the invariant is enforced at the output stage, not only on
+  // the paths that enter DISARMED. Every earlier version relied on each caller
+  // remembering to stop, and the one caller that forgot (the false branch of
+  // /drive/enable) let the motors keep their PWM until the watchdog expired.
+  // Motion is now structurally impossible outside DRIVE_ARMED: even a path that
+  // forgets to stop cannot produce output, because this is the only writer.
+  if (isEstopActive() || driveGate.state != DRIVE_ARMED) {
     stopAllMotors();
     cmdVelReceived = false;
     return;
@@ -708,23 +699,30 @@ void updateMotorOutputs()
   }
 }
 
+// 🔴 Review §54.1 — stopping is part of entering DISARMED, not a separate step
+// the caller has to remember. Callers that skipped it left the motors running to
+// the watchdog while the state topic already read false. Both effects now happen
+// in one function, so all call sites get the invariant whether they knew it or not.
 void disarmDrive()
 {
-  driveState = DRIVE_DISARMED;
-  driveZeroHolding = false;
-  driveZeroSinceMs = 0;
+  rearmGateDisarm(&driveGate);
+  stopAllMotors();
+  cmdVelReceived = false;
 }
 
 void checkSafety()
 {
   if (isEstopActive()) {
-    stopAllMotors();
-    cmdVelReceived = false;
     // The E-stop latches the drive off. Releasing the button does not undo
-    // this by itself — the zero hold and an explicit service call do.
+    // this by itself — the zero hold, the service, and the quiet barrier do.
+    // disarmDrive() stops the motors as part of the transition.
     disarmDrive();
     return;
   }
+
+  // The post-response quiet barrier has to finish even when the publisher went
+  // completely silent, so it cannot live in the cmd_vel callback (§54.2).
+  rearmGateTick(&driveGate, millis());
 
   if (!cmdVelReceived) {
     stopAllMotors();
@@ -1051,37 +1049,18 @@ void cmdVelCallback(const void* messageInput)
       static_cast<const geometry_msgs__msg__Twist*>(messageInput);
 
   if (isEstopActive()) {
-    stopAllMotors();
-    cmdVelReceived = false;
     disarmDrive();
     return;
   }
 
   const double linearX = message->linear.x;
   const double angularZ = message->angular.z;
-
-  if (!isfinite(linearX) || !isfinite(angularZ)) {
-    stopAllMotors();
-    cmdVelReceived = false;
-    return;
-  }
-
   const uint32_t nowMs = millis();
 
-  if (driveState != DRIVE_ARMED) {
-    // Re-arm gate. Zero commands accumulate the hold; any non-zero command
-    // breaks it and drops back to DISARMED. A publisher that never stopped
-    // therefore never reaches READY, which is the point of the latch.
-    if (linearX == 0.0 && angularZ == 0.0) {
-      if (!driveZeroHolding) {
-        driveZeroHolding = true;
-        driveZeroSinceMs = nowMs;
-      } else if (nowMs - driveZeroSinceMs >= REARM_ZERO_HOLD_MS) {
-        driveState = DRIVE_READY;
-      }
-    } else {
-      disarmDrive();
-    }
+  // The whole decision — including the non-finite case, the zero hold, and the
+  // post-response quiet barrier — is rearm_gate.h. Anything but DRIVE stops.
+  if (rearmGateOnCommand(&driveGate, linearX, angularZ, nowMs) !=
+      DRIVE_EFFECT_DRIVE) {
     stopAllMotors();
     cmdVelReceived = false;
     return;
@@ -1092,10 +1071,12 @@ void cmdVelCallback(const void* messageInput)
   applySkidSteerCommand(linearX, angularZ);
 }
 
-// /drive/enable — the explicit arming step. std_srvs/SetBool: data=true arms,
-// data=false disarms. The response message string is intentionally left empty:
-// assigning it would allocate on every call, and the reason code is published
-// on /drive/diag where it can be watched without polling the service.
+// /drive/enable — the explicit arming step. std_srvs/SetBool: data=true starts
+// the post-response quiet barrier (it does NOT arm on its own — see §54.2 in
+// rearm_gate.h), data=false disarms. The response message string is
+// intentionally left empty: assigning it would allocate on every call, and the
+// reason code is published on /drive/diag where it can be watched without
+// polling the service.
 void driveEnableCallback(const void* requestInput, void* responseOutput)
 {
   const auto* request =
@@ -1103,40 +1084,20 @@ void driveEnableCallback(const void* requestInput, void* responseOutput)
   auto* response =
       static_cast<std_srvs__srv__SetBool_Response*>(responseOutput);
 
-  // Incremented before every branch. A caller that sees this counter stay put
-  // knows the request never reached the board, which is the one thing a
-  // single-burn rollout could not otherwise distinguish from a logic refusal.
-  ++driveServiceCalls;
+  const bool success =
+      rearmGateOnService(&driveGate, request->data, isEstopActive(), millis());
 
-  if (!request->data) {
-    disarmDrive();
-    driveRejectReason = REARM_OK;
-    response->success = true;
-    return;
+  // 🔴 Review §54.1 — the cleanup happens before the response is written, not
+  // after. An operator who reads success:true on a disable has to be able to
+  // treat it as "the motors are already at zero", and the only way to promise
+  // that is to do the stopping first. The gate never returns to ARMED here, so
+  // any outcome other than staying armed leaves this line stopping the motors.
+  if (driveGate.state != DRIVE_ARMED) {
+    stopAllMotors();
+    cmdVelReceived = false;
   }
 
-  if (isEstopActive()) {
-    disarmDrive();
-    driveRejectReason = REARM_REJECT_ESTOP;
-    response->success = false;
-    return;
-  }
-
-  if (driveState == DRIVE_ARMED) {
-    driveRejectReason = REARM_REJECT_ALREADY;
-    response->success = false;
-    return;
-  }
-
-  if (driveState != DRIVE_READY) {
-    driveRejectReason = REARM_REJECT_ZERO_HOLD;
-    response->success = false;
-    return;
-  }
-
-  driveState = DRIVE_ARMED;
-  driveRejectReason = REARM_OK;
-  response->success = true;
+  response->success = success;
 }
 
 void resetOdomCallback(const void* messageInput)
@@ -1177,10 +1138,17 @@ void publishDiagnostics()
   gyroBiasMessage.z = gyroBiasZ;
   estopStateMessage.data = isEstopActive();
 
-  driveEnabledMessage.data = (driveState == DRIVE_ARMED);
-  driveDiagMessage.x = static_cast<double>(driveServiceCalls);
-  driveDiagMessage.y = static_cast<double>(driveRejectReason);
-  driveDiagMessage.z = static_cast<double>(driveState);
+  // Wire contract (canon = docs/REAL_ROBOT_VALUES.md §1-f):
+  //   /drive/enabled  std_msgs/Bool        data = (state == ARMED)
+  //   /drive/diag     geometry_msgs/Vector3  x = service call count
+  //                                          y = DriveReject
+  //                                          z = DriveState (0/1/2/3)
+  // Two topics rather than one: Bool cannot carry the counters, and the counter
+  // is what separates "the request never arrived" from "the logic refused it".
+  driveEnabledMessage.data = (driveGate.state == DRIVE_ARMED);
+  driveDiagMessage.x = static_cast<double>(driveGate.serviceCalls);
+  driveDiagMessage.y = static_cast<double>(driveGate.rejectReason);
+  driveDiagMessage.z = static_cast<double>(driveGate.state);
 
   RCSOFTCHECK(rcl_publish(&gyroBiasPublisher, &gyroBiasMessage, nullptr));
   RCSOFTCHECK(rcl_publish(&estopStatePublisher, &estopStateMessage, nullptr));
@@ -1285,6 +1253,10 @@ void setup()
   }
 
   stopAllMotors();
+
+  // Boot is a DISARMED entry like any other. Arming after a reset takes the
+  // same zero hold, service call, and quiet barrier as arming after an E-stop.
+  rearmGateInit(&driveGate);
 
   // Keep the robot completely still during this startup calibration.
   initializeImu();

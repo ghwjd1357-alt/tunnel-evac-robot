@@ -240,8 +240,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(96, len(rows))
-        self.assertEqual(96, len({row["id"] for row in rows}))
+        self.assertEqual(99, len(rows))
+        self.assertEqual(99, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -275,7 +275,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_96_primary_findings(self):
+    def test_02b_history_scan_independently_counts_99_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         files, found = review_history_findings(review_dir)
         if not files:
@@ -284,7 +284,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(96, len(found))
+        self.assertEqual(99, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
@@ -600,7 +600,15 @@ outside
 
     def test_27_watchdog_commands_require_an_uncommanded_observation_window(self):
         text = ai_context.read_ref(ai_context.Ref("docs/JETSON_SETUP.md", "7"))[0]
-        watchdog = text.split("#### 7-c-0.", 1)[1].split("#### 7-c-R1.", 1)[0]
+        # The contract is about §7-c-0's own procedure, so the window is that
+        # section's body: from its heading to the next `####`, whatever it is.
+        # Ending at the literal `#### 7-c-R1.` silently policed every section
+        # inserted between the two — §7-c-E (re-arm) tripped the "exactly two
+        # pub blocks" count in 08-11 with a command that has nothing to do with
+        # the watchdog measurement.
+        watchdog = re.split(
+            r"\n#### ", text.split("#### 7-c-0.", 1)[1], maxsplit=1
+        )[0]
         blocks = list(re.finditer(r"```bash\n(.*?)```", watchdog, re.S))
         pub_blocks = [match for match in blocks if "ros2 topic pub" in match.group(1)]
         self.assertEqual(2, len(pub_blocks))

@@ -275,7 +275,49 @@ expect_rc 2 "⑩-g --expect 경로가 중복되면 rc=2" -- \
     bash "$CHECK" --repo "$REPO" --baseline "$BASE" --expect "$EXPECT" --expect "$EXPECT"
 
 # ── 11) 진짜 저장소 역회귀 (read-only) ─────────────────────────────────────
-expect_rc 0 "⑪ 실제 저장소의 현행 상태는 PASS" -- bash "$CHECK" --repo "$ROOT"
+# 🔴 08-11 개정 — 구판은 `expect_rc 0 … --repo "$ROOT"` 였다. 즉 **"실물 저장소의 펌웨어는
+# 늘 등록 지문 그대로"** 를 픽스처 계약으로 박아 둔 것인데, 그 전제는 이 도구가 존재하는
+# 바로 그 상황에서 거짓이 된다: **정당한 펌웨어 변경이 검토 승인을 기다리는 동안.**
+# `REAL_ROBOT_VALUES §1-f` ⓷ 이 "지문은 승인 뒤에 옮긴다"를 지시하므로 그 구간은 설계상
+# `rc=1` 이고, 그때마다 이 픽스처 전량이 빨개진다 — 이 파일이 §46.2 로 두 번 경고한
+# **"늘 울리는 경보"** 를 픽스처 쪽에서 재생산한 것이다.
+#   → 계약을 "항상 PASS" 가 아니라 **"판정이 실제 상태와 일치한다"** 로 고친다. 느슨해진 게
+#     아니라 양방향이 됐다: 지문이 맞는데 FAIL 이어도, 어긋났는데 PASS 여도 여기서 걸린다.
+# 등록 지문은 검사기 **기본값에서 뽑고**, 실제 값은 `sha256sum` 으로 **독립 경로에서** 만든다.
+# ⚠ **등록 목록 전체**를 본다. 08-11 에 스케치 파일이 1개 → 2개가 되면서(`rearm_gate.h`)
+#   `.ino` 하나만 대조하던 판은 "지문 일치인데 왜 FAIL 이냐"로 틀린 기대를 냈다 — 변이 시험이
+#   그 자리에서 잡았다. 등록 자리 수와 실제 스케치 소스 수가 갈리는 것도 불일치다.
+REG_LINES="$(grep -oP '(?<=")firmware/[^"=]+=\d+,\d+,[0-9a-f]{64}(?=")' "$CHECK")"
+REG_N="$(printf '%s\n' "$REG_LINES" | grep -c .)"
+# 실제 스케치 root 소스 (Arduino 가 함께 컴파일하는 확장자). 판정기의 분류기를 베끼지 않고
+# 개수만 센다 — 여기서 필요한 것은 "등록 안 된 소스가 있는가" 뿐이다.
+LIVE_N="$(find "$ROOT/firmware" -mindepth 2 -maxdepth 2 -type f \
+    \( -name '*.ino' -o -name '*.pde' -o -name '*.c' -o -name '*.cc' -o -name '*.cpp' \
+       -o -name '*.cxx' -o -name '*.S' -o -name '*.h' -o -name '*.hpp' -o -name '*.hh' \
+       -o -name '*.tpp' -o -name '*.ipp' \) | wc -l)"
+REG_MATCHES=1
+while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    rp="${spec%%=*}"; rsha="${spec##*,}"
+    lsha="$(sha256sum "$ROOT/$rp" 2>/dev/null | awk '{print $1}')"
+    [ "$rsha" = "$lsha" ] || REG_MATCHES=0
+done <<<"$REG_LINES"
+
+if [ "$REG_N" -eq 0 ]; then
+    ng "⑪ 검사기 기본 --expect 목록을 못 읽었다"
+elif [ "$REG_MATCHES" -eq 1 ] && [ "$REG_N" -eq "$LIVE_N" ]; then
+    expect_rc 0 "⑪ 실제 저장소: 등록 $REG_N 건 전부 지문 일치이므로 PASS" -- \
+        bash "$CHECK" --repo "$ROOT"
+else
+    expect_rc 1 "⑪ 실제 저장소: 지문 미갱신(등록 $REG_N · 실제 소스 $LIVE_N)이므로 FAIL" -- \
+        bash "$CHECK" --repo "$ROOT"
+    #  차단 사유가 "지문 불일치" 인지까지 본다 — rc=1 만 보면 다른 이유로 멈춘 것과 못 가른다.
+    case "$LAST_OUT" in
+        *"내용 불일치"*|*"미추적 소스"*)
+            ok "⑪-b 차단 사유가 지문/미추적 소스로 명시된다" ;;
+        *) ng "⑪-b rc=1 인데 사유가 지문·미추적이 아니다 — 다른 이유로 멈췄다" ;;
+    esac
+fi
 
 # ── 12) git 렌더링 설정을 흔들어도 판정이 안 흔들린다 (08-07 검토 §50.1 P1) ──
 # 직전 판은 기대 지문으로 `git diff` **출력 텍스트**를 해시했다. 그래서 작업 트리를 한 바이트도
@@ -325,8 +367,19 @@ else
 fi
 
 #    실물 저장소에서도 같은 축을 확인한다 — §50.1 이 재현된 바로 그 대상이다.
-expect_rc 0 "⑫-g 실제 저장소도 렌더링 ${#SHAKE[@]}종을 흔든 채 PASS" -- \
-    shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$ROOT"
+# 🔴 08-11 개정 — 여기서 지켜야 할 성질은 "rc 가 0" 이 아니라 **"렌더링을 흔들어도 판정이
+# 안 바뀐다"** 다. rc=0 을 박아 두면 ⑪ 과 같은 이유로 승인 대기 구간마다 빨개지면서,
+# 정작 §50.1 이 요구한 **불변성**은 재지 않는다(흔든 쪽만 보고 안 흔든 쪽과 비교하지 않았다).
+#   → 안 흔든 판정을 먼저 받아 두고 흔든 판정과 **같은지**를 본다. 실물 상태와 무관하게 참이고,
+#     구조가 무너지면(렌더링이 판정에 닿으면) 그 순간 갈린다.
+BASE_OUT="$(bash "$CHECK" --repo "$ROOT" 2>&1)"; BASE_RC=$?
+SHOOK_OUT="$(shake "${SHAKE[@]}" -- bash "$CHECK" --repo "$ROOT" 2>&1)"; SHOOK_RC=$?
+if [ "$BASE_RC" -eq "$SHOOK_RC" ]; then
+    ok "⑫-g 실제 저장소: 렌더링 ${#SHAKE[@]}종을 흔들어도 판정 불변 (rc=$BASE_RC 양쪽)"
+else
+    ng "⑫-g 실제 저장소: 렌더링이 판정을 흔들었다 (안 흔듦 rc=$BASE_RC · 흔듦 rc=$SHOOK_RC)"
+    echo "$SHOOK_OUT" | sed 's/^/        | /'
+fi
 
 # ── 13) 사례 ID 는 검사와 1:1 이어야 한다 (08-07 검토 §50.3 P2) ─────────────
 # 이 저장소는 결과를 ID 로 인용한다. 유일성이 깨지면 증거 한 줄을 되짚을 수 없다.

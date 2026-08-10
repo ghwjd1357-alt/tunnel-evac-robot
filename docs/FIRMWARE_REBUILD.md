@@ -139,8 +139,45 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 sha256sum firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino  # 값을 다시 만드는 법
 ```
 
+### 🔴 4-a. 2026-08-11 현재 — 지문은 **아직 구판이다. `rc=1` 이 정상이고, 굽지 않는다**
+
+re-arm 래치(§54 보완)가 스케치를 고쳤고 **파일이 하나 늘었다**. 지문은 **독립 검토 승인 뒤에만**
+옮긴다(`REAL_ROBOT_VALUES §1-f` ⓷ — 6 을 5 보다 먼저 하면 지문이 새 내용을 스스로 승인한다).
+
+| 파일 | 현재 작업 트리 내용 sha256 | 지문 등록 |
+|---|---|---|
+| `teensy_integrated_base_v1_4.ino` | `79860d3805ac43c0463001f55d03224bca04f89be1e0b32d44094eecdef932b0` | ❌ 승인 대기 |
+| 🔴 `rearm_gate.h` **(신규)** | `03f1d23c1082a9eadbc7c115a53f0824fecba9eae6b80533b83bb0c8e4f91678` | ❌ 승인 대기 |
+
+⚠ **`rearm_gate.h` 도 판정 대상이다** — `arduino-cli` 는 스케치 root 의 헤더를 함께 컴파일하고
+`firmware_precheck.sh` 의 `is_sketch_source()` 가 root `.h` 를 소스로 분류한다. 지금은
+**미추적 소스**로 잡혀 `rc=1` 이 뜬다. 그게 맞다 — 아직 승인 전이다.
+
+승인이 나면 `--expect` 를 **두 개** 준다(기본값과 이 표를 같이 옮긴다):
+```bash
+bash tools/firmware_precheck.sh \
+  --expect firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=<추가>,<삭제>,79860d38... \
+  --expect firmware/teensy_integrated_base_v1_4/rearm_gate.h=<추가>,<삭제>,03f1d23c...
+```
+
+**2026-08-11 빌드 실측** (`arduino-cli compile -b teensy:avr:teensy41`, 링크 성공):
+
+| | 08-11 re-arm 구현 | **08-11 §54 보완(현재)** | 증감 |
+|---|---|---|---|
+| FLASH code | 294,112 | **294,112** | 0 |
+| RAM1 variables | 62,624 | **62,656** | +32 |
+| RAM1 free for locals | 297,824 | **297,792** | −32 |
+| RAM2 variables | 12,448 | **12,448** | 0 |
+| `.ino` 줄수 / bytes | 1,487 / — | **1,459 / 45,638** | −28줄 |
+| `rearm_gate.h` | — | **207 / 10,367** | 신규 |
+
+🔴 **`.ino` 가 28줄 줄어든 것은 기능이 빠져서가 아니다** — 전이가 `rearm_gate.h` 로 옮겨갔고
+스케치에는 배선만 남았다. 두 파일 합은 늘었다. RAM +32 bytes 는 `RearmGate` 구조체 하나다.
+
+### 4-b. 지문 갱신 규칙 (상시)
+
 `tools/firmware_precheck.sh` 의 `--expect` 기본값이 **같은 64자리**를 갖고 있다.
-🔴 **`.ino` 를 정당하게 고치면 위 명령으로 새 값을 만들어 두 자리(이 절 · 그 스크립트)를 같이
+🔴 **스케치 소스를 정당하게 고치면 위 명령으로 새 값을 만들어 두 자리(이 절 · 그 스크립트)를 같이
 옮긴다.** 증감 `8 2` 는 **진단 출력일 뿐 판정에 쓰지 않는다** — git 의 diff 알고리즘이 정하는
 값이라 판정에 쓰면 §50.1 의 거짓 양성이 돌아온다. 같은 `8/2` 라도 내용이 다르면 FAIL 인 것은
 그대로이며, 이제 그 근거가 **내용 자체**다.
@@ -233,6 +270,26 @@ root와 `src/**`의 `.cc/.cxx`도 실제 컴파일됐다. 따라서 root 12종·
 ```bash
 strings -n 3 /tmp/fwout/*.elf | grep -xE "158|10607"
 ```
+
+**2026-08-11 관측값 (re-arm 래치 · 🔴 아직 굽지 않았다)**
+
+기준점과 같은 환경(`arduino-cli` + `teensy:avr 1.58.2` + `platform.local.txt`)에서 잰 값이다.
+⚠ **이 표는 측정이지 승인이 아니다** — 판정하는 값은 여전히 **내용 sha256** 하나고, 그것은
+독립 검토 뒤에 옮긴다(`REAL_ROBOT_VALUES §1-f`⓷).
+
+| 항목 | 08-05 기준점 | 08-11 re-arm | 증분 |
+|---|---|---|---|
+| FLASH code | 291,100 | **294,112** | +3,012 |
+| FLASH data | 84,452 | **86,500** | +2,048 |
+| FLASH headers | 8,440 | **8,504** | +64 |
+| RAM1 variables | 60,096 | **62,624** | +2,528 |
+| RAM1 code | 156,088 | **159,096** | +3,008 |
+| RAM2 variables | 12,448 | **12,448** | 0 |
+| RAM1 여유(지역변수) | — | **297,824** | — |
+| `ARDUINO` / `TEENSYDUINO` | 10607 / 158 | **10607 / 158** | 불변 ✅ |
+
+소스 = 1,313 → **1,487 줄**. 새 내용 sha256(**검토 통과 전까지 옮기지 않는다**) =
+`e6e15b5f55324c730524e8f706fcc90bcc9b52a071a965b39899ac438670e840`.
 
 ⚠ **검증 상한 (과대 주장 금지)**: 확인한 것은 **환경 지문 일치·링크 성공·소스 해시 불변**이다.
 **실차에 올라가 있는 바이너리와 바이트 단위로 같은지는 확인하지 않았다** — Teensy 플래시를
