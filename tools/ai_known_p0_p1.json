@@ -83,5 +83,16 @@
   {"id":"0801-diff-endpoint-hides-worktree-47","path":"tools/firmware_precheck.sh","anchor":"비교 끝점을 HEAD 로 박으면, 아직 커밋하지 않은 오염은 판정에서 통째로 빠진다"},
   {"id":"0801-ignored-and-official-sketch-sources-48","path":"tools/firmware_precheck.sh","anchor":"ignore 규칙은 컴파일 제외 규칙이 아니다 — 숨은 소스도 판정 입력이다"},
   {"id":"0801-actual-teensy-cc-cxx-inputs-49","path":"tools/firmware_precheck.sh","anchor":"실제 Teensy toolchain은 공식 sketch 명세보다 넓다"},
-  {"id":"0801-fingerprint-pins-git-rendering-50","path":"tools/firmware_precheck.sh","anchor":"지문이 \"내용\"이 아니라 \"이 기계의 git 렌더링\"을 고정하고 있었다"}
+  {"id":"0801-fingerprint-pins-git-rendering-50","path":"tools/firmware_precheck.sh","anchor":"지문이 \"내용\"이 아니라 \"이 기계의 git 렌더링\"을 고정하고 있었다"},
+  {"id":"0801-precheck-ancestor-symlink-51","path":"tools/firmware_precheck.sh","anchor":"조상 디렉터리 symlink 는 사전검사가 보지 않는다"},
+  {"id":"0801-watchdog-zero-window-52","path":"tools/watchdog_report.py","anchor":"zero 명령이 끼어든 구간은 watchdog 판정에 쓸 수 없다"},
+  {"id":"0801-watchdog-cumulative-creep-52","path":"tools/watchdog_report.py","anchor":"정지 판정은 표본 간 증분이 아니라 기준점 대비 누적 이동으로 한다"},
+  {"id":"0801-dcdc-typ-efficiency-52","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"`Typ.` 효율은 보장 하한이 아니다"},
+  {"id":"0801-series-contact-voltage-split-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"각 접점이 단독으로 25.2V 를 끊는 정격이 필요하다"},
+  {"id":"0801-fuse-wire-numeric-compare-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"30A 퓨즈는 30A 에서 끊기지 않는다"},
+  {"id":"0801-glass-fuse-interrupting-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"차단용량은 정격 전류와 다른 숫자다"},
+  {"id":"0801-switch-breaker-load-break-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"통전 정격은 부하개폐 능력이 아니다"},
+  {"id":"0801-lipo-alarm-warns-not-blocks-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"알람은 경고 장치이지 차단 장치가 아니다"},
+  {"id":"0801-pin21-two-active-circuits-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"PIN21 회로를 지시하는 활성 문장은 하나여야 한다"},
+  {"id":"0801-spare-relay-count-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"}
 ]

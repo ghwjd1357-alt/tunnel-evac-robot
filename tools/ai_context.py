@@ -178,6 +178,9 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("bringup", (
         "src/tunnel_bringup/**", "docs/JETSON_SETUP.md", "docs/D1_FIRST_STEP.md",
         "tools/d0_check.sh", "tools/bag_gap_report.py", "tools/todo_d0_scan.py",
+        # 검토 §52: R0 watchdog 판정기. 판정 기준은 `JETSON_SETUP §7-c-0` 이 소유하고
+        # 이 도구는 그 기준에 넣을 수치를 만든다 — 둘을 같은 프로필에 둔다.
+        "tools/watchdog_report.py",
     )),
     ("nav2", (
         "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",
