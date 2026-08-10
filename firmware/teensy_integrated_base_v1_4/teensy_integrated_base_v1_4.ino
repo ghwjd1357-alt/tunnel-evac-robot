@@ -21,6 +21,7 @@
 #include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/float64.h>
 #include <std_msgs/msg/string.h>
+#include <std_srvs/srv/set_bool.h>
 #include <rosidl_runtime_c/string_functions.h>
 
 // ============================================================================
@@ -187,6 +188,41 @@ static const uint32_t WATCHDOG_TIMEOUT_MS = 500;
 static const uint32_t ODOM_PERIOD_US = 20000;
 
 // ============================================================================
+// Re-arm latch (2026-08-11) — contract: docs/REAL_ROBOT_VALUES.md §1-f
+//
+// Clearing the E-stop must not by itself put the robot back under command. A
+// publisher that never stopped would otherwise have its next message accepted
+// as a fresh command, which is the hazard this latch exists for. Arming needs
+// three things in order: the E-stop released, zero commands held continuously
+// for REARM_ZERO_HOLD_MS, and an explicit /drive/enable service call.
+//
+// The latch lives in the firmware rather than in a ROS node because the Teensy
+// subscribes to /cmd_vel directly — a node-side gate is bypassed by anyone
+// publishing to that topic.
+//
+// It does NOT replace the watchdog. WATCHDOG_TIMEOUT_MS still stops the motors
+// on command dropout while armed; see checkSafety().
+// ============================================================================
+
+static const uint32_t REARM_ZERO_HOLD_MS = 500;
+
+enum DriveState : uint8_t {
+  DRIVE_DISARMED = 0,  // boot / E-stop. Non-zero commands are discarded.
+  DRIVE_READY = 1,     // E-stop clear and zero hold satisfied. Waiting on service.
+  DRIVE_ARMED = 2,     // Commands accepted.
+};
+
+// Reason the most recent /drive/enable call was refused. Published for
+// diagnosis: a burn that ships the latch and the service together cannot
+// otherwise separate "the call never arrived" from "the logic refused it".
+enum DriveReject : uint8_t {
+  REARM_OK = 0,
+  REARM_REJECT_ESTOP = 1,        // E-stop is active
+  REARM_REJECT_ZERO_HOLD = 2,    // zero commands not yet held long enough
+  REARM_REJECT_ALREADY = 3,      // already armed
+};
+
+// ============================================================================
 // BNO055 IMU configuration
 // Teensy 4.1 Wire: SDA=18, SCL=19
 // ============================================================================
@@ -234,6 +270,14 @@ rcl_publisher_t imuYawPublisher;
 rcl_publisher_t gyroBiasPublisher;
 rcl_publisher_t estopStatePublisher;
 rcl_publisher_t firmwareInfoPublisher;
+rcl_publisher_t driveEnabledPublisher;
+rcl_publisher_t driveDiagPublisher;
+
+// Only one service slot exists (RMW_UXRCE_MAX_SERVICES is exactly 1), so the
+// diagnostic counters ride a publisher instead of a second service.
+rcl_service_t driveEnableService;
+std_srvs__srv__SetBool_Request driveEnableRequest;
+std_srvs__srv__SetBool_Response driveEnableResponse;
 
 geometry_msgs__msg__Twist cmdVelMessage;
 std_msgs__msg__Bool resetOdomMessage;
@@ -245,6 +289,8 @@ std_msgs__msg__Float64 imuYawMessage;
 geometry_msgs__msg__Vector3 gyroBiasMessage;
 std_msgs__msg__Bool estopStateMessage;
 std_msgs__msg__String firmwareInfoMessage;
+std_msgs__msg__Bool driveEnabledMessage;
+geometry_msgs__msg__Vector3 driveDiagMessage;
 
 // ============================================================================
 // Runtime state
@@ -264,6 +310,15 @@ double wheelFilteredDerivative[4] = {0.0, 0.0, 0.0, 0.0};
 bool cmdVelReceived = false;
 bool imuInitialized = false;
 bool gyroBiasCalibrated = false;
+
+// Re-arm latch state. driveZeroHolding is a separate flag rather than a
+// sentinel value of driveZeroSinceMs, because millis() is legitimately 0 for
+// the first millisecond after boot.
+DriveState driveState = DRIVE_DISARMED;
+bool driveZeroHolding = false;
+uint32_t driveZeroSinceMs = 0;
+uint32_t driveServiceCalls = 0;
+uint8_t driveRejectReason = REARM_OK;
 
 uint32_t lastCmdVelMs = 0;
 uint32_t lastPwmUpdateMs = 0;
@@ -653,11 +708,21 @@ void updateMotorOutputs()
   }
 }
 
+void disarmDrive()
+{
+  driveState = DRIVE_DISARMED;
+  driveZeroHolding = false;
+  driveZeroSinceMs = 0;
+}
+
 void checkSafety()
 {
   if (isEstopActive()) {
     stopAllMotors();
     cmdVelReceived = false;
+    // The E-stop latches the drive off. Releasing the button does not undo
+    // this by itself — the zero hold and an explicit service call do.
+    disarmDrive();
     return;
   }
 
@@ -988,6 +1053,7 @@ void cmdVelCallback(const void* messageInput)
   if (isEstopActive()) {
     stopAllMotors();
     cmdVelReceived = false;
+    disarmDrive();
     return;
   }
 
@@ -1000,9 +1066,77 @@ void cmdVelCallback(const void* messageInput)
     return;
   }
 
-  lastCmdVelMs = millis();
+  const uint32_t nowMs = millis();
+
+  if (driveState != DRIVE_ARMED) {
+    // Re-arm gate. Zero commands accumulate the hold; any non-zero command
+    // breaks it and drops back to DISARMED. A publisher that never stopped
+    // therefore never reaches READY, which is the point of the latch.
+    if (linearX == 0.0 && angularZ == 0.0) {
+      if (!driveZeroHolding) {
+        driveZeroHolding = true;
+        driveZeroSinceMs = nowMs;
+      } else if (nowMs - driveZeroSinceMs >= REARM_ZERO_HOLD_MS) {
+        driveState = DRIVE_READY;
+      }
+    } else {
+      disarmDrive();
+    }
+    stopAllMotors();
+    cmdVelReceived = false;
+    return;
+  }
+
+  lastCmdVelMs = nowMs;
   cmdVelReceived = true;
   applySkidSteerCommand(linearX, angularZ);
+}
+
+// /drive/enable — the explicit arming step. std_srvs/SetBool: data=true arms,
+// data=false disarms. The response message string is intentionally left empty:
+// assigning it would allocate on every call, and the reason code is published
+// on /drive/diag where it can be watched without polling the service.
+void driveEnableCallback(const void* requestInput, void* responseOutput)
+{
+  const auto* request =
+      static_cast<const std_srvs__srv__SetBool_Request*>(requestInput);
+  auto* response =
+      static_cast<std_srvs__srv__SetBool_Response*>(responseOutput);
+
+  // Incremented before every branch. A caller that sees this counter stay put
+  // knows the request never reached the board, which is the one thing a
+  // single-burn rollout could not otherwise distinguish from a logic refusal.
+  ++driveServiceCalls;
+
+  if (!request->data) {
+    disarmDrive();
+    driveRejectReason = REARM_OK;
+    response->success = true;
+    return;
+  }
+
+  if (isEstopActive()) {
+    disarmDrive();
+    driveRejectReason = REARM_REJECT_ESTOP;
+    response->success = false;
+    return;
+  }
+
+  if (driveState == DRIVE_ARMED) {
+    driveRejectReason = REARM_REJECT_ALREADY;
+    response->success = false;
+    return;
+  }
+
+  if (driveState != DRIVE_READY) {
+    driveRejectReason = REARM_REJECT_ZERO_HOLD;
+    response->success = false;
+    return;
+  }
+
+  driveState = DRIVE_ARMED;
+  driveRejectReason = REARM_OK;
+  response->success = true;
 }
 
 void resetOdomCallback(const void* messageInput)
@@ -1043,8 +1177,15 @@ void publishDiagnostics()
   gyroBiasMessage.z = gyroBiasZ;
   estopStateMessage.data = isEstopActive();
 
+  driveEnabledMessage.data = (driveState == DRIVE_ARMED);
+  driveDiagMessage.x = static_cast<double>(driveServiceCalls);
+  driveDiagMessage.y = static_cast<double>(driveRejectReason);
+  driveDiagMessage.z = static_cast<double>(driveState);
+
   RCSOFTCHECK(rcl_publish(&gyroBiasPublisher, &gyroBiasMessage, nullptr));
   RCSOFTCHECK(rcl_publish(&estopStatePublisher, &estopStateMessage, nullptr));
+  RCSOFTCHECK(rcl_publish(&driveEnabledPublisher, &driveEnabledMessage, nullptr));
+  RCSOFTCHECK(rcl_publish(&driveDiagPublisher, &driveDiagMessage, nullptr));
 }
 
 void publishFirmwareInfo()
@@ -1219,6 +1360,25 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
       "firmware/info"));
 
+  RCCHECK(rclc_publisher_init_default(
+      &driveEnabledPublisher,
+      &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
+      "drive/enabled"));
+
+  // x = service call count, y = last reject reason, z = latch state.
+  RCCHECK(rclc_publisher_init_default(
+      &driveDiagPublisher,
+      &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
+      "drive/diag"));
+
+  RCCHECK(rclc_service_init_default(
+      &driveEnableService,
+      &node,
+      ROSIDL_GET_SRV_TYPE_SUPPORT(std_srvs, srv, SetBool),
+      "drive/enable"));
+
   // Message initialization
   geometry_msgs__msg__Twist__init(&cmdVelMessage);
   std_msgs__msg__Bool__init(&resetOdomMessage);
@@ -1230,6 +1390,10 @@ void setup()
   geometry_msgs__msg__Vector3__init(&gyroBiasMessage);
   std_msgs__msg__Bool__init(&estopStateMessage);
   std_msgs__msg__String__init(&firmwareInfoMessage);
+  std_msgs__msg__Bool__init(&driveEnabledMessage);
+  geometry_msgs__msg__Vector3__init(&driveDiagMessage);
+  std_srvs__srv__SetBool_Request__init(&driveEnableRequest);
+  std_srvs__srv__SetBool_Response__init(&driveEnableResponse);
 
   rosidl_runtime_c__String__assign(&odomMessage.header.frame_id, "odom");
   rosidl_runtime_c__String__assign(&odomMessage.child_frame_id, "base_footprint");
@@ -1261,7 +1425,10 @@ void setup()
   imuMessage.linear_acceleration_covariance[4] = 0.04;
   imuMessage.linear_acceleration_covariance[8] = 0.04;
 
-  RCCHECK(rclc_executor_init(&executor, &support.context, 3, &allocator));
+  // 3 subscriptions + 1 service. Undersizing this does not fail quietly: the
+  // handle array fills, rclc_executor_add_service() returns RCL_RET_ERROR and
+  // RCCHECK drops into errorLoop() — a halted board, not a silent no-op.
+  RCCHECK(rclc_executor_init(&executor, &support.context, 4, &allocator));
 
   RCCHECK(rclc_executor_add_subscription(
       &executor,
@@ -1283,6 +1450,13 @@ void setup()
       &resetYawMessage,
       &resetYawCallback,
       ON_NEW_DATA));
+
+  RCCHECK(rclc_executor_add_service(
+      &executor,
+      &driveEnableService,
+      &driveEnableRequest,
+      &driveEnableResponse,
+      &driveEnableCallback));
 
   (void)rmw_uros_sync_session(1000);
   lastTimeSyncMs = millis();
