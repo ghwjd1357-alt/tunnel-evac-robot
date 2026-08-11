@@ -150,8 +150,10 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
   서사·증거의 정본이지 **다음 세션의 진입 경로가 아니다.** 08-04 에 §39~§42 넉 건(불승인
   포함)이 저장소에 한 글자도 없어 이틀 뒤에 발견됐다.
 - **핸드오프는 현재 묶음 + 미해결 보류만 유지한다** — 완료된 서사는 정본으로 보내고 링크한다.
-  cold-start(이 파일 + `CLAUDE.md` + 핸드오프) 상한 = **42,000 bytes / 13,500 o200k 토큰**
-  (`tools/test_ai_context.py` 의 `COLD_START_*`. 08-07 사용자 결정으로 비율 게이트를 대체).
+  🔴 **이 규율을 강제하는 상한은 핸드오프 단독 = 20,000 bytes** 다(`HANDOFF_BYTE_BUDGET`).
+  cold-start 총량(이 파일 + `CLAUDE.md` + 핸드오프) = **45,000 bytes / 14,500 o200k 토큰**
+  (`tools/test_ai_context.py` 의 `COLD_START_*`. 08-07 비율 폐기 → **08-11 총량 완화 + 단독
+  상한 신설**, 둘 다 사용자 결정). ⚠ 총량이 걸리면 줄일 것은 **정본이지 핸드오프가 아니다.**
 - **커밋 = push 한 세트.** 원격 `https://github.com/ghwjd1357-alt/tunnel-evac-robot` (private).
 - 빌드는 항상 `colcon build --symlink-install` (수동 실행).
 - **`make_map.sh` 실런 금지** — 지도 자산 변경은 사용자 명시 승인 + 정기 지도 제작 때만. E2E 스크립트는 전용 시뮬 PC 전용(Jetson 실행 금지).

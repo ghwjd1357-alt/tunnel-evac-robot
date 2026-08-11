@@ -29,8 +29,21 @@ REVIEW_HISTORY_SPECIALS = (
 # ── cold-start 예산 (08-07 사용자 결정 — 비율 폐기, 절대 상한) ─────────────
 # 차가운 세션이 강제로 읽는 세 파일. 여기 안 들어가는 사실은 정본으로 보내고 링크한다.
 COLD_START_PATHS = ("AGENTS.md", "CLAUDE.md", "docs/CURRENT_HANDOFF.md")
-COLD_START_BYTE_BUDGET = 42_000
-COLD_START_TOKEN_BUDGET = 13_500
+# 🔴 08-11 사용자 결정 — **총량 완화 + 핸드오프 전용 상한 신설**. 이유는 숫자가 아니라
+#   재는 대상이었다: 총량은 세 파일을 재는데 `AGENTS §5` 의 "현재 묶음 + 미해결 보류만"
+#   규율이 걸리는 것은 **핸드오프 하나뿐**이다. 그래서 `AGENTS.md` 에 규칙 한 줄이 늘면
+#   그 값을 무관한 핸드오프가 대신 냈다. 08-07 개정(비율→절대) 뒤 **4일 만에** 여유가
+#   30 바이트로 돌아온 것이 그 증거다(08-07 은 41 바이트였다 — 같은 병이 재발한 것).
+#   → 압력을 그것이 유효한 자리에만 남긴다. 핸드오프는 자기 상한으로 규율을 그대로 받고,
+#     정본(`AGENTS.md`)의 정당한 증가는 더 이상 핸드오프 여유를 훔치지 않는다.
+#   ⚠ **총량 42,000→45,000 · 토큰 13,500→14,500 은 완화다 — 숨기지 않는다.**
+#   재개방 조건: ① 핸드오프가 **옮길 완료 서사가 없는데** 자기 상한에 반복해 걸릴 때
+#   ② 총량 여유가 다시 5% 밑으로 갈 때(그때는 `AGENTS.md` 를 줄일 차례지 총량을 올릴
+#   차례가 아니다). 색인 = `MASTER_PLAN §8`.
+COLD_START_BYTE_BUDGET = 45_000
+COLD_START_TOKEN_BUDGET = 14_500
+# 핸드오프 단독 상한 — `AGENTS §5` 를 강제하는 자리는 여기다.
+HANDOFF_BYTE_BUDGET = 20_000
 
 WATCHDOG_ORIGIN = re.compile(r"(?:구동부(?:의)?\s*)?(?:\d+차\s*)?회신(?:값|수치)?")
 WATCHDOG_AUTHORITY = re.compile(r"(?:충족|통과(?:\s*처리)?|확정|해소)")
@@ -466,6 +479,25 @@ class ContextRouterTest(unittest.TestCase):
         self.assertLessEqual(
             len(text.encode()), COLD_START_BYTE_BUDGET,
             f"cold-start {len(text.encode()):,} bytes > {COLD_START_BYTE_BUDGET:,} — "
+            "정본을 줄일 차례다 (총량은 AGENTS.md 증가분까지 포함한다)",
+        )
+
+    def test_14b_handoff_alone_fits_its_own_budget(self):
+        """🔴 `AGENTS §5` 를 강제하는 자리는 총량이 아니라 **여기**다 (08-11 사용자 결정).
+
+        총량 상한은 세 파일을 재므로 `AGENTS.md` 의 정당한 증가가 핸드오프 여유를
+        갉아먹었다 — 서로 무관한 두 관심사가 한 예산을 놓고 다퉜고, 그래서 08-07
+        개정 뒤 4일 만에 여유가 30 바이트로 돌아왔다. 압력은 규율이 실제로 걸리는
+        파일에만 있어야 의미가 있다: 핸드오프는 **현재 묶음 + 미해결 보류만** 든다.
+
+        ⚠ 이 테스트가 깨지면 상한을 올리기 전에 **옮길 완료 서사가 있는지 먼저 본다.**
+        없는데도 반복해 걸리면 그때가 재개방 시점이다(모듈 상단 재개방 조건 ①).
+        """
+        handoff = (ROOT / "docs/CURRENT_HANDOFF.md").read_text()
+        size = len(handoff.encode())
+        self.assertLessEqual(
+            size, HANDOFF_BYTE_BUDGET,
+            f"CURRENT_HANDOFF {size:,} bytes > {HANDOFF_BYTE_BUDGET:,} — "
             "완료된 서사를 정본으로 보내라 (AGENTS.md §5)",
         )
 
