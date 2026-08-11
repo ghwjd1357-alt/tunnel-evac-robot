@@ -98,7 +98,7 @@ done
 #   스스로 승인한다(`REAL_ROBOT_VALUES §1-f` ⓷).
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=199,15,aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=215,18,b8e44dfd0c41670dd008e27c9e8d24506cdd39a360e3dd2217002cba318d4f32"
         "firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978"
         "firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663"
     )

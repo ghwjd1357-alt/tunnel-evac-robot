@@ -37,10 +37,16 @@
 #define STRINGIFY_INNER(x) #x
 #define STRINGIFY(x) STRINGIFY_INNER(x)
 
-static const char FW_VERSION[] = "handover-integrated-pi-continuous-low-speed-1.3.0";
+// 🔴 2026-08-12 — 정체 문자열 정정 (docs/FIRMWARE_REBUILD.md §4 항목 1 의 부채).
+// 08-06 실물 관측에서 version·source·git_sha 셋 다 실제와 달랐고, 그래서 정체 판별에
+// 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
+static const char FW_VERSION[] = "rearm-latch-pi-continuous-low-speed-1.4.0";
+// ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
+// 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
+// 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
 static const char FW_GIT_SHA[] = "0000000000000000000000000000000000000000";
 static const char FW_GIT_SHA_SHORT[] = "00000000";
-static const char FW_SOURCE_PATH[] = "/home/park/robot_firmware/teensy_integrated_pi_continuous_low_speed_v1_3.ino";
+static const char FW_SOURCE_PATH[] = "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino";
 static const char FW_LIBRARY_LIST[] =
     "micro_ros_arduino, Encoder, Adafruit_BNO055, Adafruit_Unified_Sensor, Adafruit_BusIO";
 
@@ -156,7 +162,14 @@ static const int MIN_RUNNING_PWM[4] = {15, 15, 15, 15};
 // 0.02 m/s -> approximately HOLD_PWM
 // 0.03 m/s -> approximately HOLD_PWM + 13
 // 0.05 m/s -> approximately HOLD_PWM + 39
-static const double FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN = 1300.0;
+// 🔴 2026-08-12 교정 (예약 32). 구값 1300.0 은 지면 실측 대비 약 3.5배였다 — 명령 0.12 에서
+// 곧바로 FEEDFORWARD_MAX_PWM(145) 로 포화했고, 그 PWM 의 실제 속도가 0.33 m/s 였다.
+// PI 가 되돌릴 수 있는 폭은 WHEEL_KP*오차 + INTEGRAL_PWM_LIMIT = 약 26 PWM 뿐이라
+// 119~145 PWM 에 갇혔다 = 그 구간에서 속도 제어가 사실상 열려 있었다.
+// 지면 실측 2점(69 PWM -> 0.123 m/s · 145 PWM -> 0.3265 m/s, 줄자로 odom 검증)에서
+// v ~= 0.00268*(PWM-23) 이고 0.12 m/s 는 PWM ~= 68 이므로 (68-30)/(0.12-0.02) ~= 380.
+// 정본 = docs/MASTER_PLAN.md §7 예약 32 · 근거 bag = r1_ground_0811_2127, d0_drive_0811_2146.
+static const double FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN = 375.0;
 static const int FEEDFORWARD_MAX_PWM = 145;
 
 // Closed-loop output safety limit. Raise only after ground-speed verification.

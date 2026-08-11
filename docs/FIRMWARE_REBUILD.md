@@ -125,12 +125,17 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1 = 멈춘다 / 2 = 판정 불능
 ```
 
-🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-11 지문 이관 후
+🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-12 예약 32 교정 후
 허용된 변경은 세 건**이고, 아래 64자리 세 개가 **이 절의 정본**이다:
 
+⚠ **`.ino` 지문은 2026-08-12 에 옮겼다** — 구값 `aa8e75ec…`(199,15 · 1,491줄)은 08-11 굽기
+시점의 것이다. 바뀐 내용은 **둘뿐**이다: ① `FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN` `1300.0 → 375.0`
+(예약 32 속도 교정) ② `FW_VERSION`·`FW_SOURCE_PATH` 정체 문자열 정정(아래 §4 표 항목 1 의 부채).
+🔴 **`MAX_LINEAR_CMD = 0.12` · `MAX_ANGULAR_CMD = 0.50` · `USE_PID_D_TERM = false` 는 그대로다.**
+
 ```
-aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 199,15 · 1,491줄 / 47,808 bytes)
+b8e44dfd0c41670dd008e27c9e8d24506cdd39a360e3dd2217002cba318d4f32
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 215,18 · 1,504줄 / 49,154 bytes)
 7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978
   firmware/teensy_integrated_base_v1_4/rearm_gate.h        (신규 · 247,0 · 247줄 / 13,693 bytes)
 f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663
@@ -188,16 +193,20 @@ bash tools/firmware_precheck.sh \
 
 **2026-08-11 빌드 실측** (`arduino-cli compile -b teensy:avr:teensy41`, 링크 성공):
 
-| | 08-11 re-arm 구현 | 08-11 §54 보완 | **08-11 §55 보완(현재)** | §54 대비 |
+| | 08-11 re-arm 구현 | 08-11 §54 보완 | 08-11 §55 보완 | **08-12 예약 32(현재)** |
 |---|---|---|---|---|
-| FLASH code | 294,112 | 294,112 | **294,176** | +64 |
-| FLASH headers | 8,504 | 8,504 | **8,440** | −64 |
-| RAM1 variables | 62,624 | 62,656 | **62,656** | **0** |
-| RAM1 free for locals | 297,824 | 297,792 | **297,792** | 0 |
-| RAM2 variables | 12,448 | 12,448 | **12,448** | 0 |
-| `.ino` 줄수 / bytes | 1,487 / — | 1,459 / 45,638 | **1,491 / 47,808** | +32줄 |
-| `rearm_gate.h` | — | 207 / 10,367 | **247 / 13,693** | +40줄 |
-| `drive_wiring.h` | — | — | **101 / 5,196** | 신규 |
+| FLASH code | 294,112 | 294,112 | 294,176 | **294,176** (0) |
+| FLASH headers | 8,504 | 8,504 | 8,440 | **8,440** (0) |
+| RAM1 variables | 62,624 | 62,656 | 62,656 | **62,656** (0) |
+| RAM1 free for locals | 297,824 | 297,792 | 297,792 | **297,792** (0) |
+| RAM2 variables | 12,448 | 12,448 | 12,448 | **12,448** (0) |
+| `.ino` 줄수 / bytes | 1,487 / — | 1,459 / 45,638 | 1,491 / 47,808 | **1,504 / 49,154** |
+| `rearm_gate.h` | — | 207 / 10,367 | **247 / 13,693** | 247 / 13,693 (무변경) |
+| `drive_wiring.h` | — | — | **101 / 5,196** | 101 / 5,196 (무변경) |
+
+⚠ **08-12 는 코드·RAM 이 전부 0 증감이다** — 바뀐 것이 `double` 상수 하나와 문자열 리터럴
+둘뿐이라 그래야 맞다. 🔴 **증감이 0 이라는 사실을 "안 바뀌었다"로 읽지 않는다** — 내용
+sha256 은 `aa8e75ec…` → `b8e44dfd…` 로 바뀌었고, 그게 판정 근거다.
 
 🔴 **RAM 증감이 0 인 것이 §55 보완의 성질을 그대로 보여준다.** `drive_wiring.h` 는 템플릿이고
 `TeensyDriveSink` 는 멤버가 없는 빈 구조체라 **런타임 비용도 데이터도 0** 이다 — 함수 포인터
@@ -452,7 +461,7 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 
 | # | 항목 | 소유자·트리거 |
 |---|---|---|
-| 1 | 🔴 폴더명 `v1_4` 와 소스 상수 `FW_VERSION "…-1.3.0"` 불일치. `/firmware/info` 가 방송하는 것은 후자다. **08-06 실물에서 확인**: `version` · `source=/home/park/…v1_3.ino` · `git_sha=000…` **셋 다 실제와 다르다**. 🔴 **정체 판별에 쓸 수 있는 필드는 `build`(컴파일 시각)와 매크로 2개뿐이다** — 08-06 업로드 확정도 `build=Aug 6 2026 22:17:38` 로 했다 | 역할 A · **펌웨어를 다음에 여는 묶음에서 상수 3개를 갱신** (구동부는 08-06 합의로 펌웨어에 관여하지 않는다) |
+| 1 | 🔴 폴더명 `v1_4` 와 소스 상수 `FW_VERSION "…-1.3.0"` 불일치. `/firmware/info` 가 방송하는 것은 후자다. **08-06 실물에서 확인**: `version` · `source=/home/park/…v1_3.ino` · `git_sha=000…` **셋 다 실제와 다르다**. 🔴 **정체 판별에 쓸 수 있는 필드는 `build`(컴파일 시각)와 매크로 2개뿐이었다** — 08-06 업로드 확정도 `build=Aug 6 2026 22:17:38` 로 했다 | ⚠ **08-12 부분 종결** — `FW_VERSION` = `rearm-latch-pi-continuous-low-speed-1.4.0` · `FW_SOURCE_PATH` = 저장소 실제 경로로 정정했다(예약 32 굽기와 같은 묶음). 🔴 **`FW_GIT_SHA` 는 `0` 그대로다** — 소스에 자기 커밋 해시를 적으면 그 편집이 해시를 다시 바꾸는 순환이라 **빌드 시 주입(`-DFW_GIT_SHA=…`)이 필요**하고, 그건 이번 최소 변경 범위 밖이다. 🔴 **그때까지 정체 판별의 정본은 여전히 `build` 다** |
 | 2 | 구동부가 실제로 쓴 Teensyduino 패치 버전(1.58.**0/1/2**). 매크로는 셋 다 `158` 이라 구분되지 않는다 | 역할 A · 위와 같이 확인 |
 | ✅ 3 | ~~`re-arm` 래치 구현 주체~~ — **08-11 사용자 결정: 펌웨어 구현 주체는 이제부터 항상 역할 A** 다. 부정·전환 시험 설계 = `REAL_ROBOT_VALUES §1-f`⓹ | 완료 (08-11) |
 | 4 | aarch64(Jetson) 빌드 환경 필요 여부 | 터널 현장 재조정 시나리오가 실제로 오면 |
