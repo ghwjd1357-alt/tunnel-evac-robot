@@ -51,8 +51,14 @@
 구간이 전부 **"정지 증거"** 로 둔갑해, 꼬리 전체를 못 봐도 `조건 2 충족` 이 나왔다.
 이 도구의 조건 2 는 R0→R1 지면 주행 허가의 입력이므로 그 방향의 실패는 위험하다.
 → 이제 **관측이 완전할 때만 수치를 낸다**: ⓵ 프레임 번호가 처음부터 끝까지 1씩 연속이고
-(결측·중복·역순 없음) ⓶ 요청 구간이 조기 EOF 로 잘리지 않았고 ⓷ `T0` 이후 모든 프레임의
+(결측·중복·역순 없음) ⓶ 요청 구간이 조기 EOF 로 잘리지 않았고 ⓷ **요청 구간 전체**의
 회전값이 유한하며 유효점이 `{min_points}`개 이상일 때. 하나라도 어긋나면 **판정 불능**이다.
+
+🔴 ⓷ 이 `T0` **앞까지** 거슬러 가는 이유(검토 §58.1 P1) — 바퀴 중심은 프레임마다 배경
+아핀으로 **누적해서** 옮기는 상태다. 추적 실패 프레임은 그 갱신을 건너뛰므로, `T0` 앞의
+실패 한 번이 어긋난 중심을 `T0` 에 실어 나른다. 뒤 행이 다시 유한해져도 **엉뚱한 자리를
+바퀴로 알고 재는 것**이다. 실측 공격에서 조건 2 가 `{drift_mm_s}` → `0.1487` mm/s 로
+4분의 1까지 **과소평가**됐다 — 방향이 안전 반대쪽이라 P1 이다.
 
 사용법:
     python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522
@@ -117,6 +123,11 @@ def rotation_series(path, center, axes, frame_range, progress=None):
     """영상에서 프레임당 (접선=회전, 반경=잡음) 을 뽑는다. cv2 의존은 여기에만 둔다.
 
     반환 = `[(n, rot_deg, rad_deg, n_points), ...]`. 추적 실패 프레임은 `nan`.
+
+    🔴 **중심 `(cx,cy)` 는 프레임마다 누적되는 상태다**(검토 §58.1). 추적 실패 세 경로는
+    `continue` 로 중심 갱신을 건너뛰므로 그 프레임의 카메라 이동이 중심에서 **영구 누락**
+    된다. 그래서 실패는 그 행 하나가 아니라 **그 뒤 전부**를 오염시킨다 — 소비자
+    (`analyze`)가 요청 구간 전체를 fail-closed 로 막는 이유가 이것이다.
 
     ⚠ `center` 는 **`frame_range[0]` 시점의** 바퀴 타원 중심이다. 카메라가 흐르므로
     (실측 285 프레임에 198px) 중심을 고정하면 마스크가 바퀴를 벗어난다. 매 프레임쌍에서
@@ -247,19 +258,26 @@ def analyze(series, t0_frame, fps, bag_ms=None, expected_range=None):
 
     t0_idx = frames.index(t0_frame)          # 연속성이 보장돼 항상 존재한다
     # 🔴 **`NaN` 을 `0.0`(=안 돌았다)으로 바꾸지 않는다.** 못 본 것은 "모른다" 이고,
-    # 모르는 구간은 정지 증거가 될 수 없다. 판정 구간 전체를 fail-closed 로 막는다.
-    bad = [rows[i][0] for i in range(t0_idx, len(rows))
+    # 모르는 구간은 정지 증거가 될 수 없다.
+    #
+    # 🔴 **`T0` 앞까지 본다**(검토 §58.1 P1). 구판은 `range(t0_idx, …)` 였다 — "앞은
+    # 판정에 안 쓰이니 봐준다" 가 뒷문이었다. 생산자는 바퀴 중심을 매 프레임 배경 아핀으로
+    # **누적**해 옮기고(`rotation_series` 의 중심 갱신), 추적 실패 프레임은 `continue` 로
+    # 그 갱신을 건너뛴다. 그래서 `T0` 앞 실패는 어긋난 중심을 `T0` 로 실어 나르고, 뒤 행이
+    # 다시 유한해져도 그 값은 엉뚱한 자리에서 잰 값이다. "나중 행이 finite" 를 상태가
+    # 회복됐다는 대리값으로 **쓰지 않는다**.
+    bad = [rows[i][0] for i in range(len(rows))
            if not math.isfinite(rows[i][1]) or rows[i][3] < MIN_VALID_POINTS]
     if bad:
         return {'ok': False,
-                'reason': f'T0 이후 관측 실패 {len(bad)}프레임(첫 n={bad[0]}, '
+                'reason': f'관측 실패 {len(bad)}프레임(첫 n={bad[0]}, '
                           f'유효점 {MIN_VALID_POINTS} 미만이거나 회전값이 유한하지 않다) '
-                          f'— 못 본 구간은 정지가 아니다'}
+                          f'— 못 본 구간은 정지가 아니고, T0 앞이라도 바퀴 중심이 어긋난다'}
 
     window_frames = max(int(round(MOTION_WINDOW_MS / 1000.0 * fps)), 2)
-    # T0 앞은 판정에 쓰이지 않는다. 값이 유효하지 않으면 `nan` 그대로 둔다 —
-    # 0 으로 채우면 위에서 막은 바로 그 거짓 정지가 뒷문으로 돌아온다.
-    rot = [r[1] if math.isfinite(r[1]) else float('nan') for r in rows]
+    # 위 fail-closed 를 통과했으므로 여기 도달한 열은 **전 구간이 유한**하다. 그래도
+    # `0.0` 치환은 절대 되살리지 않는다 — 그게 거짓 정지를 만들던 바로 그 뒷문이다.
+    rot = [r[1] for r in rows]
 
     def swept(i):
         """프레임 `i` 이후 창 안에서 누적 회전이 가장 크게 벌어진 값(부호 무시)."""
@@ -273,7 +291,8 @@ def analyze(series, t0_frame, fps, bag_ms=None, expected_range=None):
     # 실측: 프레임당 잡음 최대가 0.146°/f 로 정본 판정선(5mm/s = 0.084°/f)보다 커서
     # 증분 판정은 정지 뒤 잡음을 계속 "이동"으로 읽는다. 창 안 누적으로 보면 무작위
     # 잡음은 상쇄되고(창 12프레임에 약 0.2°) 실회전만 남는다(주행 17.9°).
-    # 🔴 `t0_idx` 아래로는 내려가지 않는다 — 그 앞은 유효성을 보증하지 않은 구간이다.
+    # 🔴 `t0_idx` 아래로는 내려가지 않는다 — 잡음 바닥은 **판정 구간 안**에서 재야 한다.
+    # (T0 앞도 관측은 유효하다. 다만 그 구간은 아직 주행 중이라 잡음이 아니다.)
     tail_start = max(len(rows) - NOISE_TAIL_FRAMES, t0_idx)
     noise_swept = [swept(i) for i in range(tail_start, len(rows) - window_frames)]
     if len(noise_swept) < NOISE_TAIL_FRAMES // 2:
@@ -284,7 +303,7 @@ def analyze(series, t0_frame, fps, bag_ms=None, expected_range=None):
     def last_motion(rate_mm_s):
         """임계를 넘은 마지막 프레임의 **다음** 프레임 = 바퀴가 최종 위치에 선 프레임."""
         limit = mm_s_to_deg_per_frame(rate_mm_s, fps) * window_frames
-        # 🔴 `t0_idx` 부터만 훑는다 — 유효성을 보증한 구간이 정확히 여기다.
+        # 🔴 `t0_idx` 부터만 훑는다 — 총 정지는 T0 를 기점으로 세는 값이다.
         hit = [rows[i][0] for i in range(t0_idx, len(rows)) if swept(i) > limit]
         return None if not hit else hit[-1] + 1
 
@@ -332,6 +351,11 @@ def analyze(series, t0_frame, fps, bag_ms=None, expected_range=None):
 
     return {
         'ok': True,
+        # 🔴 검토 §58 조건부 수용 전제 — "요청 구간 **전체**의 연속성·유한성·유효점" 을
+        # **별도 출력으로 확인한** 시행에서만 이 도구의 조건 2 값을 쓴다. 그 확인이 이 셋이다.
+        'observed_frames': len(rows),
+        'observed_span': (frames[0], frames[-1]),
+        'range_checked': expected_range is not None,
         't0_frame': t0_frame,
         'stop_frame': stop,
         'n_frames': n_frames,
@@ -365,6 +389,13 @@ def report(v):
         return
     print(f"  fps {v['fps']:.4f} · 1 프레임 = {1000.0 / v['fps']:.3f} ms · "
           f"판정 창 {v['window_frames']}프레임({MOTION_WINDOW_MS}ms)")
+    lo, hi = v['observed_span']
+    # 🔴 검토 §58 이 요구한 **별도 출력**. 이 줄이 없거나 ⚠ 면 조건 2 값을 쓰면 안 된다.
+    print(f"  관측 완전성: {lo}~{hi} {v['observed_frames']}프레임 전량 연속·유한·"
+          f"유효점≥{MIN_VALID_POINTS} ✅ (T0 앞 포함 — 바퀴 중심 아핀 체인이 안 끊겼다)"
+          if v['range_checked'] else
+          f"  관측 완전성: {lo}~{hi} {v['observed_frames']}프레임 전량 연속·유한·"
+          f"유효점≥{MIN_VALID_POINTS} ⚠ `--range` 가 없어 조기 EOF 는 확인하지 못했다")
     print(f"  잡음 바닥(창 누적): 평균 {v['noise_mean_deg']:.3f}° · 최대 {v['noise_max_deg']:.3f}°")
     print(f"  정본 판정선 {MOTION_RATE_MM_S:g} mm/s = 창당 {v['canon_line_deg']:.3f}°")
     print()

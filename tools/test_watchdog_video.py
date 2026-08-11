@@ -28,6 +28,16 @@ PRODUCER_FAILURES = (
 # 판정에 닿는 네 자리. T0 직후 · 감속 경계 · 2초 꼬리 중간 · 꼬리 끝.
 INJECTION_POINTS = (671, 697, 800, 894)
 
+# 🔴 위 넷 중 **앞의 셋**은 생산자가 `continue` 로 빠져나가면서 바퀴 중심 갱신까지
+# 건너뛴다 — 그래서 그 프레임의 카메라 이동이 중심에서 영구 누락된다(검토 §58.1).
+# 넷째(`keep.sum()<30`)는 배경 아핀이 살아 있어 중심은 갱신되지만, **최소 안전선**을
+# 택했으므로 소비자는 넷을 구분하지 않는다 — 틀리더라도 보수적인 쪽으로만 틀린다.
+CHAIN_BREAKING = PRODUCER_FAILURES[:3]
+# 판정에 **안 닿는** 자리들. 구간 시작 · T0 직전 · T0 앞 연속 20프레임.
+PRE_T0_INJECTIONS = (('구간 시작', (610,)),
+                     ('T0 직전', (669,)),
+                     ('T0 앞 연속 20프레임', tuple(range(650, 670))))
+
 
 def row(n, rot=0.0, rad=0.02, npts=300):
     return (n, rot, rad, npts)
@@ -215,12 +225,16 @@ class ObservationCompletenessTest(unittest.TestCase):
         # 같은 열이라도 요청 구간을 모르면 그 사실을 주장하지 않는다.
         self.assertTrue(wv.analyze(rows, 670, FPS)['ok'])
 
-    def test_29_invalid_frames_before_t0_do_not_block(self):
-        """역회귀 — 판정에 쓰이지 않는 T0 앞 실패까지 막으면 도구가 못 쓰게 된다."""
+    def test_29_invalid_frames_before_t0_block_too(self):
+        """🔴 검토 §58.1 로 **뒤집힌** 회귀. 구판은 여기서 `ok=True` 를 냈다.
+
+        "T0 앞은 판정에 안 쓰이니 봐준다" 가 정확히 뒷문이었다 — 중심이 누적 상태라
+        T0 앞 실패는 T0 **이후 전부**를 오염시킨다.
+        """
         rows = [r if r[0] != 620 else (620, NAN, NAN, 0) for r in series()]
         v = wv.analyze(rows, 670, FPS)
-        self.assertTrue(v['ok'], v.get('reason'))
-        self.assertEqual(wv.RECORDED['n_frames'], v['n_frames'])
+        self.assertFalse(v['ok'], 'T0 앞 실패를 그대로 통과시켰다')
+        self.assertIn('T0 앞이라도', v['reason'])
 
     def test_30_the_real_contiguous_run_still_reproduces_the_record(self):
         """🔴 역회귀 — 실제와 같은 285프레임·NaN 0건은 기록값을 그대로 낸다."""
@@ -235,6 +249,58 @@ class ObservationCompletenessTest(unittest.TestCase):
         self.assertAlmostEqual(wv.RECORDED['measured_ms'], v['measured_ms'], places=1)
         self.assertAlmostEqual(wv.RECORDED['delta_ms'],
                                v['cross_observer_delta_ms'], places=1)
+
+
+class CenterChainTest(unittest.TestCase):
+    """🔴 검토 §58.1 — **"나중 행이 finite" 는 상태가 회복됐다는 증거가 아니다.**
+
+    바퀴 중심은 프레임마다 배경 아핀으로 누적해 옮기는 상태다. 추적 실패는 그 갱신을
+    건너뛰므로, T0 **앞**의 실패 한 번이 어긋난 중심을 T0 로 실어 나른다. 검토자의
+    실측 공격에서 조건 2 가 `0.5945` → `0.1487 mm/s` 로 4분의 1까지 과소평가됐다
+    (안전 반대 방향). 이 클래스가 그 뒷문을 막는다.
+    """
+
+    def test_46_chain_breaking_failures_before_t0_are_undecidable(self):
+        """세 경로 × 세 자리. 🔴 **뒤 행을 전부 유한하게 둬도** 판정 불능이어야 한다."""
+        for name, rot, npts in CHAIN_BREAKING:
+            for where, frames in PRE_T0_INJECTIONS:
+                hit = set(frames)
+                rows = [r if r[0] not in hit else (r[0], rot, NAN, npts)
+                        for r in series()]
+                # 전제 확인 — T0 이후는 한 프레임도 안 건드렸다.
+                self.assertFalse([r for r in rows
+                                  if r[0] >= 670 and not math.isfinite(r[1])])
+                v = wv.analyze(rows, 670, FPS, expected_range=(610, 895))
+                with self.subTest(cause=name, where=where):
+                    self.assertFalse(v['ok'], f'{name} @{where} 를 통과시켰다')
+                    self.assertIn('관측 실패', v['reason'])
+                    # 오염된 상태로 조건 2 를 계산해 내보내면 안 된다.
+                    self.assertNotIn('drift_mm_s', v)
+                    self.assertNotIn('cond2_ok', v)
+
+    def test_47_the_reason_names_the_center_not_just_the_blind_frame(self):
+        """왜 T0 앞까지 막는지가 사유에 남아야 한다 — 다음 사람이 되돌리지 않도록."""
+        rows = [r if r[0] != 615 else (615, NAN, NAN, 0) for r in series()]
+        self.assertIn('바퀴 중심', wv.analyze(rows, 670, FPS)['reason'])
+
+    def test_48_a_clean_run_prints_the_completeness_line(self):
+        """🔴 검토 §58 전제는 "**별도 출력으로** 확인" 이다 — 안 찍히면 못 쓴다."""
+        v = wv.analyze(series(), 670, FPS, expected_range=(610, 895))
+        self.assertEqual(285, v['observed_frames'])
+        self.assertEqual((610, 894), v['observed_span'])
+        self.assertTrue(v['range_checked'])
+        text = report_text(v)
+        self.assertIn('관측 완전성', text)
+        self.assertIn('285프레임 전량 연속·유한', text)
+        self.assertIn('✅', text)
+
+    def test_49_without_a_requested_range_the_line_says_so(self):
+        """`--range` 없이 돌리면 조기 EOF 를 못 본다 — ✅ 로 위장하지 않는다."""
+        v = wv.analyze(series(), 670, FPS)
+        self.assertFalse(v['range_checked'])
+        text = report_text(v)
+        self.assertIn('⚠', text)
+        self.assertNotIn('전량 연속·유한·유효점≥30 ✅', text)
 
 
 class CrossObserverTest(unittest.TestCase):
