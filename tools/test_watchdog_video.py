@@ -389,6 +389,18 @@ class ContractTest(unittest.TestCase):
         self.assertEqual((610, 895), p['frame_range'])
         self.assertEqual((112.0, 178.0), p['axes'])
 
+    def test_22_current_firmware_remeasurement_preset_is_in_the_tool(self):
+        """🔴 현행 펌웨어 재측정(2026-08-11)의 파라미터도 도구 안에 있어야 한다.
+
+        08-07 증거는 승계가 불인정됐으므로(§57.5) R1 허가 근거로 쓰이는 시행은
+        이쪽이다. 정본(`JETSON_SETUP §7-c-0`)에 적힌 `27프레임 / 450.1ms` 를
+        누가 재현하려면 이 세 값이 그대로 있어야 한다.
+        """
+        p = wv.PRESETS['0811-1938']
+        self.assertEqual((413, 651), p['frame_range'])
+        self.assertEqual((865.0, 1236.0), p['center'])
+        self.assertEqual((290.0, 237.0), p['axes'])
+
 
 class RecordedFactsTest(unittest.TestCase):
     """검토 §57.3 — 설명·출력·회귀가 **한 출처**(`RECORDED`)에서 나온다."""
