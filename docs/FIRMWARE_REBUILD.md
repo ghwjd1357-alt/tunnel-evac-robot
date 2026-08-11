@@ -125,42 +125,65 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1 = 멈춘다 / 2 = 판정 불능
 ```
 
-**2026-08-07 기준 허용된 변경은 딱 한 건이다** — `ESTOP_ACTIVE_LOW true→false`
-(`.ino:111` 과 그 위 주석 · 1307→1313줄 · 37,965→38,458 bytes · 기준점 대비 증감 `8 2`).
-
-🔴 **판정하는 값은 이것 하나다 — `.ino` 파일 **내용**의 sha256** (patch 가 아니다):
+🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-11 지문 이관 후
+허용된 변경은 세 건**이고, 아래 64자리 세 개가 **이 절의 정본**이다:
 
 ```
-1db24326ff1f4d8100e5a1fd99f77803a5f02e8c28a0aa0c0609d6d817a90bd8
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino
+aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 199,15 · 1,491줄 / 47,808 bytes)
+7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978
+  firmware/teensy_integrated_base_v1_4/rearm_gate.h        (신규 · 247,0 · 247줄 / 13,693 bytes)
+f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663
+  firmware/teensy_integrated_base_v1_4/drive_wiring.h      (신규 · 101,0 · 101줄 / 5,196 bytes)
 ```
 
 ```bash
-sha256sum firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino  # 값을 다시 만드는 법
+sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h}
 ```
 
-### 🔴 4-a. 2026-08-11 현재 — 지문은 **아직 구판이다. `rc=1` 이 정상이고, 굽지 않는다**
+허용된 세 건이 담고 있는 것: ① `ESTOP_ACTIVE_LOW true→false`(`.ino:111` 과 그 위 주석 —
+되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이 재개방된다) ② re-arm 래치 배선 ③ 상태전이 정본
+(`rearm_gate.h`)과 **모터 정지의 관측 가능한 자리**(`drive_wiring.h`).
+
+⚠ **구판 기록** — 08-07 기준 허용 변경은 `ESTOP_ACTIVE_LOW` **한 건**이었고 그때의 내용
+sha256 은 `1db24326…`(1307→1313줄 · 37,965→38,458 bytes · 증감 `8 2`)였다. 이 값은 **더 이상
+판정에 쓰지 않는다** — 위 세 개가 대체했다. 이관 경위는 `§4-a`.
+
+🔴 **이 세 지문은 검토 §56 조건부 수용까지 받은 내용을 가리킨다.** `§56.1` **P1 은 열린 채**
+동결됐다(전제조건·재개방·완료판정 = `REAL_ROBOT_VALUES §1-f` ⓵). **지문이 `rc=0` 이라는 것은
+"굽어도 되는 상태"라는 뜻이지 "결함이 없다"는 뜻이 아니다.**
+
+### 4-a. 2026-08-11 — 지문 이관 **완료**. `rc=0` 이고, **굽기 차단이 풀렸다**
 
 re-arm 래치(§54 보완 → §55 보완)가 스케치를 고쳤고 **파일이 둘 늘었다**. 지문은 **독립 검토
-승인 뒤에만** 옮긴다(`REAL_ROBOT_VALUES §1-f` ⓷ — 6 을 5 보다 먼저 하면 지문이 새 내용을 스스로
-승인한다).
+승인 뒤에만** 옮긴다는 규칙(`REAL_ROBOT_VALUES §1-f` ⓷ — 6 을 5 보다 먼저 하면 지문이 새 내용을
+스스로 승인한다)에 따라 **§54→§55→§56 세 회차를 다 태운 뒤** 옮겼다.
 
-| 파일 | 현재 작업 트리 내용 sha256 | 지문 등록 |
-|---|---|---|
-| `teensy_integrated_base_v1_4.ino` | `aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02` | ❌ 승인 대기 |
-| 🔴 `rearm_gate.h` **(신규)** | `7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978` | ❌ 승인 대기 |
-| 🔴 `drive_wiring.h` **(신규)** | `f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663` | ❌ 승인 대기 |
+| 언제 | 무엇 |
+|---|---|
+| `d0bf9f8` ~ `a7d1483` | 구현·보완. 지문 **미이관** · `firmware_precheck` `rc=1` 이 굽기를 막음 |
+| `20b2a3a` | §56 결과 정본 이관(문서·인벤토리 전용). 🔴 **이 묶음에서도 지문은 안 옮겼다** |
+| **이 커밋** | **지문 3개 이관 → `rc=0`.** 값은 `§4` 가 정본이고 여기서 복제하지 않는다 |
 
 ⚠ **root `.h` 도 판정 대상이다** — `arduino-cli` 는 스케치 root 의 헤더를 함께 컴파일하고
-`firmware_precheck.sh` 의 `is_sketch_source()` 가 root `.h` 를 소스로 분류한다. 지금은
-**미추적 소스**로 잡혀 `rc=1` 이 뜬다. 그게 맞다 — 아직 승인 전이다.
+`firmware_precheck.sh` 의 `is_sketch_source()` 가 root `.h` 를 소스로 분류한다. 이관 전에는
+두 헤더가 **미추적 소스**로 잡혀 `rc=1` 이었고, 그것이 의도된 방어였다.
 
-승인이 나면 `--expect` 를 **세 개** 준다(기본값과 이 표를 같이 옮긴다):
+🔴 **이관으로 사라진 것이 무엇인지 정확히 쓴다.** `rc=1` 은 *"굽지 마라"* 를 **자동으로**
+강제하던 유일한 게이트였다. 지금부터 그 자리는 비어 있고, 굽기 전 확인은 **사람의 절차**
+(`§5` 업로드 안전 규칙 · `JETSON_SETUP §7-c-E`)로만 남는다. **소스를 또 고치면 `rc=1` 이
+돌아오는 것이 정상이고, 그때 승인 없이 지문을 다시 옮기면 안 된다.**
+
+🔴 **`rc=0` 은 "결함 없음"이 아니다.** `§56.1` P1(응답 전송이 실패해도 보드만 무장)은
+**열린 채 동결**됐다 — 전제조건·재개방·완료판정은 `REAL_ROBOT_VALUES §1-f` ⓵ 이고,
+코드 보완 기한은 **R1 통과 직후·자율 발행 전**이다.
+
+재판정이 필요하면 기본값 없이도 같은 판정을 만들 수 있다:
 ```bash
 bash tools/firmware_precheck.sh \
-  --expect firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=<추가>,<삭제>,aa8e75ec... \
-  --expect firmware/teensy_integrated_base_v1_4/rearm_gate.h=<추가>,<삭제>,7b3a0462... \
-  --expect firmware/teensy_integrated_base_v1_4/drive_wiring.h=<추가>,<삭제>,f4b6d65e...
+  --expect firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=199,15,aa8e75ec... \
+  --expect firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a0462... \
+  --expect firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e...
 ```
 
 **2026-08-11 빌드 실측** (`arduino-cli compile -b teensy:avr:teensy41`, 링크 성공):

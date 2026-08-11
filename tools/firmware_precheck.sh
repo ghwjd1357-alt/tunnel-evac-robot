@@ -87,14 +87,21 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# 기대 목록의 기본값 = 2026-08-07 현재 **허용된 변경 딱 한 건**.
-#   `ESTOP_ACTIVE_LOW true→false` = `.ino:111` 과 그 위 주석. 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이
-#   재개방된다.
+# 기대 목록의 기본값 = 2026-08-11 지문 이관 후 **허용된 변경 세 건**.
+#   ① `.ino` — `ESTOP_ACTIVE_LOW true→false`(`.ino:111`, 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 재개방)
+#      + re-arm 래치 배선(§54→§55 보완).
+#   ② `rearm_gate.h`(신규) — 상태전이 정본. ③ `drive_wiring.h`(신규) — 모터 정지의 관측 가능한 자리.
 #   🔴 아래 64자리는 **파일 내용의 sha256** 이다(patch 가 아니다). 정본 `docs/FIRMWARE_REBUILD.md §4`
 #   가 같은 값을 64자리 전문으로 갖고 있고, 재생성은 그쪽에 적힌 `sha256sum <파일>` 한 줄이다.
-#   `.ino` 를 정당하게 고치면 **두 자리를 같이** 옮긴다.
+#   스케치 소스를 정당하게 고치면 **두 자리를 같이** 옮긴다.
+#   ⚠ 이 기본값은 검토 §56 조건부 수용까지 받은 내용이다 — 승인 없이 갱신하면 지문이 새 내용을
+#   스스로 승인한다(`REAL_ROBOT_VALUES §1-f` ⓷).
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
-    EXPECT_ARGS=("firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=8,2,1db24326ff1f4d8100e5a1fd99f77803a5f02e8c28a0aa0c0609d6d817a90bd8")
+    EXPECT_ARGS=(
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=199,15,aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02"
+        "firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978"
+        "firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663"
+    )
 fi
 
 # 이 설치본의 실제 권위 = arduino-cli 1.5.2-rc.1 + teensy:avr 1.58.2, Teensy 4.1의
