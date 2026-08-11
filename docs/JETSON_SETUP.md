@@ -409,7 +409,7 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
 | | `FW_VERSION` | `FW_SOURCE_PATH` | `FW_GIT_SHA` | `build` |
 |---|---|---|---|---|
 | **보드(현재)** | `…-low-speed-1.3.0` | `/home/park/…v1_3.ino` | `0` | **`Aug 11 2026 15:13:20`** |
-| **저장소(다음 굽기)** | `rearm-latch-pi-continuous-low-speed-1.4.0` | 저장소 실제 경로 | `0` | 굽는 시각 |
+| **저장소(다음 굽기)** | `rearm-latch-pi-continuous-low-speed-1.4.0` | `firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino` | `0` | 굽는 시각 |
 
 🔴 **굽기 전에는 보드 행이 정상이다** — `1.3.0` 을 보고 "오염"으로 읽지 않는다.
 🔴 **굽고 나면 새 행이 정상이다** — 그때 `1.3.0` 이 나오면 **안 구워진 것**이다.
@@ -1227,7 +1227,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
-| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. 🔴 잔여: `FW_VERSION` 문자열(1.3.0)과 폴더명(v1_4) 불일치를 구동부에 확인 |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. ✅ **잔여 종결(08-12)** — `FW_VERSION` 1.3.0 vs 폴더명 v1_4 불일치는 **08-05 당시의 잔여**였고, 저장소는 08-12 에 `rearm-latch-pi-continuous-low-speed-1.4.0` 으로 정정했다(예약 32 묶음). 🔴 **구동부 확인 사항이 아니다** — 08-06 합의로 펌웨어는 역할 A 소유다. ⚠ **다음 굽기 전까지 보드가 `1.3.0` 을 방송하는 것은 정상**이고, 굽은 뒤 `1.3.0` 이면 안 구워진 것이다(2상태 표 = `§7-a`) |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |

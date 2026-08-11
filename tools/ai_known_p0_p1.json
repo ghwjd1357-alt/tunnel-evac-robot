@@ -533,5 +533,10 @@
     "id": "0812-fingerprint-moved-before-independent-review-60",
     "path": "tools/firmware_precheck.sh",
     "anchor": "유일한 자동 굽기 차단이 미승인 구동 상수를"
+  },
+  {
+    "id": "0812-pi-authority-is-not-in-window-convergence-61",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "권한 안에 있다는 것과 시행 창 안에 도달한다는 것은"
   }
 ]
