@@ -1189,12 +1189,35 @@ cp tools/rearm_gate_host_test.cpp tools/rearm_gate_host_test.sh "$W/tools/"
 bash "$W/tools/rearm_gate_host_test.sh"; echo "rc=$?"
 ```
 
+🔴 **M1·M3 은 `(void)sink;` 를 반드시 남긴다 (08-11 정정 · 검토 §56.2).** 앞 판은 *"`stopAllMotors`
+·플래그 제거"* 라고만 적었는데, **문장 그대로 두 줄을 지우면 템플릿 인자 `sink` 가 미사용이 되어
+`-Werror=unused-parameter` 로 컴파일이 멎고 harness 는 `rc=2`(판정 불능)** 를 낸다. 기록된
+`rc=1 · 16/53줄` 은 **의미만 바꾼 등가 변이**의 값이다. 두 사실을 구분해 고정한다:
+
+| 무엇을 했나 | 결과 | 읽는 법 |
+|---|---|---|
+| 문장 그대로 두 줄 **literal 삭제** | **rc=2** | 판정 불능. 🔴 **rc=0 처럼 읽지 않는다** |
+| `(void)sink;` 를 남긴 **의미 등가 변이** | **rc=1 · 16줄**(M1) · **53줄**(M3) | 정지 배선의 검출력 증거 |
+
+M1 정확한 patch (M3 = 여기에 M2 를 더한다):
+
+```bash
+python3 - "$W" <<'PY'
+import sys, pathlib
+f = pathlib.Path(sys.argv[1]) / "firmware/teensy_integrated_base_v1_4/drive_wiring.h"
+s = f.read_text()
+s = s.replace("  rearmGateDisarm(g);\n  sink.stopAllMotors();\n  sink.setCmdVelReceived(false);",
+              "  rearmGateDisarm(g);\n  (void)sink;")
+f.write_text(s)
+PY
+```
+
 | 변이 | 파일 | 관측값 |
 |---|---|---|
 | M0 무변이 | — | rc=0 · FAIL 0줄 |
-| M1 `driveDisarm` 의 `stopAllMotors`·플래그 제거 | `drive_wiring.h` | **rc=1 · 16줄** |
+| M1 `driveDisarm` 의 `stopAllMotors`·플래그 제거 **+ `(void)sink;`** | `drive_wiring.h` | **rc=1 · 16줄** |
 | M2 `driveOutputAllowed` 가드 제거(항상 true) | `drive_wiring.h` | **rc=1 · 36줄** |
-| M3 M1+M2 | `drive_wiring.h` | **rc=1 · 53줄** |
+| M3 M1+M2 (`driveDisarm` 쪽에 `(void)sink;`) | `drive_wiring.h` | **rc=1 · 53줄** |
 | M4 `rearmGateTick` 이 `ARMING` 도 승격 | `rearm_gate.h` | **rc=1 · 3줄** |
 | M5 장벽 시작을 서비스 콜백 안으로 되돌림 | `.ino` | **rc=1 · 구조 검사 3줄** |
 | M6 서비스 성공이 곧바로 `ARMED` | `rearm_gate.h` | **rc=1 · 266줄** |
@@ -1212,3 +1235,44 @@ bash "$W/tools/rearm_gate_host_test.sh"; echo "rc=$?"
 내용은 실기 `JETSON_SETUP §7-c-E` 몫이다. 응답이 **클라이언트에 닿은** 시각은 펌웨어가 관측할
 수 없어 §55.1 보완 뒤에도 **agent→client 전송 지연은 미실측**으로 남는다. 실차 통전·배선
 변경·펌웨어 업로드는 하지 않았다.
+
+## 10.24 검토 §56 — 사슬 동결과 조건부 수용 (2026-08-11)
+
+**판정 = 조건부 수용 · 이 검토 사슬 동결 (P0 0 / P1 1 / P2 1).** §55.1·§55.2·§55.3 은 완료판정대로
+닫혔다. `0784ad6..a7d1483` 1커밋 15파일, 검토자 독립 실행에서 정상판 동작 **922** + 구조 **7**
+PASS · pytest 182 · colcon **245 tests / 0 errors / 0 failures / 3 skipped** · Teensy 독립 링크
+FLASH code 294,176 / RAM1 variables 62,656 로 지문 3개 일치.
+
+| | 결함 | 처분 |
+|---|---|---|
+| §56.1 **P1** | 응답 전송 실패를 성공처럼 취급해 **보드만 무장**된다 | ⚠ **조건부 수용 — 코드 안 고침.** 전제조건·재개방·완료판정 = `REAL_ROBOT_VALUES §1-f` ⓵. 회귀·변이 M8 예약 = 같은 절 |
+| §56.2 P2 | M1·M3 재현 절차가 기록된 `rc=1` 을 못 만든다 (`rc=2`) | ✅ §10.23 에 정확한 patch 와 `rc=2`/`rc=1` 구분 고정 |
+
+### 🔴 왜 P1 을 열어둔 채 동결하나
+
+`AGENTS.md §6` — **같은 결함 사슬의 3회차부터는 P0 만 반영하고 동결한다.** §54(1) → §55(2) →
+§56(3) 이고 §56.1 은 P1 이다. 이 규칙은 firmware precheck 가 §47→§50 으로 **4회** 돈 뒤에
+"규칙이 아니라 계수기가 없었다"고 판단해 만든 것이다. **처음 구속력이 생긴 자리에서 깨면
+규칙이 아니다.** 계수 = `git log --grep='Review-round'`.
+
+⚠ 물리적 근거도 같이 적는다 — `[ARMED]` 는 그 자체로 안 움직이고 비영 `/cmd_vel` 이 있어야
+돈다. R1 은 수동 텔레옵이라 서비스가 timeout 나면 조작자가 명령을 시작하지 않는다. 🔴 **이
+전제는 자율 발행자가 붙는 순간 무너지므로, 그것이 첫 번째 재개방 조건이다.**
+
+### 🔴 이번에도 정본이 거짓을 말하고 있었다 (두 자리)
+
+1. `.ino` 주석 *"a gate left in ARMING never arms (fail-closed)"* — **반대다.** 호출이 무조건이라
+   `[ARMING]` 은 다음 루프에서 `[PENDING]` 이 된다. fail-closed 라 이름 붙인 자리가 fail-open.
+2. `REAL_ROBOT_VALUES §1-f` ⓶ 의 `z=4` 주석이 같은 거짓을 복제하고 있었다 → 정정 완료.
+
+⚠ **`.ino` 는 이번 묶음에서 한 글자도 안 고친다** — 주석 한 줄이라도 sha256 이 바뀌면 굽는
+물건이 **검토받은 물건과 달라진다**. 주석 수정은 §56.1 코드 보완과 같은 묶음이다.
+
+### 인벤토리·게이트
+
+- 알려진 P0/P1 **101 → 102** (`0811-response-send-failure-still-arms-56`).
+  동기화 전에는 Desktop history 102 vs inventory 101 로 `test_02b` 가 **예상대로 FAIL** 했다 —
+  검토자도 같은 것을 관측했고, 회귀 실패로 숨기지 않았다.
+- 지문은 **여전히 안 옮겼다.** `firmware_precheck` `rc=1` 이 정상이고 **아직 굽지 않는다.**
+  지문 이관은 이 문서 동기화 **뒤 별도 커밋**이며, 업로드는 사용자 승인 + `FIRMWARE_REBUILD §5`
+  (바퀴 공중 · 모터 전력 0V)를 그대로 지킨다.
