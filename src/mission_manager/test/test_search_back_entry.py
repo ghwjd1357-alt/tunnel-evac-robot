@@ -39,6 +39,7 @@ test_search_back_entry.py — SEARCH_BACK 진입 봉인 (예약 16 ①+②′, 0
   cd ~/ros2_ws && python3 -m pytest src/mission_manager/test/ -q
 """
 
+import ast
 import os
 import re
 import types
@@ -697,9 +698,40 @@ def _production_src(name):
         return f.read()
 
 
+def _reset_call_lines(src):
+    """`self.monitor.reset(...)` **실행 호출**의 줄 번호를 `ast` 로 찾는다 (예약 20).
+
+    🔴 **문자열 검색으로 세면 주석 처리된 호출도 호출로 센다.** 08-02 검토 §28 P2-1 이
+    격리 사본에서 실증했다 — 실행 호출을 주석으로 덮고 `pass` 를 넣어도 이 검사가
+    `1 passed` 였다. 즉 "자리 소실 양방향 게이트"라는 주장이 그때는 성립하지 않았다.
+
+    `ast` 는 주석을 파싱하지 않으므로 여기서 세는 것은 **실제로 실행되는 호출뿐**이다.
+    역할 태그(`[reset-role] …`)는 주석에 있어 AST 에 안 남으므로, 호출의 줄 번호로
+    원본 줄을 되짚어 읽는다 — **호출이 사라지면 그 줄도 같이 사라진다**.
+    """
+    tree = ast.parse(src)
+    lines = src.splitlines()
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if not (isinstance(f, ast.Attribute) and f.attr == 'reset'):
+            continue
+        owner = f.value
+        if not (isinstance(owner, ast.Attribute) and owner.attr == 'monitor'):
+            continue
+        if not (isinstance(owner.value, ast.Name) and owner.value.id == 'self'):
+            continue
+        # 여러 줄 호출이면 태그가 끝 줄에 붙을 수 있으므로 호출이 걸친 줄을 다 본다.
+        end = getattr(node, 'end_lineno', node.lineno)
+        found.append('\n'.join(lines[node.lineno - 1:end]))
+    return found
+
+
 def test_sb23_reset_docstring_covers_every_production_caller():
     node_src = _production_src('mission_node.py')
-    call_lines = [ln for ln in node_src.splitlines() if 'self.monitor.reset(' in ln]
+    call_lines = _reset_call_lines(node_src)
     assert call_lines, '전제 불성립: 생산 코드에서 reset 호출을 못 찾았다'
 
     tagged = [role for ln in call_lines for role in RESET_ROLE_RE.findall(ln)]
@@ -713,3 +745,30 @@ def test_sb23_reset_docstring_covers_every_production_caller():
         f'reset() 설명이 빠뜨린 호출 역할: {sorted(called - documented)}'
     assert documented <= called, \
         f'설명에는 있는데 호출 자리가 사라진 역할: {sorted(documented - called)}'
+
+
+def test_sb23b_commented_out_reset_is_not_counted_as_a_caller():
+    """🔴 예약 20 부정 회귀 — 주석 처리된 호출을 호출로 세면 안 된다.
+
+    이 검사가 등록된 사유가 바로 이것이다(08-02 검토 §28 P2-1): 구판은
+    `mission_node.py` 를 줄 단위 문자열로 읽어 `'self.monitor.reset('` 이 든 줄을
+    호출자로 셌고, **실행 호출을 주석으로 덮고 `pass` 를 넣어도 통과**했다.
+    ⚠ 문자열 검색으로 돌아가면 이 테스트가 죽는다.
+    """
+    live = 'class N:\n    def f(self):\n        self.monitor.reset("any")  # [reset-role] a\n'
+    assert len(_reset_call_lines(live)) == 1
+
+    commented = ('class N:\n    def f(self):\n'
+                 '        # self.monitor.reset("any")  # [reset-role] a\n'
+                 '        pass\n')
+    assert _reset_call_lines(commented) == [], \
+        '주석 처리된 호출을 실행 호출로 셌다 — 예약 20 의 결함이 되살아났다'
+
+
+def test_sb23c_other_objects_reset_is_not_miscounted():
+    """`self.monitor.reset` 만 센다 — 이름이 비슷한 다른 호출을 끌어오지 않는다."""
+    src = ('class N:\n    def f(self):\n'
+           '        self.other.reset("any")\n'
+           '        self.monitor.clear("any")\n'
+           '        monitor.reset("any")\n')
+    assert _reset_call_lines(src) == []

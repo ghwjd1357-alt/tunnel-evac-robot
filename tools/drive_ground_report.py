@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""지면 주행 실측 — `/odom` 으로 거리·속도·횡편차·yaw 를 뽑고 IMU 와 교차한다.
+
+★ **이 도구가 재는 것과 안 재는 것**
+
+  - **잰다** = 명령이 나간 구간의 **경로장·전진/횡 성분·yaw 변화**, 그리고 (주면)
+    같은 시행의 **IMU yaw** 와의 차이.
+  - **안 잰다** = 실제 이동 거리. 🔴 **그건 줄자다.** `/odom` 은 엔코더 파생값이고
+    `twist` 도 같은 엔코더에서 나오므로 **서로를 검증하지 못한다.**
+
+🔴 **줄자가 왜 정본인가** (2026-08-11 실측 두 번이 이걸 증명했다)
+
+  ① R1 1차에서 `/odom` 이 `69.5°` 회전을 주장했는데 육안은 완벽한 직진이었다. 원인은
+     좌전륜 엔코더 부호 반전이었고, **줄자가 없었으면 어느 쪽이 거짓말인지 못 갈랐다**.
+  ② 부호를 고친 뒤 `/odom` 676mm vs **줄자 685mm** 로 맞았다. 그 순간 08-07부터 열려
+     있던 질문("명령보다 빠른 것인가, 오도메트리 스케일이 2배인가")이 닫혔다 —
+     **스케일이 아니라 실제로 빨랐다**(명령 `0.12` → 실측 `0.3265 m/s`, 예약 32).
+
+⚠ **평균속도를 정상속도로 읽지 않는다.** 짧은 대조군은 가감속 구간이 커서 평균이 낮게
+나온다. `0.12 m/s` 도달 판정은 `§7-c-1` 의 **3m 실측**이 한다.
+
+★ **횡편차를 세계좌표가 아니라 시작 방향 기준으로 가른다** — 세계좌표 그대로 보면
+로봇이 어느 방향을 보고 출발했는지에 따라 값이 흔들려 편차가 안 보인다.
+
+사용법:
+    python3 tools/drive_ground_report.py <bag> [--tape-mm 685]
+    종료코드 0 = 판정 유효 / 1 = 판정 불능 / 2 = 입력 오류
+
+정본 = `docs/JETSON_SETUP.md §7-c-R1`,`§7-c-1` · 짝 도구 = `tools/drive_encoder_check.py`.
+"""
+import math
+import sys
+
+# 🔴 펌웨어 `.ino` 와 같은 값. 다르면 펌웨어와 다른 물건을 재게 된다.
+WHEEL_BASE_M = 0.62
+# 명령이 끊긴 뒤 watchdog 이 세울 때까지를 포함해 보는 꼬리. `§7-c-0` 실측 총 정지가
+# 약 516ms 이므로 1.5s 면 정지까지 확실히 담는다.
+COAST_TAIL_S = 1.5
+# 가속 구간을 뺀 "정상 구간"의 시작. 08-11 실측에서 약 1.5s 면 twist 가 평탄해졌다.
+CRUISE_START_S = 1.5
+
+
+class UsageError(Exception):
+    """입력 계약 위반. rc=2 로 끝난다."""
+
+
+def load(bag):
+    """`/cmd_vel`·`/odom`·`/imu/yaw_deg` 를 읽는다. ROS 의존은 여기에만 둔다."""
+    import rosbag2_py                                     # noqa: PLC0415
+    from rclpy.serialization import deserialize_message   # noqa: PLC0415
+    from rosidl_runtime_py.utilities import get_message   # noqa: PLC0415
+
+    reader = rosbag2_py.SequentialReader()
+    reader.open(rosbag2_py.StorageOptions(uri=bag, storage_id='sqlite3'),
+                rosbag2_py.ConverterOptions('', ''))
+    tmap = {t.name: t.type for t in reader.get_all_topics_and_types()}
+    if '/odom' not in tmap or '/cmd_vel' not in tmap:
+        raise UsageError(f'bag 에 /odom·/cmd_vel 이 다 있어야 한다: {sorted(tmap)}')
+
+    cmds, odoms, imu = [], [], []
+    while reader.has_next():
+        topic, data, t = reader.read_next()
+        m = deserialize_message(data, get_message(tmap[topic]))
+        if topic == '/cmd_vel':
+            cmds.append((t, m.linear.x, m.angular.z))
+        elif topic == '/odom':
+            p = m.pose.pose.position
+            q = m.pose.pose.orientation
+            yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                             1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+            odoms.append((t, p.x, p.y, yaw, m.twist.twist.linear.x))
+        elif topic == '/imu/yaw_deg':
+            imu.append((t, m.data))
+    return cmds, odoms, imu
+
+
+def analyze(cmds, odoms, imu=None, tape_mm=None):
+    """순수 함수 — bag I/O 없이 판정한다. 회귀는 여기에 합성 열을 넣는다."""
+    nz = [c for c in cmds if abs(c[1]) > 1e-9 or abs(c[2]) > 1e-9]
+    if not nz:
+        return {'ok': False, 'reason': '비영 /cmd_vel 이 없다 — 무장이 안 됐을 수 있다'}
+    t0, t1 = nz[0][0], nz[-1][0]
+
+    seg = [o for o in odoms if t0 <= o[0] <= t1 + COAST_TAIL_S * 1e9]
+    if len(seg) < 2:
+        return {'ok': False, 'reason': f'판정 구간의 /odom 표본이 {len(seg)}개뿐이다'}
+
+    x0, y0, yaw0 = seg[0][1], seg[0][2], seg[0][3]
+    dx, dy = seg[-1][1] - x0, seg[-1][2] - y0
+    # 시작 방향을 x축으로 놓고 종/횡을 가른다.
+    fwd = dx * math.cos(yaw0) + dy * math.sin(yaw0)
+    lat = -dx * math.sin(yaw0) + dy * math.cos(yaw0)
+
+    path = sum(math.hypot(seg[i][1] - seg[i - 1][1], seg[i][2] - seg[i - 1][2])
+               for i in range(1, len(seg)))
+    dur_seg = (seg[-1][0] - seg[0][0]) / 1e9
+    dyaw = math.degrees((seg[-1][3] - yaw0 + math.pi) % (2 * math.pi) - math.pi)
+
+    cruise = [o[4] for o in odoms
+              if t0 + CRUISE_START_S * 1e9 <= o[0] <= t1]
+
+    v = {
+        'ok': True,
+        'cmd_linear': nz[0][1],
+        'cmd_angular': nz[0][2],
+        'n_nonzero': len(nz),
+        'cmd_dur_s': (t1 - t0) / 1e9,
+        'obs_dur_s': dur_seg,
+        'n_odom': len(seg),
+        'path_mm': path * 1000.0,
+        'fwd_mm': fwd * 1000.0,
+        'lat_mm': lat * 1000.0,
+        'lat_pct': abs(lat) / max(abs(fwd), 1e-9) * 100.0,
+        'dyaw_deg': dyaw,
+        'avg_mps': path / dur_seg if dur_seg > 0 else float('nan'),
+        'cruise_mps': (sum(cruise) / len(cruise)) if cruise else None,
+    }
+
+    if imu:
+        pre = [d for t, d in imu if t <= t0]
+        post = [d for t, d in imu if t >= t1]
+        if pre and post:
+            v['imu_dyaw_deg'] = post[-1] - pre[-1]
+
+    # 🔴 줄자가 있으면 그것이 정본이다 — odom 은 여기서 **검증받는 쪽**이다.
+    if tape_mm is not None:
+        v['tape_mm'] = tape_mm
+        v['odom_over'] = path * 1000.0 / tape_mm if tape_mm > 0 else float('nan')
+        v['true_mps'] = (tape_mm / 1000.0) / dur_seg if dur_seg > 0 else float('nan')
+    return v
+
+
+def report(v, name=''):
+    print('=' * 74)
+    print('지면 주행 실측:', name)
+    if not v['ok']:
+        print(f'  🔴 판정 불가 — {v["reason"]}')
+        return
+    print(f'  명령 linear={v["cmd_linear"]:.3f} angular={v["cmd_angular"]:.3f} · '
+          f'비영 {v["n_nonzero"]}건 · 발행 {v["cmd_dur_s"]:.2f}s · '
+          f'관측 {v["obs_dur_s"]:.2f}s(정지까지) · /odom {v["n_odom"]}표본')
+    print()
+    print(f'  경로장(odom)        = {v["path_mm"]:9.1f} mm')
+    print(f'  전진 성분           = {v["fwd_mm"]:9.1f} mm')
+    print(f'  🔴 횡편차           = {v["lat_mm"]:9.1f} mm   ({v["lat_pct"]:.2f}% of 전진)')
+    print(f'  yaw 변화(엔코더)    = {v["dyaw_deg"]:9.2f} °')
+    if 'imu_dyaw_deg' in v:
+        d = v['imu_dyaw_deg']
+        gap = abs(d - v['dyaw_deg'])
+        flag = '✅ 교차 일치' if gap < 1.0 else '🔴 두 관측자가 어긋난다'
+        print(f'  yaw 변화(IMU 독립)  = {d:9.2f} °   차이 {gap:.2f}° {flag}')
+    print()
+    print(f'  평균속도(경로장)    = {v["avg_mps"]:9.4f} m/s'
+          f'   ⚠ 가감속 포함 — 정상속도가 아니다')
+    if v['cruise_mps'] is not None:
+        print(f'  twist.x 정상구간    = {v["cruise_mps"]:9.4f} m/s'
+              f'   ⚠ EMA(α=0.10) 파생값이라 보조 관측이다')
+    if 'tape_mm' in v:
+        print()
+        print(f'  🔴 줄자(정본)       = {v["tape_mm"]:9.1f} mm')
+        print(f'     odom / 줄자      = {v["odom_over"]:9.3f} 배')
+        print(f'     실제 평균속도    = {v["true_mps"]:9.4f} m/s'
+              f'   ← 명령의 {v["true_mps"] / max(abs(v["cmd_linear"]), 1e-9):.2f}배')
+        if abs(v['odom_over'] - 1.0) > 0.05:
+            print('     🔴 odom 과 줄자가 5% 넘게 어긋난다 — 오도메트리 스케일을 의심한다')
+        else:
+            print('     ✅ 오도메트리 스케일 정상(5% 이내)')
+    print()
+    print('  🔴 실제 이동 거리의 정본은 줄자다 — odom·twist 는 같은 엔코더 파생이라')
+    print('     서로를 검증하지 못한다. 표시하고 재는 것이 유일한 외부 관측이다.')
+
+
+def main(argv):
+    args = argv[1:]
+    tape = None
+    if '--tape-mm' in args:
+        i = args.index('--tape-mm')
+        try:
+            tape = float(args[i + 1])
+        except (IndexError, ValueError):
+            print('입력 오류 — --tape-mm 뒤에 수를 준다', file=sys.stderr)
+            return 2
+        del args[i:i + 2]
+    if len(args) != 1:
+        print(__doc__.split('사용법:')[1].strip(), file=sys.stderr)
+        return 2
+
+    try:
+        cmds, odoms, imu = load(args[0])
+    except UsageError as exc:
+        print(f'입력 오류 — {exc}', file=sys.stderr)
+        return 2
+    except Exception as exc:                              # noqa: BLE001
+        print(f'판정 불가 — bag 을 읽지 못했다: {exc}', file=sys.stderr)
+        return 2
+
+    v = analyze(cmds, odoms, imu, tape)
+    report(v, args[0].rstrip('/').split('/')[-1])
+    return 0 if v['ok'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main(sys.argv))
