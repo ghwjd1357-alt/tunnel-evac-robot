@@ -166,9 +166,15 @@ static const int MIN_RUNNING_PWM[4] = {15, 15, 15, 15};
 // 곧바로 FEEDFORWARD_MAX_PWM(145) 로 포화했고, 그 PWM 의 실제 속도가 0.33 m/s 였다.
 // PI 가 되돌릴 수 있는 폭은 WHEEL_KP*오차 + INTEGRAL_PWM_LIMIT = 약 26 PWM 뿐이라
 // 119~145 PWM 에 갇혔다 = 그 구간에서 속도 제어가 사실상 열려 있었다.
-// 지면 실측 2점(69 PWM -> 0.123 m/s · 145 PWM -> 0.3265 m/s, 줄자로 odom 검증)에서
-// v ~= 0.00268*(PWM-23) 이고 0.12 m/s 는 PWM ~= 68 이므로 (68-30)/(0.12-0.02) ~= 380.
-// 정본 = docs/MASTER_PLAN.md §7 예약 32 · 근거 bag = r1_ground_0811_2127, d0_drive_0811_2146.
+// 🔴 이 값은 "교정값"이 아니라 **후보**다 (검토 §60.1). 회귀에 쓴 69/145 는 명령에서 계산한
+// **명목 feedforward 값**이지 관측된 appliedPwm 이 아니다 — 실제 출력은 FF + Kp*error +
+// Ki*integral 을 거치고 보드가 그 값을 발행하지 않는다. 검토자의 PI 포함 근사는 0.12 m/s 의
+// 실제 출력을 ~60.5 PWM(기울기 ~305)로 본다.
+// ⚠ 다만 고쳐야 할 것은 기울기의 정확도가 아니라 **포화**다: 구값에서 필요한 보정이 약
+// -75 PWM 으로 PI 권한(INTEGRAL_PWM_LIMIT 기준 +-20)을 넘었다. 375 는 그 보정을 0.12 에서
+// -7 PWM, 0.05 에서 -5.6 PWM 으로 만들어 **적분이 오차를 0 으로 몰 수 있는 범위**에 넣는다.
+// 🔴 그래도 확정은 굽고 지면에서 0.12 = 0.12 +-10% 를 재는 것이다.
+// 근거 bag = r1_ground_0811_2127, d0_drive_0811_2146 · 정본 = docs/MASTER_PLAN.md §7 예약 32.
 static const double FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN = 375.0;
 static const int FEEDFORWARD_MAX_PWM = 145;
 

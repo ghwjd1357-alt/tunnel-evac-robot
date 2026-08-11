@@ -1,107 +1,537 @@
 [
-  {"id":"0719-3.1","path":"src/mission_manager/mission_manager/follower_monitor.py","anchor":"복구 순간 디바운스 타이머 재무장"},
-  {"id":"0719-3.2","path":"src/mission_manager/mission_manager/goal_manager.py","anchor":"cancel: `goals_canceling` 확인"},
-  {"id":"0719-4.1","path":"src/mission_manager/mission_manager/goal_manager.py","anchor":"stale 은 즉시 cancel+최종 CANCELED 관찰"},
-  {"id":"0719-9.2","path":"src/mission_manager/mission_manager/mission_node.py","anchor":"외부 입력 신뢰경계"},
-  {"id":"0719-9.4","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"속도: `successful` 확인+재시도"},
-  {"id":"0719-11.3","path":"tools/map_promote.sh","anchor":"fail-closed 4파일 transaction"},
-  {"id":"0719-12.6","path":"tools/mission_e2e.sh","anchor":"부모 kill -9 는 고아 nav2"},
-  {"id":"0719-12.8","path":"src/tunnel_sim/config/nav2_params.yaml","anchor":"rolling_window: false"},
-  {"id":"0719-P0-bringup","path":"src/tunnel_bringup/launch/real_bringup.launch.py","anchor":"실차 검증 사다리 R0~R8"},
-  {"id":"0719-P0-scan-tf","path":"src/tunnel_bringup/urdf/robot_real.urdf","anchor":"TF 이중발행 금지"},
-  {"id":"0719-P0-dimensions","path":"src/tunnel_bringup/urdf/robot_real.urdf","anchor":"footprint"},
-  {"id":"0719-P0-collision","path":"src/tunnel_bringup/config/nav2_params_real.yaml","anchor":"inflation_radius ≥ 외접반경 0.40"},
-  {"id":"0719-P0-estop","path":"src/tunnel_bringup/launch/real_bringup.launch.py","anchor":"ESTOP_PIN=21"},
-  {"id":"0719-P0-real-map","path":"maps/real/tunnel.yaml","anchor":"지도 생명주기"},
-  {"id":"0719-P0-person","path":"src/tunnel_interfaces/msg/Detection.msg","anchor":"camera-frame 3D position 제공"},
-  {"id":"0720-speed-reconcile","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"원하는 값(desired)과 반영된 값(applied)은 따로 추적"},
-  {"id":"0720-speed-deadline","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"비동기 요청엔 요청 단위 deadline"},
-  {"id":"0720-guide-live","path":"src/mission_manager/mission_manager/mission_node.py","anchor":"게이트 술어는 반드시 live"},
-  {"id":"0720-searchback-exhausted","path":"src/mission_manager/mission_manager/mission_node.py","anchor":"guide_speed_recovery_exhausted"},
-  {"id":"0720-searchback-goal","path":"src/mission_manager/mission_manager/mission_node.py","anchor":"GUIDE·SEARCH_BACK 신규 `send_goal`"},
-  {"id":"0723-pending-goal","path":"src/mission_manager/mission_manager/goal_manager.py","anchor":"비동기는 '호출'이 아니라 '완결' 검증"},
-  {"id":"0723-result-exception","path":"src/mission_manager/mission_manager/goal_manager.py","anchor":"future.result()` 전파"},
-  {"id":"0723-timeout-budget","path":"tools/lib_e2e.sh","anchor":"상한 집행은 벽시계"},
-  {"id":"0723-hard-kill","path":"tools/lib_e2e.sh","anchor":"--kill-after"},
-  {"id":"0723-topic-pub","path":"tools/mission_e2e.sh","anchor":"topic pub"},
-  {"id":"0729-readiness-generation","path":"src/tunnel_bringup/tunnel_bringup/readiness_gate.py","anchor":"서비스 소실→복구 경계 가드"},
-  {"id":"0729-cmdvel-parser","path":"tools/lib_e2e.sh","anchor":"판독기 fail-closed 계약"},
-  {"id":"0729-ground-truth","path":"tools/lib_e2e.sh","anchor":"두 개의 유한 실수"},
-  {"id":"0729-observation-window","path":"tools/lib_e2e.sh","anchor":"침묵 창의 **시간 경계**"},
-  {"id":"0729-unbounded-cli","path":"tools/scan_unbounded_cli.py","anchor":"상한 없는 외부 CLI 전수 봉쇄"},
-  {"id":"0729-wrapper-prefix","path":"tools/scan_unbounded_cli.py","anchor":"단위 전체"},
-  {"id":"0729-command-substitution","path":"tools/scan_unbounded_cli.py","anchor":"큰따옴표 안이라도 명령치환"},
-  {"id":"0729-amp-redirection","path":"tools/scan_unbounded_cli.py","anchor":"`&` 한 글자에 네 가지 뜻"},
-  {"id":"0729-line-continuation","path":"tools/scan_unbounded_cli.py","anchor":"물리 source와 Bash 논리 입력은 다르다"},
-  {"id":"0801-guide-transition","path":"src/mission_manager/mission_manager/mission_node.py","anchor":"GUIDE 진입 시 놓침 타이머"},
-  {"id":"0801-first-scan","path":"src/mission_manager/mission_manager/follower_monitor.py","anchor":"첫 유효 EMPTY 에서 즉시 `lost`·예산 소모 **없음**"},
-  {"id":"0801-clone","path":"docs/JETSON_SETUP.md","anchor":"실차 검증 사다리 R0~R8"},
-  {"id":"0801-qos-zero","path":"tools/d0_check.sh","anchor":"구독자 0개를 \"전부 매칭\"으로 승인"},
-  {"id":"0801-bag-boundary","path":"tools/bag_gap_report.py","anchor":"관측 창 완주"},
-  {"id":"0801-topic-policy","path":"tools/bag_gap_report.py","anchor":"33.33ms 하나를 모든 토픽에"},
-  {"id":"0801-hz-early-exit","path":"tools/d0_check.sh","anchor":"같은 `rc` 인데 정상값이 정반대"},
-  {"id":"0801-handoff-wording","path":"tools/handoff_single_check.sh","anchor":"문구에 의존하는 검사"},
-  {"id":"0801-handoff-no-id-reserved-23","path":"tools/handoff_single_check.sh","anchor":"검사는 *낱말*이 아니라 *구조*"},
-  {"id":"0719-9.3-accuracy-upper","path":"tools/accuracy_bench.sh","anchor":"시뮬 상한"},
-  {"id":"0719-9.5-cancel-final","path":"src/mission_manager/mission_manager/goal_manager.py","anchor":"최종 CANCELED"},
-  {"id":"0719-11.4-test-isolation","path":"tools/mission_e2e.sh","anchor":"trap 은 `INT TERM`"},
-  {"id":"0719-11.5-accuracy-bench","path":"tools/accuracy_report.py","anchor":"시뮬 상한"},
-  {"id":"0719-12.3-guide-guarantee","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"GUIDE 저속 상실"},
-  {"id":"0719-12.5-map-transaction","path":"tools/map_promote.sh","anchor":"4파일 transaction"},
-  {"id":"0719-13.3-stale-speed-failure","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"늦은 응답의 상태 덮어쓰기 가드"},
-  {"id":"0719-13.4-map-acceptance","path":"tools/make_map.sh","anchor":"negative **자동** 수락 게이트"},
-  {"id":"0720-guide-origin-reconcile","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"GUIDE 저속 상실"},
-  {"id":"0720-future-never-completes","path":"src/mission_manager/mission_manager/speed_manager.py","anchor":"요청 단위 deadline"},
-  {"id":"0729-readiness-disconnect","path":"src/tunnel_bringup/tunnel_bringup/readiness_gate.py","anchor":"비동기 증거는 '세대'에 속한다"},
-  {"id":"0729-publisher-evidence-parser","path":"tools/lib_e2e.sh","anchor":"온전한 표본"},
-  {"id":"0729-unknown-parent-parser","path":"tools/lib_e2e.sh","anchor":"부모 전환"},
-  {"id":"0729-observation-start-time","path":"tools/lib_e2e.sh","anchor":"시작 GID 스냅샷 확정"},
-  {"id":"0729-input-fd","path":"tools/scan_unbounded_cli.py","anchor":"입력 FD 복제"},
-  {"id":"0801-odom-publisher-contract","path":"tools/d0_check.sh","anchor":"`/odom` RELIABLE"},
-  {"id":"0801-context-fenced-heading-34","path":"tools/ai_context.py","anchor":"fenced code 내부의 `#`는 절 경계로 취급하지 않는다"},
-  {"id":"0801-r0-watchdog-procedure-34","path":"docs/JETSON_SETUP.md","anchor":"60fps 동일 화면 영상"},
-  {"id":"0801-watchdog-record-slot-37","path":"tools/test_ai_context.py","anchor":"watchdog 정상 실측 기록 슬롯의 위치 계약"},
-  {"id":"0801-lidar-d0-d1-owner-38","path":"tools/test_ai_context.py","anchor":"라이다 실측 소유 시점 D+0/D+1 정합"},
-  {"id":"0801-readiness-doc-owner-38","path":"tools/test_ai_context.py","anchor":"readiness flake 활성 정본 소유권 정합"},
-  {"id":"0801-d0-snapshot-wallclock-39","path":"tools/d0_check.sh","anchor":"스냅샷 판정이 상한 초를 사실로 단정한다"},
-  {"id":"0801-runbook-next-step-split-39","path":"docs/JETSON_SETUP.md","anchor":"런북 안에 다음 단계가 두 개 있고 느슨한 쪽이 먼저 읽힌다"},
-  {"id":"0801-method-b-decision-lost-40","path":"tools/test_ai_context.py","anchor":"방법 B 계약 표면 재설계 결정의 소재"},
-  {"id":"0801-relay-dc-break-rating-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"DC 는 교류와 달리 아크가 스스로 꺼지지 않는다"},
-  {"id":"0801-fuse-time-current-coordination-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"명목 30A 와 허용 32A 의 숫자 비교는 보호 협조가 아니다"},
-  {"id":"0801-glass-fuse-series-rating-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"조합(series/backup) 정격이 자동으로 생기지 않는다"},
-  {"id":"0801-fuseholder-as-load-switch-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"퓨즈와 퓨즈홀더는 개폐 스위치용 부품이 아니다"},
-  {"id":"0801-design-closure-vs-installed-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"위험은 설계로 닫히지 않는다 — 실물에서 관찰돼야 닫힌다"},
-  {"id":"0801-upload-step-is-one-word-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"\"업로드\" 라는 한 단어는 실행 절차가 아니다"},
-  {"id":"0801-cmdvel-ban-violated-by-e10-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"차단 시험이 상위 안전 불변조건을 어기면 그 시험이 틀린 자리에 있는 것이다"},
-  {"id":"0801-continuity-silence-not-short-test-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"완성된 회로에서 (+)↔(−) 연속성 \"무음\" 은 단락 판정법이 아니다"},
-  {"id":"0801-spare-relay-count-policy-43","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"\"둘 다 교체\" 정책은 예비 두 개가 있어야 실행된다"},
-  {"id":"0801-limit-status-vs-limit-fired-39r","path":"tools/d0_check.sh","anchor":"상한 상태값은 상한이 발동했다는 증거가 아니다"},
-  {"id":"0801-shutdown-order-two-branches-44","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"퓨즈홀더는 부하 차단기가 아니다 — 종료 순서는 한 곳만 가리켜야 한다"},
-  {"id":"0801-normal-margin-is-not-fault-protection-44","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"정상전류가 퓨즈보다 작다는 계산은 운전 여유이지 고장 보호 증명이 아니다"},
-  {"id":"0801-series-contacts-do-not-split-voltage-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"단일 융착에서 남은 접점은 전압 전부를 혼자 끊는다 — 반씩이 아니다"},
-  {"id":"0801-datasheet-model-mismatch-45","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"모델·제조사가 다른 데이터시트의 정격은 실물의 차단능력 증거가 아니다"},
-  {"id":"0801-diff-endpoint-hides-worktree-47","path":"tools/firmware_precheck.sh","anchor":"비교 끝점을 HEAD 로 박으면, 아직 커밋하지 않은 오염은 판정에서 통째로 빠진다"},
-  {"id":"0801-ignored-and-official-sketch-sources-48","path":"tools/firmware_precheck.sh","anchor":"ignore 규칙은 컴파일 제외 규칙이 아니다 — 숨은 소스도 판정 입력이다"},
-  {"id":"0801-actual-teensy-cc-cxx-inputs-49","path":"tools/firmware_precheck.sh","anchor":"실제 Teensy toolchain은 공식 sketch 명세보다 넓다"},
-  {"id":"0801-fingerprint-pins-git-rendering-50","path":"tools/firmware_precheck.sh","anchor":"지문이 \"내용\"이 아니라 \"이 기계의 git 렌더링\"을 고정하고 있었다"},
-  {"id":"0801-precheck-ancestor-symlink-51","path":"tools/firmware_precheck.sh","anchor":"조상 디렉터리 symlink 는 사전검사가 보지 않는다"},
-  {"id":"0801-watchdog-zero-window-52","path":"tools/watchdog_report.py","anchor":"zero 명령이 끼어든 구간은 watchdog 판정에 쓸 수 없다"},
-  {"id":"0801-watchdog-cumulative-creep-52","path":"tools/watchdog_report.py","anchor":"정지 판정은 표본 간 증분이 아니라 기준점 대비 누적 이동으로 한다"},
-  {"id":"0801-dcdc-typ-efficiency-52","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"`Typ.` 효율은 보장 하한이 아니다"},
-  {"id":"0801-series-contact-voltage-split-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"각 접점이 단독으로 25.2V 를 끊는 정격이 필요하다"},
-  {"id":"0801-fuse-wire-numeric-compare-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"30A 퓨즈는 30A 에서 끊기지 않는다"},
-  {"id":"0801-glass-fuse-interrupting-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"차단용량은 정격 전류와 다른 숫자다"},
-  {"id":"0801-switch-breaker-load-break-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"통전 정격은 부하개폐 능력이 아니다"},
-  {"id":"0801-lipo-alarm-warns-not-blocks-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"알람은 경고 장치이지 차단 장치가 아니다"},
-  {"id":"0801-pin21-two-active-circuits-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"PIN21 회로를 지시하는 활성 문장은 하나여야 한다"},
-  {"id":"0801-spare-relay-count-53","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"},
-  {"id":"0811-disarm-must-stop-motors-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"`[DISARMED]` 진입은 그 자리에서 모터를 세우는 것까지가 한 동작이다"},
-  {"id":"0811-service-response-barrier-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"성공 응답은 무장이 아니라 **장벽의 시작**이다"},
-  {"id":"0811-nonfinite-breaks-zero-hold-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"},
-  {"id":"0811-quiet-clock-starts-after-response-55","path":"firmware/teensy_integrated_base_v1_4/rearm_gate.h","anchor":"콜백은 `[ARMING]` 만 표식하고, 시계는 spin 이 응답 전송까지 마치고 돌아온 뒤"},
-  {"id":"0811-harness-must-see-motor-wiring-55","path":"firmware/teensy_integrated_base_v1_4/drive_wiring.h","anchor":"안전 출력 경로의 자동 방어가 0 이었는데"},
-  {"id":"0811-response-send-failure-still-arms-56","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"응답 전송이 실패해도 보드만 무장된다"},
-  {"id":"0811-video-blind-frames-counted-as-stop-57","path":"tools/watchdog_video.py","anchor":"관측하지 못한 구간을 \"정지\"로 세지 않는다"},
-  {"id":"0811-cross-observer-delta-is-not-render-lag-57","path":"tools/watchdog_video.py","anchor":"\"렌더 지연 확정\"이 아니다"},
-  {"id":"0811-accumulated-center-poisoned-by-pre-t0-blindness-58","path":"tools/watchdog_video.py","anchor":"판정기가 누적 상태를 쓰면 판정 구간 밖의 결측도 결과를 오염시킨다"}
+  {
+    "id": "0719-3.1",
+    "path": "src/mission_manager/mission_manager/follower_monitor.py",
+    "anchor": "복구 순간 디바운스 타이머 재무장"
+  },
+  {
+    "id": "0719-3.2",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "cancel: `goals_canceling` 확인"
+  },
+  {
+    "id": "0719-4.1",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "stale 은 즉시 cancel+최종 CANCELED 관찰"
+  },
+  {
+    "id": "0719-9.2",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "외부 입력 신뢰경계"
+  },
+  {
+    "id": "0719-9.4",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "속도: `successful` 확인+재시도"
+  },
+  {
+    "id": "0719-11.3",
+    "path": "tools/map_promote.sh",
+    "anchor": "fail-closed 4파일 transaction"
+  },
+  {
+    "id": "0719-12.6",
+    "path": "tools/mission_e2e.sh",
+    "anchor": "부모 kill -9 는 고아 nav2"
+  },
+  {
+    "id": "0719-12.8",
+    "path": "src/tunnel_sim/config/nav2_params.yaml",
+    "anchor": "rolling_window: false"
+  },
+  {
+    "id": "0719-P0-bringup",
+    "path": "src/tunnel_bringup/launch/real_bringup.launch.py",
+    "anchor": "실차 검증 사다리 R0~R8"
+  },
+  {
+    "id": "0719-P0-scan-tf",
+    "path": "src/tunnel_bringup/urdf/robot_real.urdf",
+    "anchor": "TF 이중발행 금지"
+  },
+  {
+    "id": "0719-P0-dimensions",
+    "path": "src/tunnel_bringup/urdf/robot_real.urdf",
+    "anchor": "footprint"
+  },
+  {
+    "id": "0719-P0-collision",
+    "path": "src/tunnel_bringup/config/nav2_params_real.yaml",
+    "anchor": "inflation_radius ≥ 외접반경 0.40"
+  },
+  {
+    "id": "0719-P0-estop",
+    "path": "src/tunnel_bringup/launch/real_bringup.launch.py",
+    "anchor": "ESTOP_PIN=21"
+  },
+  {
+    "id": "0719-P0-real-map",
+    "path": "maps/real/tunnel.yaml",
+    "anchor": "지도 생명주기"
+  },
+  {
+    "id": "0719-P0-person",
+    "path": "src/tunnel_interfaces/msg/Detection.msg",
+    "anchor": "camera-frame 3D position 제공"
+  },
+  {
+    "id": "0720-speed-reconcile",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "원하는 값(desired)과 반영된 값(applied)은 따로 추적"
+  },
+  {
+    "id": "0720-speed-deadline",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "비동기 요청엔 요청 단위 deadline"
+  },
+  {
+    "id": "0720-guide-live",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "게이트 술어는 반드시 live"
+  },
+  {
+    "id": "0720-searchback-exhausted",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "guide_speed_recovery_exhausted"
+  },
+  {
+    "id": "0720-searchback-goal",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "GUIDE·SEARCH_BACK 신규 `send_goal`"
+  },
+  {
+    "id": "0723-pending-goal",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "비동기는 '호출'이 아니라 '완결' 검증"
+  },
+  {
+    "id": "0723-result-exception",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "future.result()` 전파"
+  },
+  {
+    "id": "0723-timeout-budget",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "상한 집행은 벽시계"
+  },
+  {
+    "id": "0723-hard-kill",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "--kill-after"
+  },
+  {
+    "id": "0723-topic-pub",
+    "path": "tools/mission_e2e.sh",
+    "anchor": "topic pub"
+  },
+  {
+    "id": "0729-readiness-generation",
+    "path": "src/tunnel_bringup/tunnel_bringup/readiness_gate.py",
+    "anchor": "서비스 소실→복구 경계 가드"
+  },
+  {
+    "id": "0729-cmdvel-parser",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "판독기 fail-closed 계약"
+  },
+  {
+    "id": "0729-ground-truth",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "두 개의 유한 실수"
+  },
+  {
+    "id": "0729-observation-window",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "침묵 창의 **시간 경계**"
+  },
+  {
+    "id": "0729-unbounded-cli",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "상한 없는 외부 CLI 전수 봉쇄"
+  },
+  {
+    "id": "0729-wrapper-prefix",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "단위 전체"
+  },
+  {
+    "id": "0729-command-substitution",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "큰따옴표 안이라도 명령치환"
+  },
+  {
+    "id": "0729-amp-redirection",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "`&` 한 글자에 네 가지 뜻"
+  },
+  {
+    "id": "0729-line-continuation",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "물리 source와 Bash 논리 입력은 다르다"
+  },
+  {
+    "id": "0801-guide-transition",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "GUIDE 진입 시 놓침 타이머"
+  },
+  {
+    "id": "0801-first-scan",
+    "path": "src/mission_manager/mission_manager/follower_monitor.py",
+    "anchor": "첫 유효 EMPTY 에서 즉시 `lost`·예산 소모 **없음**"
+  },
+  {
+    "id": "0801-clone",
+    "path": "docs/JETSON_SETUP.md",
+    "anchor": "실차 검증 사다리 R0~R8"
+  },
+  {
+    "id": "0801-qos-zero",
+    "path": "tools/d0_check.sh",
+    "anchor": "구독자 0개를 \"전부 매칭\"으로 승인"
+  },
+  {
+    "id": "0801-bag-boundary",
+    "path": "tools/bag_gap_report.py",
+    "anchor": "관측 창 완주"
+  },
+  {
+    "id": "0801-topic-policy",
+    "path": "tools/bag_gap_report.py",
+    "anchor": "33.33ms 하나를 모든 토픽에"
+  },
+  {
+    "id": "0801-hz-early-exit",
+    "path": "tools/d0_check.sh",
+    "anchor": "같은 `rc` 인데 정상값이 정반대"
+  },
+  {
+    "id": "0801-handoff-wording",
+    "path": "tools/handoff_single_check.sh",
+    "anchor": "문구에 의존하는 검사"
+  },
+  {
+    "id": "0801-handoff-no-id-reserved-23",
+    "path": "tools/handoff_single_check.sh",
+    "anchor": "검사는 *낱말*이 아니라 *구조*"
+  },
+  {
+    "id": "0719-9.3-accuracy-upper",
+    "path": "tools/accuracy_bench.sh",
+    "anchor": "시뮬 상한"
+  },
+  {
+    "id": "0719-9.5-cancel-final",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "최종 CANCELED"
+  },
+  {
+    "id": "0719-11.4-test-isolation",
+    "path": "tools/mission_e2e.sh",
+    "anchor": "trap 은 `INT TERM`"
+  },
+  {
+    "id": "0719-11.5-accuracy-bench",
+    "path": "tools/accuracy_report.py",
+    "anchor": "시뮬 상한"
+  },
+  {
+    "id": "0719-12.3-guide-guarantee",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "GUIDE 저속 상실"
+  },
+  {
+    "id": "0719-12.5-map-transaction",
+    "path": "tools/map_promote.sh",
+    "anchor": "4파일 transaction"
+  },
+  {
+    "id": "0719-13.3-stale-speed-failure",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "늦은 응답의 상태 덮어쓰기 가드"
+  },
+  {
+    "id": "0719-13.4-map-acceptance",
+    "path": "tools/make_map.sh",
+    "anchor": "negative **자동** 수락 게이트"
+  },
+  {
+    "id": "0720-guide-origin-reconcile",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "GUIDE 저속 상실"
+  },
+  {
+    "id": "0720-future-never-completes",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "요청 단위 deadline"
+  },
+  {
+    "id": "0729-readiness-disconnect",
+    "path": "src/tunnel_bringup/tunnel_bringup/readiness_gate.py",
+    "anchor": "비동기 증거는 '세대'에 속한다"
+  },
+  {
+    "id": "0729-publisher-evidence-parser",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "온전한 표본"
+  },
+  {
+    "id": "0729-unknown-parent-parser",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "부모 전환"
+  },
+  {
+    "id": "0729-observation-start-time",
+    "path": "tools/lib_e2e.sh",
+    "anchor": "시작 GID 스냅샷 확정"
+  },
+  {
+    "id": "0729-input-fd",
+    "path": "tools/scan_unbounded_cli.py",
+    "anchor": "입력 FD 복제"
+  },
+  {
+    "id": "0801-odom-publisher-contract",
+    "path": "tools/d0_check.sh",
+    "anchor": "`/odom` RELIABLE"
+  },
+  {
+    "id": "0801-context-fenced-heading-34",
+    "path": "tools/ai_context.py",
+    "anchor": "fenced code 내부의 `#`는 절 경계로 취급하지 않는다"
+  },
+  {
+    "id": "0801-r0-watchdog-procedure-34",
+    "path": "docs/JETSON_SETUP.md",
+    "anchor": "60fps 동일 화면 영상"
+  },
+  {
+    "id": "0801-watchdog-record-slot-37",
+    "path": "tools/test_ai_context.py",
+    "anchor": "watchdog 정상 실측 기록 슬롯의 위치 계약"
+  },
+  {
+    "id": "0801-lidar-d0-d1-owner-38",
+    "path": "tools/test_ai_context.py",
+    "anchor": "라이다 실측 소유 시점 D+0/D+1 정합"
+  },
+  {
+    "id": "0801-readiness-doc-owner-38",
+    "path": "tools/test_ai_context.py",
+    "anchor": "readiness flake 활성 정본 소유권 정합"
+  },
+  {
+    "id": "0801-d0-snapshot-wallclock-39",
+    "path": "tools/d0_check.sh",
+    "anchor": "스냅샷 판정이 상한 초를 사실로 단정한다"
+  },
+  {
+    "id": "0801-runbook-next-step-split-39",
+    "path": "docs/JETSON_SETUP.md",
+    "anchor": "런북 안에 다음 단계가 두 개 있고 느슨한 쪽이 먼저 읽힌다"
+  },
+  {
+    "id": "0801-method-b-decision-lost-40",
+    "path": "tools/test_ai_context.py",
+    "anchor": "방법 B 계약 표면 재설계 결정의 소재"
+  },
+  {
+    "id": "0801-relay-dc-break-rating-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "DC 는 교류와 달리 아크가 스스로 꺼지지 않는다"
+  },
+  {
+    "id": "0801-fuse-time-current-coordination-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "명목 30A 와 허용 32A 의 숫자 비교는 보호 협조가 아니다"
+  },
+  {
+    "id": "0801-glass-fuse-series-rating-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "조합(series/backup) 정격이 자동으로 생기지 않는다"
+  },
+  {
+    "id": "0801-fuseholder-as-load-switch-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "퓨즈와 퓨즈홀더는 개폐 스위치용 부품이 아니다"
+  },
+  {
+    "id": "0801-design-closure-vs-installed-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "위험은 설계로 닫히지 않는다 — 실물에서 관찰돼야 닫힌다"
+  },
+  {
+    "id": "0801-upload-step-is-one-word-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "\"업로드\" 라는 한 단어는 실행 절차가 아니다"
+  },
+  {
+    "id": "0801-cmdvel-ban-violated-by-e10-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "차단 시험이 상위 안전 불변조건을 어기면 그 시험이 틀린 자리에 있는 것이다"
+  },
+  {
+    "id": "0801-continuity-silence-not-short-test-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "완성된 회로에서 (+)↔(−) 연속성 \"무음\" 은 단락 판정법이 아니다"
+  },
+  {
+    "id": "0801-spare-relay-count-policy-43",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "\"둘 다 교체\" 정책은 예비 두 개가 있어야 실행된다"
+  },
+  {
+    "id": "0801-limit-status-vs-limit-fired-39r",
+    "path": "tools/d0_check.sh",
+    "anchor": "상한 상태값은 상한이 발동했다는 증거가 아니다"
+  },
+  {
+    "id": "0801-shutdown-order-two-branches-44",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "퓨즈홀더는 부하 차단기가 아니다 — 종료 순서는 한 곳만 가리켜야 한다"
+  },
+  {
+    "id": "0801-normal-margin-is-not-fault-protection-44",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "정상전류가 퓨즈보다 작다는 계산은 운전 여유이지 고장 보호 증명이 아니다"
+  },
+  {
+    "id": "0801-series-contacts-do-not-split-voltage-45",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "단일 융착에서 남은 접점은 전압 전부를 혼자 끊는다 — 반씩이 아니다"
+  },
+  {
+    "id": "0801-datasheet-model-mismatch-45",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "모델·제조사가 다른 데이터시트의 정격은 실물의 차단능력 증거가 아니다"
+  },
+  {
+    "id": "0801-diff-endpoint-hides-worktree-47",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "비교 끝점을 HEAD 로 박으면, 아직 커밋하지 않은 오염은 판정에서 통째로 빠진다"
+  },
+  {
+    "id": "0801-ignored-and-official-sketch-sources-48",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "ignore 규칙은 컴파일 제외 규칙이 아니다 — 숨은 소스도 판정 입력이다"
+  },
+  {
+    "id": "0801-actual-teensy-cc-cxx-inputs-49",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "실제 Teensy toolchain은 공식 sketch 명세보다 넓다"
+  },
+  {
+    "id": "0801-fingerprint-pins-git-rendering-50",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "지문이 \"내용\"이 아니라 \"이 기계의 git 렌더링\"을 고정하고 있었다"
+  },
+  {
+    "id": "0801-precheck-ancestor-symlink-51",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "조상 디렉터리 symlink 는 사전검사가 보지 않는다"
+  },
+  {
+    "id": "0801-watchdog-zero-window-52",
+    "path": "tools/watchdog_report.py",
+    "anchor": "zero 명령이 끼어든 구간은 watchdog 판정에 쓸 수 없다"
+  },
+  {
+    "id": "0801-watchdog-cumulative-creep-52",
+    "path": "tools/watchdog_report.py",
+    "anchor": "정지 판정은 표본 간 증분이 아니라 기준점 대비 누적 이동으로 한다"
+  },
+  {
+    "id": "0801-dcdc-typ-efficiency-52",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "`Typ.` 효율은 보장 하한이 아니다"
+  },
+  {
+    "id": "0801-series-contact-voltage-split-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "각 접점이 단독으로 25.2V 를 끊는 정격이 필요하다"
+  },
+  {
+    "id": "0801-fuse-wire-numeric-compare-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "30A 퓨즈는 30A 에서 끊기지 않는다"
+  },
+  {
+    "id": "0801-glass-fuse-interrupting-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "차단용량은 정격 전류와 다른 숫자다"
+  },
+  {
+    "id": "0801-switch-breaker-load-break-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "통전 정격은 부하개폐 능력이 아니다"
+  },
+  {
+    "id": "0801-lipo-alarm-warns-not-blocks-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "알람은 경고 장치이지 차단 장치가 아니다"
+  },
+  {
+    "id": "0801-pin21-two-active-circuits-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "PIN21 회로를 지시하는 활성 문장은 하나여야 한다"
+  },
+  {
+    "id": "0801-spare-relay-count-53",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "예비 릴레이 2개가 없으면 두 개 모두 교체를 실행할 수 없다"
+  },
+  {
+    "id": "0811-disarm-must-stop-motors-54",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "`[DISARMED]` 진입은 그 자리에서 모터를 세우는 것까지가 한 동작이다"
+  },
+  {
+    "id": "0811-service-response-barrier-54",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "성공 응답은 무장이 아니라 **장벽의 시작**이다"
+  },
+  {
+    "id": "0811-nonfinite-breaks-zero-hold-54",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"
+  },
+  {
+    "id": "0811-quiet-clock-starts-after-response-55",
+    "path": "firmware/teensy_integrated_base_v1_4/rearm_gate.h",
+    "anchor": "콜백은 `[ARMING]` 만 표식하고, 시계는 spin 이 응답 전송까지 마치고 돌아온 뒤"
+  },
+  {
+    "id": "0811-harness-must-see-motor-wiring-55",
+    "path": "firmware/teensy_integrated_base_v1_4/drive_wiring.h",
+    "anchor": "안전 출력 경로의 자동 방어가 0 이었는데"
+  },
+  {
+    "id": "0811-response-send-failure-still-arms-56",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "응답 전송이 실패해도 보드만 무장된다"
+  },
+  {
+    "id": "0811-video-blind-frames-counted-as-stop-57",
+    "path": "tools/watchdog_video.py",
+    "anchor": "관측하지 못한 구간을 \"정지\"로 세지 않는다"
+  },
+  {
+    "id": "0811-cross-observer-delta-is-not-render-lag-57",
+    "path": "tools/watchdog_video.py",
+    "anchor": "\"렌더 지연 확정\"이 아니다"
+  },
+  {
+    "id": "0811-accumulated-center-poisoned-by-pre-t0-blindness-58",
+    "path": "tools/watchdog_video.py",
+    "anchor": "판정기가 누적 상태를 쓰면 판정 구간 밖의 결측도 결과를 오염시킨다"
+  },
+  {
+    "id": "0812-nominal-feedforward-pwm-is-not-observed-pwm-60",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "명목 feedforward 값**이지 관측된 `appliedPwm` 이"
+  },
+  {
+    "id": "0812-fingerprint-moved-before-independent-review-60",
+    "path": "tools/firmware_precheck.sh",
+    "anchor": "유일한 자동 굽기 차단이 미승인 구동 상수를"
+  }
 ]

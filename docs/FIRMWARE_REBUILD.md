@@ -125,17 +125,20 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1 = 멈춘다 / 2 = 판정 불능
 ```
 
-🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-12 예약 32 교정 후
+🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-11 지문 이관 후
 허용된 변경은 세 건**이고, 아래 64자리 세 개가 **이 절의 정본**이다:
 
-⚠ **`.ino` 지문은 2026-08-12 에 옮겼다** — 구값 `aa8e75ec…`(199,15 · 1,491줄)은 08-11 굽기
-시점의 것이다. 바뀐 내용은 **둘뿐**이다: ① `FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN` `1300.0 → 375.0`
-(예약 32 속도 교정) ② `FW_VERSION`·`FW_SOURCE_PATH` 정체 문자열 정정(아래 §4 표 항목 1 의 부채).
-🔴 **`MAX_LINEAR_CMD = 0.12` · `MAX_ANGULAR_CMD = 0.50` · `USE_PID_D_TERM = false` 는 그대로다.**
+🔴 **2026-08-12 — `.ino` 는 예약 32 교정으로 이미 바뀌었고, 그래서 이 지문은 지금 `rc=1` 을
+낸다. 그게 의도다** (검토 §60.2 P1). `REAL_ROBOT_VALUES §1-f` ⓷ 의 순서는
+`코드 수정 → 빌드 → **구판 지문으로 FAIL** → 독립 검토 → 지문 갱신` 이다. 08-12 에 한 번
+6·7 을 뒤집어 검토 전에 지문을 옮겼고, 그 결과 **유일한 자동 굽기 차단이 미승인 구동 상수를
+"굽어도 된다"로 통과시켰다** — 되돌렸다. 🔴 **지문은 오염 검출기이지 의미 승인자가 아니다.** 새 내용 sha256 은
+`b8e44dfd0c41670dd008e27c9e8d24506cdd39a360e3dd2217002cba318d4f32`(215,18 · 1,504줄 /
+49,154 bytes)이고, **검토 승인 뒤 지문 전용 별도 커밋에서만** 여기와 검사기 두 자리를 옮긴다.
 
 ```
-b8e44dfd0c41670dd008e27c9e8d24506cdd39a360e3dd2217002cba318d4f32
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 215,18 · 1,504줄 / 49,154 bytes)
+aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 199,15 · 1,491줄 / 47,808 bytes · 🔴 08-12 현재 소스는 이 값이 아니다 = 의도된 rc=1)
 7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978
   firmware/teensy_integrated_base_v1_4/rearm_gate.h        (신규 · 247,0 · 247줄 / 13,693 bytes)
 f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663

@@ -404,10 +404,18 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
   (~/Desktop/teensy_integrated_base_v1_4/SHA256SUMS.txt 대조 성공)
 ```
 
-🔴 **미해결 — 버전 문자열이 폴더명과 다르다**: 폴더는 `v1_4` 인데 소스 상수는
-`FW_VERSION[] = "handover-integrated-pi-continuous-low-speed-1.3.0"` 이고, `/firmware/info` 가
-방송하는 값이 이것이다. **어느 쪽이 정본인지 구동부에 확인한다** — 버전으로 판정하는 자리에서
-갈린다. 소유자 = 역할 A · 트리거 = 구동부와 다음 대면.
+🔴 **정체 문자열은 지금 두 상태다 — 어느 쪽을 보는지 먼저 정한다** (검토 §60.4).
+
+| | `FW_VERSION` | `FW_SOURCE_PATH` | `FW_GIT_SHA` | `build` |
+|---|---|---|---|---|
+| **보드(현재)** | `…-low-speed-1.3.0` | `/home/park/…v1_3.ino` | `0` | **`Aug 11 2026 15:13:20`** |
+| **저장소(다음 굽기)** | `rearm-latch-pi-continuous-low-speed-1.4.0` | 저장소 실제 경로 | `0` | 굽는 시각 |
+
+🔴 **굽기 전에는 보드 행이 정상이다** — `1.3.0` 을 보고 "오염"으로 읽지 않는다.
+🔴 **굽고 나면 새 행이 정상이다** — 그때 `1.3.0` 이 나오면 **안 구워진 것**이다.
+⚠ `FW_GIT_SHA` 는 양쪽 다 `0` 이라 **바이너리를 커밋에 결박하지 못한다**(자기참조라 빌드 시
+주입이 필요 · `FIRMWARE_REBUILD §4` 표 항목 1). 그래서 정체의 외부 체인은
+**검토받은 내용 sha256 + clean 빌드 기록 + 업로드 뒤 `build` 관측** 셋이 같이 맡는다.
 
 ★ **환경 지문**: 소스가 `STRINGIFY(ARDUINO)`·`STRINGIFY(TEENSYDUINO)` 를 그대로 굽는다.
 실차 관측값 `arduino_macro=10607`(= Arduino IDE 2.x·arduino-cli 계열) ·
@@ -425,8 +433,9 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `transport=serial`, `baud=115200`, `wheel_radius=0.05698`, `control=PI`,
 `kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
-⚠ **`version=…-1.3.0` 이라고 나오는 것이 정상이다.** 소스는 v1.4 인데 `FW_VERSION` 문자열이
-1.3.0 그대로이고 `FW_GIT_SHA` 는 0 으로 채워져 있다 — **이 필드로 버전을 판별할 수 없다.**
+⚠ **굽기 전 보드에서 `version=…-1.3.0` 이 나오는 것이 정상이다**(위 두 상태 표).
+🔴 **다음 굽기 뒤에는 `…-1.4.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
+`FW_GIT_SHA` 는 양쪽 다 0 이라 **이 필드로 커밋을 판별할 수 없다.**
 대신 `wheel_radius=0.05698` · `kp=30.000` · `ki=5.000` 이 소스와 일치하는지 본다
 (`d0_check.sh` 검사 [7] 이 이걸 자동으로 한다).
 

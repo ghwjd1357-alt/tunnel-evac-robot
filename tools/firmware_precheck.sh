@@ -96,9 +96,14 @@ done
 #   스케치 소스를 정당하게 고치면 **두 자리를 같이** 옮긴다.
 #   ⚠ 이 기본값은 검토 §56 조건부 수용까지 받은 내용이다 — 승인 없이 갱신하면 지문이 새 내용을
 #   스스로 승인한다(`REAL_ROBOT_VALUES §1-f` ⓷).
+#   🔴 **2026-08-12 에 실제로 그 순서를 뒤집었다** (검토 §60.2 P1). 예약 32 의 행동 변경과
+#   같은 커밋에서 이 기본값과 정본 지문을 함께 옮겨, **독립 검토 전인데 `rc=0`** 이 나왔다.
+#   유일한 자동 굽기 차단이 미승인 구동 상수를 "굽어도 된다"로 통과시킨 것이다 — 되돌렸다.
+#   → 순서는 `코드 수정 → 빌드 → 구판 지문으로 rc=1 → 독립 검토 → **지문 전용 별도 커밋**`.
+#   → 지문은 오염 검출기이지 **의미 승인자가 아니다.**
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=215,18,b8e44dfd0c41670dd008e27c9e8d24506cdd39a360e3dd2217002cba318d4f32"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=199,15,aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02"
         "firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978"
         "firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663"
     )
