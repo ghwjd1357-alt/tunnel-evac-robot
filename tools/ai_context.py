@@ -182,6 +182,10 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 이 도구는 그 기준에 넣을 수치를 만든다 — 둘을 같은 프로필에 둔다.
         # 회귀도 같은 자리다 — 08-10 에 판정기만 넣고 그 테스트를 빠뜨렸다.
         "tools/watchdog_report.py", "tools/test_watchdog_report.py",
+        # 검토 §57.5: 영상 판정기가 라우팅에 없어 `review` 가 unknown 으로 fail-closed
+        # 회수했다. 짝 도구와 **같은 프로필**이다 — 둘은 같은 기준(`§7-c-0`)에 수치를
+        # 넣고 서로를 교차검증하므로, 한쪽만 라우팅되면 그 교차가 문맥에서 끊긴다.
+        "tools/watchdog_video.py", "tools/test_watchdog_video.py",
     )),
     ("nav2", (
         "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",

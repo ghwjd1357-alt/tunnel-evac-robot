@@ -7,7 +7,7 @@ cv2·영상 없이 돈다(`analyze` 는 순수 함수, `rotation_series` 안에�
 import io
 import math
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 from tools import watchdog_video as wv
 
@@ -15,8 +15,29 @@ FPS = 59.9955
 DRIVE = -1.49          # 주행 중 실측 접선 회전 °/프레임 (2026-08-11, 무부하)
 
 
+NAN = float('nan')
+
+# 🔴 생산자(`rotation_series`)가 추적에 실패하는 **네 경로 전부**와, 각 경로가 남기는 행의
+# 모양. 검토 §57.1 이 연 자리 — 소비자가 이 넷을 전부 "판정 불능" 으로 보내야 한다.
+PRODUCER_FAILURES = (
+    ('특징점 없음(goodFeaturesToTrack None)', NAN, 0),
+    ('추적 점 수 부족(len(Q0)<25 or len(P0)<40)', NAN, 300),
+    ('배경 아핀 실패(estimateAffine2D None)', NAN, 300),
+    ('유효 바퀴점 부족(keep.sum()<30)', NAN, 12),
+)
+# 판정에 닿는 네 자리. T0 직후 · 감속 경계 · 2초 꼬리 중간 · 꼬리 끝.
+INJECTION_POINTS = (671, 697, 800, 894)
+
+
 def row(n, rot=0.0, rad=0.02, npts=300):
     return (n, rot, rad, npts)
+
+
+def report_text(v):
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        wv.report(v)
+    return buf.getvalue()
 
 
 def series(t0=670, drive_from=610, stop_at=698, end=895, rot=DRIVE, tail_noise=0.0):
@@ -135,23 +156,133 @@ class UndecidableTest(unittest.TestCase):
         self.assertFalse(wv.analyze(series(), 670, 0.0)['ok'])
 
 
-class CrossCheckTest(unittest.TestCase):
-    """bag 과의 교차 — 렌더 지연이 타당 범위 밖이면 T0 오독이나 다른 시행이다."""
+class ObservationCompletenessTest(unittest.TestCase):
+    """🔴 검토 §57.1 — **못 본 프레임은 정지 증거가 아니다.**
 
-    def test_14_plausible_render_lag_is_accepted(self):
-        v = wv.analyze(series(), 670, FPS, bag_ms=516.2)
-        self.assertAlmostEqual(49.5, v['render_lag_ms'], places=1)
-        self.assertTrue(v['render_lag_plausible'])
+    구판은 추적 실패(`NaN`)를 `0.0` 회전으로 바꿔, T1 뒤 꼬리를 통째로 못 봐도
+    `조건 2 충족` 을 냈다. 이 클래스가 그 fail-open 을 전부 막는다.
+    """
 
-    def test_15_negative_render_lag_is_flagged(self):
-        """bag 이 영상보다 짧으면 물리적으로 불가능하다 — 잡아야 한다."""
+    def test_22_every_producer_failure_at_every_position_is_undecidable(self):
+        for name, rot, npts in PRODUCER_FAILURES:
+            for at in INJECTION_POINTS:
+                rows = [r if r[0] != at else (at, rot, NAN, npts)
+                        for r in series()]
+                v = wv.analyze(rows, 670, FPS)
+                with self.subTest(cause=name, at=at):
+                    self.assertFalse(v['ok'], f'{name} @{at} 를 관측으로 셌다')
+                    self.assertIn('관측 실패', v['reason'])
+
+    def test_23_the_whole_tail_going_blind_is_not_a_stop(self):
+        """🔴 검토자가 재현한 그 공격 — T1 뒤 전량 NaN 이 `cond2_ok=True` 였다."""
+        rows = [r if r[0] < 698 else (r[0], NAN, NAN, 0) for r in series()]
+        v = wv.analyze(rows, 670, FPS)
+        self.assertFalse(v['ok'])
+        self.assertNotIn('cond2_ok', v)
+
+    def test_24_finite_rotation_with_too_few_points_is_still_invalid(self):
+        """생산자가 바뀌어 유한값을 내놔도 유효점이 모자라면 관측이 아니다."""
+        rows = [r if r[0] != 800 else (800, 0.0, 0.02, wv.MIN_VALID_POINTS - 1)
+                for r in series()]
+        self.assertFalse(wv.analyze(rows, 670, FPS)['ok'])
+
+    def test_25_one_missing_frame_is_undecidable(self):
+        rows = [r for r in series() if r[0] != 800]
+        v = wv.analyze(rows, 670, FPS)
+        self.assertFalse(v['ok'])
+        self.assertIn('연속이 아니다', v['reason'])
+
+    def test_26_a_long_deleted_span_cannot_be_counted_as_observation(self):
+        """🔴 구판은 중간을 통째로 지워도 `frames[-1]-stop` 으로 2초를 셌다."""
+        rows = [r for r in series() if not 700 <= r[0] < 860]
+        v = wv.analyze(rows, 670, FPS)
+        self.assertFalse(v['ok'])
+        self.assertIn('연속이 아니다', v['reason'])
+
+    def test_27_duplicate_and_reversed_frame_numbers_are_undecidable(self):
+        rows = series()
+        dup = rows[:100] + [rows[99]] + rows[100:]
+        self.assertFalse(wv.analyze(dup, 670, FPS)['ok'])
+        rev = rows[:100] + rows[100:120][::-1] + rows[120:]
+        self.assertFalse(wv.analyze(rev, 670, FPS)['ok'])
+
+    def test_28_early_eof_against_the_requested_range_is_undecidable(self):
+        """요청은 610~894 인데 850 에서 끊겼다 — 남은 꼬리는 관찰한 적이 없다."""
+        rows = [r for r in series() if r[0] < 850]
+        v = wv.analyze(rows, 670, FPS, expected_range=(610, 895))
+        self.assertFalse(v['ok'])
+        self.assertIn('조기 EOF', v['reason'])
+        # 같은 열이라도 요청 구간을 모르면 그 사실을 주장하지 않는다.
+        self.assertTrue(wv.analyze(rows, 670, FPS)['ok'])
+
+    def test_29_invalid_frames_before_t0_do_not_block(self):
+        """역회귀 — 판정에 쓰이지 않는 T0 앞 실패까지 막으면 도구가 못 쓰게 된다."""
+        rows = [r if r[0] != 620 else (620, NAN, NAN, 0) for r in series()]
+        v = wv.analyze(rows, 670, FPS)
+        self.assertTrue(v['ok'], v.get('reason'))
+        self.assertEqual(wv.RECORDED['n_frames'], v['n_frames'])
+
+    def test_30_the_real_contiguous_run_still_reproduces_the_record(self):
+        """🔴 역회귀 — 실제와 같은 285프레임·NaN 0건은 기록값을 그대로 낸다."""
+        rows = series()
+        self.assertEqual(285, len(rows))
+        self.assertFalse([r for r in rows if not math.isfinite(r[1])])
+        v = wv.analyze(rows, wv.RECORDED['t0_frame'], wv.RECORDED['fps'],
+                       bag_ms=wv.RECORDED['bag_ms'], expected_range=(610, 895))
+        self.assertTrue(v['ok'], v.get('reason'))
+        self.assertEqual(wv.RECORDED['stop_frame'], v['stop_frame'])
+        self.assertEqual(wv.RECORDED['n_frames'], v['n_frames'])
+        self.assertAlmostEqual(wv.RECORDED['measured_ms'], v['measured_ms'], places=1)
+        self.assertAlmostEqual(wv.RECORDED['delta_ms'],
+                               v['cross_observer_delta_ms'], places=1)
+
+
+class CrossObserverTest(unittest.TestCase):
+    """검토 §57.2 — bag 과의 차이는 **관측계 차이**일 뿐, 원인을 특정하지 않는다."""
+
+    def test_14_delta_is_reported_without_naming_a_cause(self):
+        v = wv.analyze(series(), 670, FPS, bag_ms=wv.RECORDED['bag_ms'])
+        self.assertAlmostEqual(wv.RECORDED['delta_ms'],
+                               v['cross_observer_delta_ms'], places=1)
+        self.assertNotIn('render_lag_ms', v, '옛 이름이 남으면 옛 주장이 남는다')
+        self.assertNotIn('render_lag_plausible', v)
+
+    def test_14b_the_same_49_5ms_never_prints_a_render_lag_verdict(self):
+        """🔴 같은 입력이 '렌더 지연 확정'·'타당'을 출력하면 안 된다."""
+        out = report_text(wv.analyze(series(), 670, FPS,
+                                     bag_ms=wv.RECORDED['bag_ms']))
+        self.assertIn('관측계 차이', out)
+        self.assertIn('한 원인으로 특정하지 않는다', out)
+        self.assertNotIn('렌더 지연 +', out)
+        self.assertNotIn('타당', out)
+
+    def test_14c_no_bag_value_promotes_a_single_cause(self):
+        """저장 지연을 다르게 주입해도(=차이가 아무리 변해도) 원인 판정은 없다."""
+        for bag_ms in (470.0, 516.2, 560.0, 900.0, 2000.0):
+            out = report_text(wv.analyze(series(), 670, FPS, bag_ms=bag_ms))
+            self.assertNotIn('타당', out, bag_ms)
+            self.assertNotIn('범위 밖', out, bag_ms)
+            self.assertIn('한 원인으로 특정하지 않는다', out, bag_ms)
+
+    def test_15_negative_delta_is_flagged_for_re_checking_not_judged(self):
+        """bag 이 영상보다 짧으면 같은 시행인지 되물어야 한다 — 타당/부당 판정은 아니다."""
         v = wv.analyze(series(), 670, FPS, bag_ms=400.0)
-        self.assertLess(v['render_lag_ms'], 0)
-        self.assertFalse(v['render_lag_plausible'])
+        self.assertLess(v['cross_observer_delta_ms'], 0)
+        self.assertTrue(v['delta_negative'])
+        self.assertIn('부호가 음수다', report_text(v))
 
-    def test_16_absurdly_large_lag_is_flagged(self):
+    def test_16_a_large_delta_is_not_an_error_and_not_a_verdict(self):
+        """상한을 못 정하므로 큰 차이도 '부당'이라 부르지 않는다(0~60ms 판정 폐기)."""
         v = wv.analyze(series(), 670, FPS, bag_ms=900.0)
-        self.assertFalse(v['render_lag_plausible'])
+        self.assertFalse(v['delta_negative'])
+        self.assertFalse(hasattr(wv, 'PLAUSIBLE_RENDER_LAG_MS'),
+                         '타당 범위 상수가 남으면 §57.2 가 되살아난다')
+
+    def test_16b_the_lower_bound_holds_without_any_bag_value(self):
+        """🔴 하한 성질은 교차검사에 의존하지 않는다 — bag 없이도 PASS 는 없다."""
+        v = wv.analyze(series(), 670, FPS)
+        self.assertIsNone(v['cross_observer_delta_ms'])
+        self.assertNotIn('PASS', (v['legacy_verdict'], v['proposed_verdict']))
 
 
 class ContractTest(unittest.TestCase):
@@ -191,6 +322,133 @@ class ContractTest(unittest.TestCase):
         p = wv.PRESETS['0807-1522']
         self.assertEqual((610, 895), p['frame_range'])
         self.assertEqual((112.0, 178.0), p['axes'])
+
+
+class RecordedFactsTest(unittest.TestCase):
+    """검토 §57.3 — 설명·출력·회귀가 **한 출처**(`RECORDED`)에서 나온다."""
+
+    def test_31_the_docstring_is_built_from_recorded_not_typed_by_hand(self):
+        doc = wv.__doc__
+        self.assertNotIn('{', doc, '포맷이 안 됐다 — 설명이 상수와 끊겼다')
+        for key in ('measured_ms', 'bag_ms', 'delta_ms'):
+            self.assertIn(str(wv.RECORDED[key]), doc, key)
+
+    def test_32_the_stale_numbers_are_gone_from_the_description(self):
+        """🔴 실제는 466.7/49.5 인데 설명만 500.0/16.2 로 남아 있던 자리다."""
+        self.assertNotIn('`500.0ms`', wv.__doc__)
+        self.assertNotIn('`16.2ms`', wv.__doc__)      # `516.2ms` 와 헷갈리지 않게 백틱까지
+        self.assertNotIn('정확히 렌더 지연', wv.__doc__)
+
+    def test_33_recorded_measured_ms_is_derivable_from_frames_and_fps(self):
+        """숫자 하나를 바꾸면 여기서 깨진다 — 손으로 적은 값이 못 남는다."""
+        derived = wv.RECORDED['n_frames'] / wv.RECORDED['fps'] * 1000.0
+        self.assertAlmostEqual(wv.RECORDED['measured_ms'], derived, places=1)
+        self.assertAlmostEqual(
+            wv.RECORDED['delta_ms'],
+            wv.RECORDED['bag_ms'] - wv.RECORDED['measured_ms'], places=1)
+        self.assertEqual(wv.RECORDED['n_frames'],
+                         wv.RECORDED['stop_frame'] - wv.RECORDED['t0_frame'])
+
+    def test_34_the_recorded_drift_satisfies_condition_2(self):
+        """조건 2 는 영상만으로 닫히는 유일한 조건이다 — 그 기록도 판정선 아래여야 한다."""
+        self.assertLess(wv.RECORDED['drift_mm_s'], wv.MOTION_RATE_MM_S)
+
+
+class CliContractTest(unittest.TestCase):
+    """검토 §57.4 — 입력 오류는 traceback 이 아니라 원인 + `rc=2` 다."""
+
+    BASE = ['watchdog_video.py', 'x.mov', '--t0-frame', '670',
+            '--preset', '0807-1522']
+
+    def run_cli(self, **opts):
+        """🔴 `--opt=값` 한 토큰으로 넘긴다 — 음수 값(`-1`)을 argparse 가 옵션으로 읽지
+        않게 하려는 것이다. 그 경로는 `test_45` 가 따로 본다."""
+        extra = [f"--{k.replace('_', '-')}={v}" for k, v in opts.items()]
+        buf, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err):
+            rc = wv.main(self.BASE + extra, series_fn=lambda *a, **k: series())
+        return rc, buf.getvalue() + err.getvalue()
+
+    def test_35_non_finite_numbers_end_with_rc_2_not_a_traceback(self):
+        """🔴 `--fps nan` 이 `round(NaN)` 에서 ValueError 로 죽던 자리다."""
+        for bad in ('nan', 'NaN', 'inf', '-inf', '', 'abc'):
+            with self.subTest(fps=bad):
+                rc, out = self.run_cli(fps=bad)
+                self.assertEqual(2, rc)
+                self.assertIn('입력 오류', out)
+                self.assertNotIn('Traceback', out)
+
+    def test_36_non_positive_fps_is_a_usage_error(self):
+        for bad in ('0', '-1', '-0.001'):
+            self.assertEqual(2, self.run_cli(fps=bad)[0], bad)
+
+    def test_37_pair_arguments_check_the_field_count(self):
+        for arg, bad in (('center', '1'), ('center', '1,2,3'),
+                         ('axes', '5'), ('axes', '1,2,3'),
+                         ('range', '610'), ('range', '610,895,900')):
+            with self.subTest(arg=arg, value=bad):
+                rc, out = self.run_cli(fps=FPS, **{arg: bad})
+                self.assertEqual(2, rc)
+                self.assertNotIn('Traceback', out)
+
+    def test_38_non_finite_or_non_numeric_geometry_is_a_usage_error(self):
+        for arg, bad in (('center', 'nan,531'), ('center', '439,inf'),
+                         ('axes', 'nan,178'), ('range', 'nan,895')):
+            self.assertEqual(2, self.run_cli(fps=FPS, **{arg: bad})[0], bad)
+
+    def test_39_zero_or_negative_axes_are_a_usage_error(self):
+        """축이 0 이면 정규화에서 0 으로 나눈다 — 계산 전에 막는다."""
+        for bad in ('0,178', '112,0', '-112,178'):
+            self.assertEqual(2, self.run_cli(fps=FPS, axes=bad)[0], bad)
+
+    def test_40_reversed_or_negative_frame_range_is_a_usage_error(self):
+        for bad in ('895,610', '610,610', '-10,895', '610.5,895'):
+            self.assertEqual(2, self.run_cli(fps=FPS, range=bad)[0], bad)
+
+    def test_45_argparse_own_rejection_also_exits_with_2(self):
+        """`--axes -112,178` 처럼 값이 옵션으로 보이면 argparse 가 먼저 잡는다.
+
+        argparse 는 `-1`·`-0.001` 같은 **순수 음수만** 값으로 받아 준다(그건 우리
+        `parse_inputs` 가 잡는다). 나머지는 여기서 끝나며, 그 경로의 종료코드도 2 다.
+        """
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                wv.main(self.BASE + ['--axes', '-112,178'],
+                        series_fn=lambda *a, **k: series())
+        self.assertEqual(2, caught.exception.code)
+
+    def test_41_t0_frame_must_be_a_non_negative_integer(self):
+        for bad in ('nan', '670.5', '-1', 'abc'):
+            with self.subTest(t0=bad):
+                buf, err = io.StringIO(), io.StringIO()
+                with redirect_stdout(buf), redirect_stderr(err):
+                    rc = wv.main(['watchdog_video.py', 'x.mov', '--t0-frame', bad,
+                                  '--preset', '0807-1522', '--fps', str(FPS)],
+                                 series_fn=lambda *a, **k: series())
+                self.assertEqual(2, rc)
+                self.assertNotIn('Traceback', buf.getvalue() + err.getvalue())
+
+    def test_42_bag_ms_is_validated_too(self):
+        for bad in ('nan', 'inf', 'abc'):
+            self.assertEqual(2, self.run_cli(fps=FPS, bag_ms=bad)[0], bad)
+
+    def test_43_the_valid_preset_run_still_reaches_a_verdict(self):
+        """🔴 역회귀 — 검증을 넣다가 정상 경로를 막으면 도구가 죽는다."""
+        rc, out = self.run_cli(fps=FPS, bag_ms=wv.RECORDED['bag_ms'])
+        self.assertEqual(1, rc)                    # 판정 불능은 성공이 아니다
+        self.assertIn(f"{wv.RECORDED['measured_ms']} ms", out)
+        self.assertIn('관측계 차이', out)
+
+    def test_44_early_eof_from_the_producer_is_undecidable_through_main(self):
+        """생산자가 짧게 돌려주면 `main` 이 요청 구간과 대조해 판정 불능으로 보낸다."""
+        short = [r for r in series() if r[0] < 860]
+        self.assertEqual(1, self.run_cli(fps=FPS)[0], '정상 경로가 먼저 살아 있어야 한다')
+        buf, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err):
+            rc = wv.main(self.BASE + ['--fps', str(FPS)],
+                         series_fn=lambda *a, **k: short)
+        self.assertEqual(1, rc)
+        self.assertIn('조기 EOF', buf.getvalue())
 
 
 if __name__ == '__main__':

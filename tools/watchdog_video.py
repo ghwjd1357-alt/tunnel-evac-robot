@@ -16,11 +16,19 @@
     측정값 > 판정선  →  FAIL 확정 (참값은 더 크다)
     측정값 ≤ 판정선  →  🔴 **판정 불능** (렌더지연을 독립적으로 못 묶으면 PASS 라고 못 한다)
 
-2026-08-11 에 이 자리에서 거짓 PASS 가 날 뻔했다: 영상 실측 `500.0ms` 가 구 판정선
-`500.0ms` 아래로 보였지만, 같은 시행의 bag 은 `516.2ms` 였다. 차이 `16.2ms`(1 프레임)가
-정확히 렌더 지연이다. **총 정지 시간의 정본 측정은 bag 이고**(시작점이 실제 메시지
-타임스탬프라 편향이 없다), 영상은 *펌웨어와 독립된* 관측이라는 다른 가치를 갖는다.
-`--bag-ms` 를 주면 둘의 차이를 렌더 지연으로 환산해 타당 범위인지 같이 검사한다.
+하한 성질은 **교차검사 없이 혼자 성립한다** — 시작점은 렌더만큼 늦고, 끝점은 판정선
+`{motion_rate:g}mm/s` 를 밑도는 순간 검출돼 참값보다 이르다. 양쪽 모두 구간을 짧게 만든다.
+
+2026-08-11 에 이 자리에서 거짓 PASS 가 날 뻔했다: 영상 실측 `{measured_ms}ms`
+({n_frames}프레임)가 구 판정선 `500ms` 아래로 보였지만, 같은 시행의 bag 은 `{bag_ms}ms` 였다.
+
+🔴 **그 차이 `{delta_ms}ms` 를 한 가지 원인으로 부르지 않는다**(검토 §57.2 P1). bag 의
+시작점은 `Twist` 가 *발행된* 시각이 아니라 rosbag 이 *저장한* 시각이고(`watchdog_report.py`),
+끝점도 `/odom` 이 저장된 시각이다. 영상은 *화면에 뜬* 프레임에서 *회전이 검출된* 프레임까지다.
+둘은 **서로 다른 관측계**라 차이 안에는 렌더 지연 · 두 토픽의 DDS/record 지연 · odom 발행
+주기 · 두 T1 검출기의 차이가 **함께** 들어 있다. 그래서 `--bag-ms` 는 차이를 **적어 둘 뿐,
+타당/부당을 판정하지 않는다.** 총 정지의 정본 측정은 bag 이다(사람 눈과 화면 렌더가 끼지
+않는다) — 그러나 그 시각도 *저장* 시각이라 무편향은 아니다.
 
 ★ **채택한 측정 방법과, 먼저 실패한 두 방법** (2026-08-11 실측. 다시 밟지 않도록 남긴다)
 
@@ -36,6 +44,15 @@
      중심 오차가 만드는 가짜 성분은 원 둘레를 돌며 부호가 뒤집혀 **중앙값에서 상쇄**된다.
      실측 대비: 주행 접선 `1.490°/f` vs 정지 후 `0.0009°/f`, 접선/반경 비가 주행 `1.6` →
      정지 `0.01`. **남은 흔들림이 회전이 아님을 이 비가 증명한다.**
+
+★ **못 본 프레임은 "안 돌았다" 가 아니라 "모른다" 다** (검토 §57.1 P1)
+
+구판은 추적 실패(`NaN`)를 `0.0` 회전으로 바꿔 넣었다. 렌즈가 가려지거나 디코드가 끊긴
+구간이 전부 **"정지 증거"** 로 둔갑해, 꼬리 전체를 못 봐도 `조건 2 충족` 이 나왔다.
+이 도구의 조건 2 는 R0→R1 지면 주행 허가의 입력이므로 그 방향의 실패는 위험하다.
+→ 이제 **관측이 완전할 때만 수치를 낸다**: ⓵ 프레임 번호가 처음부터 끝까지 1씩 연속이고
+(결측·중복·역순 없음) ⓶ 요청 구간이 조기 EOF 로 잘리지 않았고 ⓷ `T0` 이후 모든 프레임의
+회전값이 유한하며 유효점이 `{min_points}`개 이상일 때. 하나라도 어긋나면 **판정 불능**이다.
 
 사용법:
     python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522
@@ -65,10 +82,26 @@ REQUIRED_TAIL_MS = 2000
 NOISE_TAIL_FRAMES = 90
 # 구 판정선(§7-c-0 조건 1 원본) = fps × 0.5. 상수가 아니라 fps 에서 나온다.
 LEGACY_TOTAL_RATIO = 0.5
+# 관측이 유효하다고 인정할 최소 유효점 수. 생산자의 `keep.sum() < 30` 과 **같은 선**을
+# 소비자도 독립으로 본다 — 생산자가 바뀌어도 소비 쪽 계약이 남는다(검토 §57.1).
+MIN_VALID_POINTS = 30
 # 🔴 결정 1-ⓐ(2026-08-11 사용자 결정) 초안 = 총 정지 상한. **검토자 확인 대기**다.
+# 🔴 이 값은 **최악 지연의 증명이 아니라 사용자가 수용한 운용 상한**이다(검토 §57.2).
 PROPOSED_TOTAL_MS = 600
-# 렌더 지연이 이 범위 밖이면 T0 를 잘못 읽었거나 두 측정이 다른 시행이다.
-PLAUSIBLE_RENDER_LAG_MS = (0.0, 60.0)
+
+# ── 기록된 실측 (2026-08-11 · `PRESETS['0807-1522']`) ────────────────────────
+# 🔴 **설명·출력·회귀가 전부 이 한 곳에서 나온다.** 여기 숫자 하나를 바꾸면 docstring 과
+# 회귀가 **같이** 깨진다 — 도구 설명만 옛 수치로 남는 사고(검토 §57.3 P2)를 구조로 막는다.
+RECORDED = dict(
+    fps=59.9955, t0_frame=670, stop_frame=698, n_frames=28,
+    measured_ms=466.7,      # = n_frames / fps
+    bag_ms=516.2,           # 같은 시행 `d0_watchdog_0807_1522`
+    delta_ms=49.5,          # 🔴 관측계 차이. 렌더 지연 '확정' 이 아니다.
+    drift_mm_s=0.5945,      # 정지 뒤 누적 — 조건 2(영상 전용 관측)
+)
+if __doc__:                      # `python -OO` 로 돌리면 docstring 이 없다
+    __doc__ = __doc__.format(motion_rate=MOTION_RATE_MM_S,
+                             min_points=MIN_VALID_POINTS, **RECORDED)
 
 
 def deg_per_frame_to_mm_s(deg, fps):
@@ -181,23 +214,52 @@ def rotation_series(path, center, axes, frame_range, progress=None):
     return out
 
 
-def analyze(series, t0_frame, fps, bag_ms=None):
+def analyze(series, t0_frame, fps, bag_ms=None, expected_range=None):
     """순수 함수 — 영상 I/O 없이 판정한다. 회귀는 여기에 합성 열을 넣는다.
 
     `series` = `[(n, rot_deg, rad_deg, n_points), ...]`.
+    `expected_range` = 생산자에게 **요청한** `(lo, hi)`. 주면 조기 EOF 를 잡는다.
     """
     rows = [r for r in series if r[0] is not None]
     if len(rows) < NOISE_TAIL_FRAMES + 10:
         return {'ok': False, 'reason': f'프레임이 {len(rows)}개뿐이라 잡음 바닥을 못 잡는다'}
-    if fps <= 0:
-        return {'ok': False, 'reason': 'fps 가 0 이하다'}
+    if not math.isfinite(fps) or fps <= 0:
+        return {'ok': False, 'reason': f'fps 가 유한한 양수가 아니다: {fps!r}'}
 
     frames = [r[0] for r in rows]
     if not frames[0] <= t0_frame <= frames[-1]:
         return {'ok': False, 'reason': f'T0={t0_frame} 이 분석 구간 밖이다'}
 
+    # ── 🔴 관측 완전성 (검토 §57.1) ──────────────────────────────────────
+    # 여기를 통과해야 아래의 "몇 프레임"·"몇 초 관찰" 이 **실제로 본 것**이 된다.
+    gaps = [(frames[i - 1], frames[i]) for i in range(1, len(frames))
+            if frames[i] != frames[i - 1] + 1]
+    if gaps:
+        return {'ok': False,
+                'reason': f'프레임이 연속이 아니다 — {gaps[0][0]}→{gaps[0][1]} '
+                          f'(결측·중복·역순 {len(gaps)}곳). 안 본 구간을 관찰로 셀 수 없다'}
+    if expected_range is not None:
+        lo, hi = expected_range
+        if frames[0] != lo or frames[-1] != hi - 1:
+            return {'ok': False,
+                    'reason': f'요청 구간 {lo}~{hi - 1} 중 {frames[0]}~{frames[-1]} 만 '
+                              f'관측됐다 — 조기 EOF·디코드 중단'}
+
+    t0_idx = frames.index(t0_frame)          # 연속성이 보장돼 항상 존재한다
+    # 🔴 **`NaN` 을 `0.0`(=안 돌았다)으로 바꾸지 않는다.** 못 본 것은 "모른다" 이고,
+    # 모르는 구간은 정지 증거가 될 수 없다. 판정 구간 전체를 fail-closed 로 막는다.
+    bad = [rows[i][0] for i in range(t0_idx, len(rows))
+           if not math.isfinite(rows[i][1]) or rows[i][3] < MIN_VALID_POINTS]
+    if bad:
+        return {'ok': False,
+                'reason': f'T0 이후 관측 실패 {len(bad)}프레임(첫 n={bad[0]}, '
+                          f'유효점 {MIN_VALID_POINTS} 미만이거나 회전값이 유한하지 않다) '
+                          f'— 못 본 구간은 정지가 아니다'}
+
     window_frames = max(int(round(MOTION_WINDOW_MS / 1000.0 * fps)), 2)
-    rot = [r[1] if math.isfinite(r[1]) else 0.0 for r in rows]
+    # T0 앞은 판정에 쓰이지 않는다. 값이 유효하지 않으면 `nan` 그대로 둔다 —
+    # 0 으로 채우면 위에서 막은 바로 그 거짓 정지가 뒷문으로 돌아온다.
+    rot = [r[1] if math.isfinite(r[1]) else float('nan') for r in rows]
 
     def swept(i):
         """프레임 `i` 이후 창 안에서 누적 회전이 가장 크게 벌어진 값(부호 무시)."""
@@ -211,7 +273,8 @@ def analyze(series, t0_frame, fps, bag_ms=None):
     # 실측: 프레임당 잡음 최대가 0.146°/f 로 정본 판정선(5mm/s = 0.084°/f)보다 커서
     # 증분 판정은 정지 뒤 잡음을 계속 "이동"으로 읽는다. 창 안 누적으로 보면 무작위
     # 잡음은 상쇄되고(창 12프레임에 약 0.2°) 실회전만 남는다(주행 17.9°).
-    tail_start = len(rows) - NOISE_TAIL_FRAMES
+    # 🔴 `t0_idx` 아래로는 내려가지 않는다 — 그 앞은 유효성을 보증하지 않은 구간이다.
+    tail_start = max(len(rows) - NOISE_TAIL_FRAMES, t0_idx)
     noise_swept = [swept(i) for i in range(tail_start, len(rows) - window_frames)]
     if len(noise_swept) < NOISE_TAIL_FRAMES // 2:
         return {'ok': False, 'reason': '잡음 구간이 창 하나를 채우지 못한다'}
@@ -221,8 +284,8 @@ def analyze(series, t0_frame, fps, bag_ms=None):
     def last_motion(rate_mm_s):
         """임계를 넘은 마지막 프레임의 **다음** 프레임 = 바퀴가 최종 위치에 선 프레임."""
         limit = mm_s_to_deg_per_frame(rate_mm_s, fps) * window_frames
-        hit = [rows[i][0] for i in range(len(rows))
-               if rows[i][0] >= t0_frame and swept(i) > limit]
+        # 🔴 `t0_idx` 부터만 훑는다 — 유효성을 보증한 구간이 정확히 여기다.
+        hit = [rows[i][0] for i in range(t0_idx, len(rows)) if swept(i) > limit]
         return None if not hit else hit[-1] + 1
 
     canon_deg = mm_s_to_deg_per_frame(MOTION_RATE_MM_S, fps) * window_frames
@@ -244,7 +307,9 @@ def analyze(series, t0_frame, fps, bag_ms=None):
                           f'(§7-c-0 조건 2 = {REQUIRED_TAIL_MS}ms)'}
 
     # 조건 2 — 정지 뒤 누적 회전이 판정선 아래인가. 부호를 살려 더해야 creep 를 잡는다.
-    after = [r[1] for r in rows if r[0] >= stop and math.isfinite(r[1])]
+    # 🔴 여기서 비유한값을 **거르지 않는다**. 걸러 낼 것이 있었다면 위 fail-closed 에서
+    # 이미 판정 불능으로 끝났어야 한다 — 거르는 순간 "못 본 꼬리"가 조건 2 를 통과한다.
+    after = [r[1] for r in rows if r[0] >= stop]
     drift_deg = sum(after)
     drift_mm_s = deg_per_frame_to_mm_s(drift_deg / max(len(after), 1), fps)
 
@@ -261,9 +326,9 @@ def analyze(series, t0_frame, fps, bag_ms=None):
         """🔴 영상은 하한만 준다 — 넘으면 FAIL 확정, 밑이면 판정 불능이다."""
         return 'FAIL' if n_frames > limit_frames else '판정 불능'
 
-    lag_ms = None if bag_ms is None else bag_ms - measured_ms
-    lag_ok = None if lag_ms is None else (
-        PLAUSIBLE_RENDER_LAG_MS[0] <= lag_ms <= PLAUSIBLE_RENDER_LAG_MS[1])
+    # 🔴 bag 과의 차이는 **서로 다른 관측계의 차이**일 뿐이다(검토 §57.2). 이름도 그렇게
+    # 부르고, "이 범위면 타당" 같은 판정을 붙이지 않는다 — 성분을 못 가르기 때문이다.
+    delta_ms = None if bag_ms is None else bag_ms - measured_ms
 
     return {
         'ok': True,
@@ -286,8 +351,10 @@ def analyze(series, t0_frame, fps, bag_ms=None):
         'proposed_limit_frames': PROPOSED_TOTAL_MS / 1000.0 * fps,
         'proposed_verdict': verdict(PROPOSED_TOTAL_MS / 1000.0 * fps),
         'bag_ms': bag_ms,
-        'render_lag_ms': lag_ms,
-        'render_lag_plausible': lag_ok,
+        'cross_observer_delta_ms': delta_ms,
+        # 부호만 본다. 음수면 "영상이 bag 보다 길다" 는 뜻이라 같은 시행인지·T0 를 옳게
+        # 읽었는지 되묻게 한다. 🔴 양수라고 해서 무엇이 타당하다는 뜻은 아니다.
+        'delta_negative': None if delta_ms is None else delta_ms < 0.0,
     }
 
 
@@ -303,7 +370,7 @@ def report(v):
     print()
     print(f"  T0(발행 표시) n={v['t0_frame']}  →  마지막 회전 n={v['stop_frame']}")
     print(f"  >>> {v['n_frames']} 프레임 = {v['measured_ms']:.1f} ms  "
-          f"🔴 **이 값은 하한이다**(렌더 지연만큼 짧게 나온다)")
+          f"🔴 **이 값은 하한이다**(시작점은 렌더만큼 늦고 끝점은 이르게 잡힌다)")
     band = ' · '.join(f"{r:g}mm/s→{'?' if f is None else f'{f}f'}"
                       for r, f in sorted(v['sensitivity'].items()))
     print(f'  >>> 판정선 민감도: {band}')
@@ -312,13 +379,21 @@ def report(v):
           f"**{v['legacy_verdict']}**")
     print(f"  ⓐ 초안(총 정지 ≤ {PROPOSED_TOTAL_MS}ms = {v['proposed_limit_frames']:.1f}f): "
           f"**{v['proposed_verdict']}**  ⚠ 검토자 확인 대기")
+    print(f"     🔴 {PROPOSED_TOTAL_MS}ms 는 **최악 지연의 증명이 아니라 사용자가 수용한 "
+          f"운용 상한**이다")
     print(f"  [조건 2] 정지 후 {v['tail_ms']:.0f}ms 누적 회전 {v['drift_deg']:+.3f}° "
           f"= {v['drift_mm_s']:.4f} mm/s → "
           f"{'충족' if v['cond2_ok'] else '🔴 미충족'} (판정선 {MOTION_RATE_MM_S:g} mm/s)")
     if v['bag_ms'] is not None:
-        mark = '타당' if v['render_lag_plausible'] else '🔴 범위 밖 — T0 오독이나 다른 시행'
         print(f"  [교차] bag {v['bag_ms']:.1f}ms - 영상 {v['measured_ms']:.1f}ms "
-              f"= 렌더 지연 {v['render_lag_ms']:+.1f}ms ({mark})")
+              f"= 관측계 차이 {v['cross_observer_delta_ms']:+.1f}ms")
+        print("         🔴 이 차이를 한 원인으로 특정하지 않는다 — bag 은 *저장* 시각, "
+              "영상은 *화면 표시*→*회전 검출* 이라")
+        print("            DDS·record 지연, odom 발행 주기, 두 T1 검출기 차이가 "
+              "함께 들어 있다 (검토 §57.2)")
+        if v['delta_negative']:
+            print("         🔴 부호가 음수다 — 같은 시행인지, T0 를 옳게 읽었는지 "
+                  "먼저 확인한다")
 
 
 PRESETS = {
@@ -329,41 +404,104 @@ PRESETS = {
 }
 
 
+class UsageError(Exception):
+    """입력 계약 위반. 🔴 traceback 이 아니라 **원인 + rc=2** 로 끝난다(검토 §57.4)."""
+
+
+def _finite(raw, name):
+    """외부에서 들어온 수 하나 — 수인지, 유한한지까지 본다(`nan`·`inf` 는 수다)."""
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        raise UsageError(f'{name} 이 수가 아니다: {raw!r}') from None
+    if not math.isfinite(value):
+        raise UsageError(f'{name} 이 유한하지 않다: {raw!r}')
+    return value
+
+
+def _pair(raw, name, positive=False):
+    """`"a,b"` — 개수까지 센다. 3개를 주면 조용히 앞 2개를 쓰지 않는다."""
+    parts = str(raw).split(',')
+    if len(parts) != 2:
+        raise UsageError(f'{name} 은 "a,b" 두 값이다 — {len(parts)}개를 받았다: {raw!r}')
+    values = tuple(_finite(p, name) for p in parts)
+    if positive and not all(v > 0 for v in values):
+        raise UsageError(f'{name} 은 두 값 모두 양수여야 한다: {raw!r}')
+    return values
+
+
+def parse_inputs(a, fps_probe=None):
+    """🔴 **모든 외부 수치를 여기 한곳에서** 계약대로 검사한다.
+
+    한곳에 모으는 이유: 검사가 흩어지면 새 인자가 늘 때마다 조용히 뚫린다
+    (`scan_unbounded_cli.py` 가 화이트리스트에서 배운 것과 같은 교훈).
+    """
+    cfg = dict(PRESETS.get(a.preset, {}))
+    if a.center:
+        cfg['center'] = _pair(a.center, '--center')
+    if a.axes:
+        cfg['axes'] = _pair(a.axes, '--axes', positive=True)
+    if a.range:
+        cfg['frame_range'] = _pair(a.range, '--range')
+    missing = [k for k in ('center', 'axes', 'frame_range') if k not in cfg]
+    if missing:
+        raise UsageError(f"--preset 이나 {'/'.join('--' + m for m in missing)} 가 필요하다")
+
+    # preset 에서 온 값도 같은 검사를 받는다 — 계약은 출처가 아니라 값에 붙는다.
+    cfg['center'] = _pair(','.join(map(repr, cfg['center'])), '--center')
+    cfg['axes'] = _pair(','.join(map(repr, cfg['axes'])), '--axes', positive=True)
+    lo, hi = _pair(','.join(map(repr, cfg['frame_range'])), '--range')
+    if lo != int(lo) or hi != int(hi):
+        raise UsageError(f'--range 는 정수 프레임 번호다: {cfg["frame_range"]!r}')
+    if not 0 <= lo < hi:
+        raise UsageError(f'--range 는 0 ≤ lo < hi 여야 한다: {int(lo)},{int(hi)}')
+    cfg['frame_range'] = (int(lo), int(hi))
+
+    t0 = _finite(a.t0_frame, '--t0-frame')
+    if t0 != int(t0) or t0 < 0:
+        raise UsageError(f'--t0-frame 은 0 이상 정수다: {a.t0_frame!r}')
+    t0 = int(t0)
+
+    fps = None if a.fps is None else _finite(a.fps, '--fps')
+    if fps is None and fps_probe is not None:
+        fps = fps_probe()
+    if fps is None or not math.isfinite(fps) or fps <= 0:
+        raise UsageError('fps 를 읽지 못했다 — --fps 로 양수를 준다')
+
+    bag_ms = None if a.bag_ms is None else _finite(a.bag_ms, '--bag-ms')
+    return cfg, t0, fps, bag_ms
+
+
 def main(argv, series_fn=None):
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(
+        description=(__doc__ or 'R0 watchdog 영상 판정기').splitlines()[0])
     ap.add_argument('video')
-    ap.add_argument('--t0-frame', type=int, required=True,
+    # 🔴 수치는 전부 문자열로 받는다 — 검사를 `parse_inputs` 한곳에 모으기 위해서다.
+    ap.add_argument('--t0-frame', required=True,
                     help='마지막 publishing #N 이 화면에 뜬 프레임(사람이 눈으로 확인)')
     ap.add_argument('--preset', choices=sorted(PRESETS))
     ap.add_argument('--center', help='바퀴 타원 중심 "x,y" (원본 좌표계)')
-    ap.add_argument('--axes', help='바퀴 타원 반축 "a,b"')
-    ap.add_argument('--range', help='분석 프레임 "lo,hi"')
-    ap.add_argument('--fps', type=float, help='생략하면 영상에서 읽는다')
-    ap.add_argument('--bag-ms', type=float, help='같은 시행의 bag 값 — 렌더 지연 교차검사')
+    ap.add_argument('--axes', help='바퀴 타원 반축 "a,b" (둘 다 양수)')
+    ap.add_argument('--range', help='분석 프레임 "lo,hi" (0 ≤ lo < hi)')
+    ap.add_argument('--fps', help='생략하면 영상에서 읽는다')
+    ap.add_argument('--bag-ms', help='같은 시행의 bag 값 — 관측계 차이를 적어 둔다')
     a = ap.parse_args(argv[1:])
 
-    cfg = dict(PRESETS.get(a.preset, {}))
-    for key, raw in (('center', a.center), ('axes', a.axes), ('frame_range', a.range)):
-        if raw:
-            cfg[key] = tuple(float(v) for v in raw.split(','))
-    missing = [k for k in ('center', 'axes', 'frame_range') if k not in cfg]
-    if missing:
-        print(f"--preset 이나 {'/'.join('--' + m for m in missing)} 가 필요하다", file=sys.stderr)
-        return 2
-    cfg['frame_range'] = tuple(int(v) for v in cfg['frame_range'])
-
-    fps = a.fps
-    if fps is None:
+    def probe():
+        """영상에서 fps 를 읽는다. 실패는 값이 아니라 `UsageError` 로 돌려준다."""
         try:
             import cv2                                       # noqa: PLC0415
             cap = cv2.VideoCapture(a.video)
             fps = cap.get(cv2.CAP_PROP_FPS)
             cap.release()
         except Exception as exc:                             # noqa: BLE001
-            print(f'fps 를 읽지 못했다 — --fps 로 준다: {exc}', file=sys.stderr)
-            return 2
-    if not fps or fps <= 0:
-        print('fps 를 읽지 못했다 — --fps 로 준다', file=sys.stderr)
+            raise UsageError(f'fps 를 읽지 못했다 — --fps 로 준다: {exc}') from None
+        return fps
+
+    try:
+        cfg, t0_frame, fps, bag_ms = parse_inputs(a, fps_probe=probe)
+    except UsageError as exc:
+        print(f'입력 오류 — {exc}', file=sys.stderr)
         return 2
 
     print('=' * 78)
@@ -377,7 +515,9 @@ def main(argv, series_fn=None):
         return 1
     print(' ' * 30, end='\r')
 
-    v = analyze(series, a.t0_frame, fps, bag_ms=a.bag_ms)
+    # 🔴 `expected_range` 를 함께 준다 — 요청한 만큼 못 읽었으면(조기 EOF) 판정 불능이다.
+    v = analyze(series, t0_frame, fps, bag_ms=bag_ms,
+                expected_range=cfg['frame_range'])
     report(v)
     print()
     if not v['ok']:

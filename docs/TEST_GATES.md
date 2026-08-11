@@ -279,6 +279,16 @@ bash tools/doc_check.sh --after-push                        # 원격 ahead/behin
 | **동결 게이트** (platform-core-freeze · mission-logic-RC · mission-v1-freeze) | **전량 + 쌍굴 + 지도 승격 evidence** |
 | **위에 없는 런타임 변경** (`follower_monitor.py` · waypoints yaml · launch/wiring 등) | ★ **fail-closed — 검토자가 관련 E2E 를 직접 선정**하고 그 근거를 검토본에 남긴다. "표에 없으니 생략"은 금지 |
 
+★★★★★★★ **08-11 §57 — R0 watchdog 영상 판정기** (`tools/watchdog_video.py` · 회귀
+`python3 -m unittest tools.test_watchdog_video` **49**, 짝 도구 `test_watchdog_report` **20**).
+검토자가 공격할 지점: ① **관측 결측을 정지로 읽는가** — 추적 실패·프레임 결측/중복/역순·조기
+EOF 를 T0 직후·감속 경계·2초 꼬리 중간·꼬리 끝에 주입해 전부 *판정 불능* 이어야 한다(§57.1 이
+`NaN→0.0` 치환으로 `cond2_ok=True` 를 만든 자리다) ② **bag 과의 차이를 한 원인으로 부르는
+문장이 되살아났는가**(§57.2 — `관측계 차이` 이지 렌더 지연 확정이 아니다) ③ 도구 설명의 수치가
+`RECORDED` 와 갈라졌는가(§57.3) ④ 입력 오류가 traceback 없이 `rc=2` 인가(§57.4).
+🔴 **여기 전량 통과는 판정기의 건전성이지 `#11` 의 증거가 아니다** — 실제 영상 1회 재실행으로
+`28프레임 / 466.7ms / 0.595 mm/s` 재현까지 봐야 하고, 그것도 **굽기 전 펌웨어**의 값이다.
+
 **조기 판정**: P0/P1 을 재현했으면 **그 시점에 판정하고 남은 게이트는 생략**한다.
 불승인이 확정된 커밋에 E2E 를 더 태울 이유가 없다 — 보완 후 어차피 다시 돈다.
 

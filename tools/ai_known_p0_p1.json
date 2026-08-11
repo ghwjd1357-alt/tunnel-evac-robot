@@ -100,5 +100,7 @@
   {"id":"0811-nonfinite-breaks-zero-hold-54","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"isfinite` 를 벗어난 입력(NaN·±Inf)도 **어느 상태에서든**"},
   {"id":"0811-quiet-clock-starts-after-response-55","path":"firmware/teensy_integrated_base_v1_4/rearm_gate.h","anchor":"콜백은 `[ARMING]` 만 표식하고, 시계는 spin 이 응답 전송까지 마치고 돌아온 뒤"},
   {"id":"0811-harness-must-see-motor-wiring-55","path":"firmware/teensy_integrated_base_v1_4/drive_wiring.h","anchor":"안전 출력 경로의 자동 방어가 0 이었는데"},
-  {"id":"0811-response-send-failure-still-arms-56","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"응답 전송이 실패해도 보드만 무장된다"}
+  {"id":"0811-response-send-failure-still-arms-56","path":"firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino","anchor":"응답 전송이 실패해도 보드만 무장된다"},
+  {"id":"0811-video-blind-frames-counted-as-stop-57","path":"tools/watchdog_video.py","anchor":"관측하지 못한 구간을 \"정지\"로 세지 않는다"},
+  {"id":"0811-cross-observer-delta-is-not-render-lag-57","path":"tools/watchdog_video.py","anchor":"\"렌더 지연 확정\"이 아니다"}
 ]
