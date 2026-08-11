@@ -40,7 +40,24 @@ R0→R1→R2→R3 순서를 건너뛰면 무엇이 틀렸는지 못 가른다.
 | odom 의미 | pose는 raw encoder 적분, twist는 EMA(`α=0.10`, 시정수 약 0.2초). EKF는 **twist** 소비 | R3 가감속·covariance 판정에 반영 |
 | 감속 능력 | 역 PWM을 의도적으로 쓰지 않아 능동 제동 없음. 경사 하강 자유주행 가능 | R6 경사 시험 전 별도 안전판정 |
 <!-- watchdog-evidence-slot:start -->
-| R0 watchdog | 명령 단절 뒤 실제 바퀴 정지 ≤0.5초. EMA twist가 아니라 60fps 영상+raw pose로 판정 | `TODO(D+0): 확인` — fps·프레임·초·bag·PASS/FAIL |
+| R0 watchdog | 명령 단절 뒤 실제 바퀴 정지. EMA twist가 아니라 영상(1차)+raw pose(정본 측정)로 판정 | 🔴 **미충족 — 조건 3 은 아래에 기록됐고 조건 1 이 안 닫혔다** (`JETSON_SETUP §7-c-0`) |
+
+**조건 3 기록 (2026-08-11 · `§7-c-0` 이 요구한 다섯 항목).**
+
+| | 값 |
+|---|---|
+| 영상 | `~/Desktop/d0_evidence/video/IMG_3461.mov` (iPhone 14 Pro · 3840×2160 HEVC) |
+| fps | **59.9955**(실측 `avg_frame_rate`) · 1 프레임 = **16.668 ms** · 1327 프레임 / 22.118초 |
+| 센 프레임 수 | **28** (T0 = n**670** = `publishing #30` 표시 → T1 = n**698** = 마지막 회전) |
+| 환산 시간 | **466.7 ms** 🔴 **하한이다** — bag 대비 렌더 지연 **49.5 ms** |
+| bag 경로 | `~/Desktop/d0_evidence/d0_watchdog_0807_1522` (**같은 시행** — 촬영 15:22:58) |
+| PASS/FAIL | 🔴 **판정 불능**. 구 조건 1 은 구조상 달성 불가 · 영상은 PASS 를 못 만든다 |
+
+- 재계산 = `python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522 --bag-ms 516.2`
+- ✅ **조건 2 는 충족** — 정지 후 3267ms 누적 회전 `+1.963°` = **0.595 mm/s**(판정선 5 mm/s).
+  🔴 이 값만 **펌웨어와 독립된 관측**이다(나머지는 `/odom.pose` 파생).
+- 🔴 **`#11` 은 열려 있다.** 결정 1 = 안 ⓐ(기준 재정의)가 08-11 에 내려졌으나 **검토자 확인**과
+  **현행 펌웨어 재측정**이 남았다. 위 실측은 **굽기 전(08-07)** 펌웨어의 값이다.
 <!-- watchdog-evidence-slot:end -->
 
 ⚠ 3m 거리로 확인한 pose 정확도를 곧바로 EKF twist 정확도로 승격하지 않는다. 등속 평균은
