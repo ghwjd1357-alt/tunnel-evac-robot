@@ -40,8 +40,19 @@ COAST_TAIL_S = 1.5
 CRUISE_START_S = 1.5
 # 🔴 "움직이는 중"의 판정선. `/odom` 정지 잡음보다 크고 최저 순항속도(약 0.09)보다 훨씬 작다.
 MOVE_EPS_MPS = 0.002
-# 움직임 한 덩어리 안에서 허용하는 표본 간격. 이보다 벌어지면 다른 시행으로 본다.
+# 움직임 한 덩어리 안에서 허용하는 표본 간격.
+# 🔴 08-12 정정 — 시간 공백 하나만으로 "다른 시행"이라고 끊으면 안 된다.
+# 실측(`r1_0812_1612`): 주행 도중 기록이 **0.343초 멈췄다가** 밀린 표본 10건을 같은
+# 시각으로 한꺼번에 토했다. 속도는 그 공백을 사이에 두고 `0.0513 → 0.0524` 로 명백히
+# 이어지는데도 구판은 거기서 뒤로 걷기를 멈췄고, 창이 **2.08초 짧아져** 배율이 `0.818`
+# 로 나왔다(줄자 568mm vs odom 464.7mm). 로봇이 아니라 기록이 딸꾹질한 것이다.
+# → 판정을 둘로 나눈다: **정지 표본**은 여전히 시행 경계다(그게 진짜 경계다).
+#   시간 공백은 **속도가 함께 끊겼을 때만** 경계로 본다.
 MOTION_GAP_S = 0.3
+# 이보다 긴 공백은 속도가 이어져 보여도 끊는다 — 그 사이에 서 있었는지 알 방법이 없다.
+MOTION_GAP_HARD_S = 2.0
+# 공백을 사이에 둔 두 표본의 속도차가 이보다 크면 "함께 끊겼다"로 본다.
+VEL_CONTINUOUS_MPS = 0.01
 
 
 def motion_start_before(odoms, anchor_ns):
@@ -64,9 +75,16 @@ def motion_start_before(odoms, anchor_ns):
     if i is None or abs(odoms[i][4]) <= MOVE_EPS_MPS:
         return None
     while i > 0:
-        if (odoms[i][0] - odoms[i - 1][0]) > MOTION_GAP_S * 1e9:
-            break
+        dt_ns = odoms[i][0] - odoms[i - 1][0]
+        # 정지 표본 = 진짜 시행 경계. 이건 무조건 끊는다.
         if abs(odoms[i - 1][4]) <= MOVE_EPS_MPS:
+            break
+        # 너무 긴 공백은 그 사이를 알 수 없으므로 끊는다.
+        if dt_ns > MOTION_GAP_HARD_S * 1e9:
+            break
+        # 짧은 공백은 **속도까지 끊겼을 때만** 경계로 본다 (기록 딸꾹질 면역).
+        if dt_ns > MOTION_GAP_S * 1e9 and \
+                abs(odoms[i][4] - odoms[i - 1][4]) > VEL_CONTINUOUS_MPS:
             break
         i -= 1
     return i

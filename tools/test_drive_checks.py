@@ -233,6 +233,44 @@ class GroundReportTest(unittest.TestCase):
         v = gr.analyze(cmds, odoms)
         self.assertAlmostEqual(0.09, v['cruise_mps'], places=3)
 
+    def test_22_a_recorder_stall_does_not_truncate_the_window(self):
+        """🔴 2026-08-12 실측(`r1_0812_1612`) — 주행 도중 기록이 0.343s 멈췄다.
+
+        속도는 공백을 사이에 두고 `0.0513 → 0.0524` 로 이어졌는데도 구판은 거기서
+        뒤로 걷기를 멈춰 창이 **2.09s 짧아졌고** 배율이 `0.818` 로 나왔다.
+        로봇이 아니라 **기록이** 딸꾹질한 것이고, 창은 줄자와 같은 구간이어야 한다.
+        """
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=1.5)
+        odoms = drop_odom_window(odoms, at_s=2.0, dur_s=0.35)
+        v = gr.analyze(cmds, odoms, tape_mm=v_path(odoms))
+        self.assertTrue(v['ok'], v.get('reason'))
+        self.assertGreater(v['cmd_lead_s'], 1.4)
+        self.assertAlmostEqual(1.0, v['odom_over'], places=2)
+
+    def test_23_a_real_stop_is_still_a_trial_boundary(self):
+        """🔴 역회귀 — 딸꾹질 면역이 "정지도 무시한다"가 되면 안 된다.
+
+        앞 시행이 **완전히 서 있다가** 다시 출발한 열에서는, 창이 앞 시행까지
+        먹으면 안 된다. 경계를 만드는 것은 시간 공백이 아니라 **정지 표본**이다.
+        """
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=1.5)
+        prior = [(t - 20 * NS, 0.0, 0.0, 0.0, v) for (t, _, _, _, v) in odoms]
+        mi = gr.motion_start_before(prior + odoms, cmds[0][0])
+        self.assertIsNotNone(mi)
+        self.assertGreater((prior + odoms)[mi][0], prior[-1][0])
+
+    def test_24_a_gap_longer_than_the_hard_limit_still_cuts(self):
+        """공백이 `MOTION_GAP_HARD_S` 를 넘으면 속도가 이어져 보여도 끊는다 —
+        그 사이에 서 있었는지 알 방법이 없기 때문이다(과잉 신뢰 금지)."""
+        # 공백은 반드시 **앵커보다 앞**에 둔다 — 뒤에 두면 뒤로 걷기가 지나가지도 않는다.
+        cmds, odoms = run_with_coast(0.09, 6.0, 1.3, drop_lead_s=4.0)
+        odoms = drop_odom_window(odoms, at_s=1.5,
+                                 dur_s=gr.MOTION_GAP_HARD_S + 0.5)
+        mi = gr.motion_start_before(odoms, cmds[0][0])
+        self.assertIsNotNone(mi)
+        # 창이 공백 **뒤**에서 시작해야 한다 = 알 수 없는 구간을 안 먹었다.
+        self.assertGreater((odoms[mi][0] - odoms[0][0]) / NS, 3.0)
+
 
 def run_with_coast(v_true, cmd_s, coast_s, drop_lead_s=0.0, t0=10 * NS, dt=0.02):
     """명령 구간 등속 → 명령이 끊기면 선형 감속 → 정지.
@@ -258,6 +296,18 @@ def run_with_coast(v_true, cmd_s, coast_s, drop_lead_s=0.0, t0=10 * NS, dt=0.02)
         odoms.append((t0 + int(el * NS), x, 0.0, 0.0, v))
         x += v * dt
     return cmds, odoms
+
+
+def drop_odom_window(odoms, at_s, dur_s):
+    """움직임 도중 `/odom` 표본이 `dur_s` 동안 통째로 빠진 열을 만든다.
+
+    08-12 실측의 모양이다 — 기록이 잠깐 멈췄다가 밀린 표본을 한꺼번에 토했다.
+    🔴 **속도는 공백 전후로 이어진다**(로봇은 계속 굴렀다). 지우는 것은 표본뿐이다.
+    """
+    t0 = odoms[0][0]
+    lo = t0 + int(at_s * NS)
+    hi = t0 + int((at_s + dur_s) * NS)
+    return [o for o in odoms if not (lo < o[0] < hi)]
 
 
 def v_path(odoms):
