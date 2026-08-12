@@ -42,6 +42,19 @@ inline void driveDisarm(struct RearmGate* g, Sink& sink)
   sink.setCmdVelReceived(false);
 }
 
+// ── ①-b 사유를 남기는 해제 (§63.1) ──────────────────────────────────────────
+// ① 과 같은 동작에 "누가 풀었는지"만 얹는다. 사유는 **전이했을 때만** 기록된다.
+// 반환 = 이번 호출이 실제로 풀었는가. 사유 기록을 스케치 쪽 규율에 맡기면
+// 08-13 이전처럼 정지와 기록이 다시 갈라지므로 여기서 한 동작으로 묶는다.
+template <typename Sink>
+inline bool driveDisarmWithReason(struct RearmGate* g, uint8_t reason, Sink& sink)
+{
+  const bool transitioned = rearmGateDisarmWithReason(g, reason);
+  sink.stopAllMotors();
+  sink.setCmdVelReceived(false);
+  return transitioned;
+}
+
 // ── ② 출력단 가드 (§54.1) ────────────────────────────────────────────────────
 // 반환 false = 이번 주기에 PWM 을 쓰면 안 된다. 정지는 이미 여기서 끝냈다.
 // 전이 경로 하나가 정지를 잊어도 모터가 못 도는 **두 번째 겹**이다: ARMED 가 아니면

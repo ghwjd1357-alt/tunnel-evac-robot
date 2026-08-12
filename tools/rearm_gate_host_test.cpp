@@ -35,6 +35,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
+#include <vector>
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -129,7 +131,7 @@ struct SketchModel {
     void onCmdVel(double lin, double ang, uint32_t nowMs)
     {
         if (estop) {
-            driveDisarm(&gate, sink);
+            driveDisarmWithReason(&gate, REARM_DISARM_ESTOP, sink);
             return;
         }
         if (!driveOnCommand(&gate, lin, ang, nowMs, sink)) {
@@ -149,7 +151,7 @@ struct SketchModel {
     void safetyTick(uint32_t nowMs)
     {
         if (estop) {
-            driveDisarm(&gate, sink);
+            driveDisarmWithReason(&gate, REARM_DISARM_ESTOP, sink);
             return;
         }
         rearmGateTick(&gate, nowMs);
@@ -1154,6 +1156,236 @@ static void t42_long_glitch_is_not_hidden()
     expectBool("T42 그 지속시간이 계수에 남는다 (>=49ms)", d.maxHighMs >= 49, true);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// §63.1 2회차 — 필터·상태기계·게시 주기를 **한 시계열**에 올린다
+//
+// 🔴 1회차 검토가 초록을 뚫은 이유가 이것이다. T36~T42 는 필터만, T01~T35 는
+//    상태기계만 봤다. 실제 반례는 셋이 겹칠 때만 나온다:
+//    E-stop 이 풀었는데(4) → 주행 중이던 10Hz 비영이 계속 오고(6) → 진단은 1Hz.
+//    각각은 옳은데 합치면 원인이 지워진다. 그래서 아래는 ms 단위로 같이 돈다.
+// ════════════════════════════════════════════════════════════════════════════
+
+// .ino 의 loop() 한 바퀴를 1ms 로 모사한다. 스케치 순서 그대로:
+//   updateEstopFilter() → checkSafety() → (10Hz) cmdVelCallback() → (1Hz) diag 발행
+struct TimelineModel {
+    RearmGate gate;
+    FakeDriveSink sink;
+    EstopDebounce filter;
+
+    // 발행된 /drive/diag 표본 (t, y)
+    std::vector<std::pair<uint32_t, uint8_t>> diag;
+
+    TimelineModel(uint32_t t0 = 0)
+    {
+        rearmGateInit(&gate);
+        estopDebounceInit(&filter, false, t0);
+    }
+
+    // rawHigh = 그 순간 PIN21 의 원시 읽기. cmd = 이번 ms 에 보낼 /cmd_vel (없으면 nullptr).
+    void step(uint32_t t, bool rawHigh, const double* cmd, bool publishDiag)
+    {
+        estopDebounceUpdate(&filter, rawHigh, t);      // updateEstopFilter()
+        if (filter.stable) {                            // checkSafety()
+            driveDisarmWithReason(&gate, REARM_DISARM_ESTOP, sink);
+        } else {
+            rearmGateTick(&gate, t);
+        }
+        if (cmd != nullptr) {                           // cmdVelCallback()
+            if (filter.stable) {
+                driveDisarmWithReason(&gate, REARM_DISARM_ESTOP, sink);
+            } else {
+                driveOnCommand(&gate, cmd[0], cmd[1], t, sink);
+            }
+        }
+        if (publishDiag) {
+            diag.emplace_back(t, gate.rejectReason);
+        }
+    }
+
+    // 정상 무장 4단계를 t0 까지 끝내고 ARMED 로 만든다.
+    void armBy(uint32_t& t)
+    {
+        const double zero[2] = {0.0, 0.0};
+        for (; t <= 600; t += 10) { step(t, false, zero, false); }
+        driveOnServiceRequest(&gate, true, false, sink);
+        rearmGateArmBarrierStart(&gate, t);
+        for (uint32_t end = t + REARM_POST_ARM_QUIET_MS + 20; t <= end; t += 10) {
+            step(t, false, zero, false);
+        }
+    }
+};
+
+// ── T43 🔴 반례 그대로 — E-stop 이 푼 사유가 비영 홍수에 안 덮인다 ───────────
+static void t43_estop_reason_survives_the_command_flood()
+{
+    TimelineModel m;
+    uint32_t t = 0;
+    m.armBy(t);
+    expectU32("T43 준비: ARMED", m.gate.state, DRIVE_ARMED);
+
+    const double go[2] = {0.10, 0.0};
+    const uint32_t highFrom = t + 100;
+    const uint32_t highTo = highFrom + 49;   // 50ms HIGH — 필터를 넘긴다
+
+    // 2초 동안: 10Hz 비영 명령 · 1Hz 진단 · 그 사이 50ms HIGH 한 번
+    for (uint32_t k = 0; k <= 2000; ++k) {
+        const uint32_t now = t + k;
+        const bool rawHigh = (now >= highFrom && now <= highTo);
+        const bool sendCmd = (k % 100 == 0);
+        const bool pubDiag = (k % 1000 == 0 && k > 0);
+        m.step(now, rawHigh, sendCmd ? go : nullptr, pubDiag);
+    }
+
+    expectU32("T43 무장은 풀렸다", m.gate.state, DRIVE_DISARMED);
+    expectBool("T43 진단이 실제로 나갔다", m.diag.size() >= 2, true);
+    // 🔴 구판은 여기가 6 이었다. 그래서 E-stop 이 밖에서 안 보였다.
+    expectU32("T43 첫 진단이 E-stop 사유를 담는다", m.diag.front().second,
+              REARM_DISARM_ESTOP);
+    expectU32("T43 마지막 진단까지 유지된다", m.diag.back().second,
+              REARM_DISARM_ESTOP);
+    expectU32("T43 E-stop 누계는 눌린 횟수만큼만 (루프마다 아니다)",
+              m.gate.disarmEstopCount, 1u);
+    expectU32("T43 비영 누계는 0 — 이미 풀린 뒤의 명령은 푼 것이 아니다",
+              m.gate.disarmNonzeroCount, 0u);
+}
+
+// ── T44 NaN 사유도 뒤이은 비영에 안 덮인다 ──────────────────────────────────
+static void t44_nonfinite_reason_survives()
+{
+    TimelineModel m;
+    uint32_t t = 0;
+    m.armBy(t);
+
+    const double nan2[2] = {NAN, 0.0};
+    m.step(t + 1, false, nan2, false);
+    expectU32("T44 NaN 이 풀었다", m.gate.rejectReason, REARM_DISARM_NONFINITE);
+
+    const double go[2] = {0.10, 0.0};
+    for (uint32_t k = 1; k <= 20; ++k) {
+        m.step(t + 1 + k * 100, false, go, false);
+    }
+    expectU32("T44 비영 20발 뒤에도 사유 5 유지", m.gate.rejectReason,
+              REARM_DISARM_NONFINITE);
+    expectU32("T44 NaN 누계 1", m.gate.disarmNonfiniteCount, 1u);
+}
+
+// ── T45 역회귀 — 진짜 장벽 위반은 여전히 6 이다 ─────────────────────────────
+static void t45_real_barrier_violation_still_reports_nonzero()
+{
+    // READY 에서 온 첫 비영
+    {
+        RearmGate g;
+        rearmGateInit(&g);
+        rearmGateOnCommand(&g, 0.0, 0.0, 0);
+        rearmGateOnCommand(&g, 0.0, 0.0, REARM_ZERO_HOLD_MS + 10);
+        expectU32("T45 준비: READY", g.state, DRIVE_READY);
+        rearmGateOnCommand(&g, 0.05, 0.0, REARM_ZERO_HOLD_MS + 20);
+        expectU32("T45 READY 의 첫 비영 = 사유 6", g.rejectReason,
+                  REARM_DISARM_NONZERO);
+        expectU32("T45 그리고 누계 1", g.disarmNonzeroCount, 1u);
+    }
+    // ARMING 에서 온 잔류 명령
+    {
+        RearmGate g;
+        rearmGateInit(&g);
+        rearmGateOnCommand(&g, 0.0, 0.0, 0);
+        rearmGateOnCommand(&g, 0.0, 0.0, REARM_ZERO_HOLD_MS + 10);
+        rearmGateOnService(&g, true, false);
+        expectU32("T45 준비: ARMING", g.state, DRIVE_ARMING);
+        rearmGateOnCommand(&g, 0.05, 0.0, REARM_ZERO_HOLD_MS + 20);
+        expectU32("T45 ARMING 의 잔류 비영 = 사유 6", g.rejectReason,
+                  REARM_DISARM_NONZERO);
+    }
+    // PENDING 에서 온 잔류 명령
+    {
+        RearmGate g;
+        rearmGateInit(&g);
+        rearmGateOnCommand(&g, 0.0, 0.0, 0);
+        rearmGateOnCommand(&g, 0.0, 0.0, REARM_ZERO_HOLD_MS + 10);
+        rearmGateOnService(&g, true, false);
+        rearmGateArmBarrierStart(&g, REARM_ZERO_HOLD_MS + 15);
+        expectU32("T45 준비: PENDING", g.state, DRIVE_PENDING);
+        rearmGateOnCommand(&g, 0.05, 0.0, REARM_ZERO_HOLD_MS + 20);
+        expectU32("T45 PENDING 의 잔류 비영 = 사유 6", g.rejectReason,
+                  REARM_DISARM_NONZERO);
+    }
+    // ARMED 에서 NaN → 6 이 아니라 5
+    {
+        RearmGate g;
+        rearmGateInit(&g);
+        rearmGateOnCommand(&g, 0.0, 0.0, 0);
+        rearmGateOnCommand(&g, 0.0, 0.0, REARM_ZERO_HOLD_MS + 10);
+        rearmGateOnService(&g, true, false);
+        rearmGateArmBarrierStart(&g, REARM_ZERO_HOLD_MS + 15);
+        rearmGateTick(&g, REARM_ZERO_HOLD_MS + 15 + REARM_POST_ARM_QUIET_MS + 1);
+        expectU32("T45 준비: ARMED", g.state, DRIVE_ARMED);
+        rearmGateOnCommand(&g, INFINITY, 0.0, REARM_ZERO_HOLD_MS + 800);
+        expectU32("T45 ARMED 의 Inf = 사유 5", g.rejectReason,
+                  REARM_DISARM_NONFINITE);
+    }
+}
+
+// ── T46 🔴 §5-G6 진짜 누름 10회가 글리치 자를 오염시키지 않는다 ─────────────
+static void t46_real_presses_do_not_pollute_the_glitch_ruler()
+{
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    uint32_t t = 1;
+
+    // 필수 토글 절차 모사 — 500ms 누름 · 500ms 해제, 10회
+    for (int i = 0; i < 10; ++i) {
+        for (uint32_t k = 0; k < 500; ++k, ++t) { estopDebounceUpdate(&d, true, t); }
+        for (uint32_t k = 0; k < 500; ++k, ++t) { estopDebounceUpdate(&d, false, t); }
+    }
+    expectU32("T46 진짜 누름은 글리치로 안 센다", d.rejectedHighCount, 0u);
+    expectU32("T46 그래서 글리치 자는 아직 0", d.maxRejectedHighMs, 0u);
+    expectBool("T46 (전체 max 는 예상대로 오염된다 — 그래서 칸을 나눴다)",
+               d.maxHighMs >= 499, true);
+
+    // 이제 주행 중 20ms 글리치 하나
+    for (uint32_t k = 0; k < 20; ++k, ++t) { estopDebounceUpdate(&d, true, t); }
+    for (uint32_t k = 0; k < 50; ++k, ++t) { estopDebounceUpdate(&d, false, t); }
+
+    expectU32("T46 글리치 1회가 잡힌다", d.rejectedHighCount, 1u);
+    expectBool("T46 그 길이가 20ms 근처로 읽힌다 (18~22)",
+               d.maxRejectedHighMs >= 18 && d.maxRejectedHighMs <= 22, true);
+    // 🔴 이것이 "30ms 가 충분한가"에 답할 수 있는 유일한 값이다.
+}
+
+// ── T47 필터를 넘은 글리치는 rejected 에 안 들어간다 (T42 의 짝) ────────────
+static void t47_promoted_high_is_not_a_rejected_glitch()
+{
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    uint32_t t = 1;
+    for (uint32_t k = 0; k < 50; ++k, ++t) { estopDebounceUpdate(&d, true, t); }
+    for (uint32_t k = 0; k < 50; ++k, ++t) { estopDebounceUpdate(&d, false, t); }
+    expectU32("T47 50ms 는 승격됐으므로 글리치 계수에 없다", d.rejectedHighCount, 0u);
+    expectBool("T47 대신 전체 max 에는 남는다", d.maxHighMs >= 49, true);
+    // 🔴 판독 규약: rejected=0 인데 무장이 풀렸다면 "필터를 넘었다" = 원인을 고칠 때다.
+}
+
+// ── T48 역회귀 — millis() 랩어라운드에서도 두 자가 다 옳다 ──────────────────
+static void t48_glitch_ruler_survives_wraparound()
+{
+    const uint32_t base = 0xFFFFFFF0u;   // 16ms 뒤 랩
+    EstopDebounce d;
+    estopDebounceInit(&d, false, base);
+
+    uint32_t t = base + 1;
+    for (uint32_t k = 0; k < 20; ++k, ++t) { estopDebounceUpdate(&d, true, t); }
+    for (uint32_t k = 0; k < 40; ++k, ++t) { estopDebounceUpdate(&d, false, t); }
+    expectU32("T48 랩을 가로지른 20ms 글리치도 1회", d.rejectedHighCount, 1u);
+    expectBool("T48 길이도 옳다 (18~22)",
+               d.maxRejectedHighMs >= 18 && d.maxRejectedHighMs <= 22, true);
+
+    bool tripped = false;
+    for (uint32_t k = 0; k < 500; ++k, ++t) {
+        if (estopDebounceUpdate(&d, true, t)) { tripped = true; }
+    }
+    expectBool("T48 랩 이후에도 500ms 진짜 누름은 잡힌다", tripped, true);
+}
+
 int main()
 {
     std::printf("=== re-arm 래치 상태 전이 + 정지 배선 harness (검토 §54·§55) ===\n");
@@ -1205,6 +1437,13 @@ int main()
     t40_release_is_also_filtered();
     t41_chatter_never_arms_the_gate();
     t42_long_glitch_is_not_hidden();
+    // §63.1 2회차 — 필터 × 상태기계 × 게시 주기를 한 시계열에서
+    t43_estop_reason_survives_the_command_flood();
+    t44_nonfinite_reason_survives();
+    t45_real_barrier_violation_still_reports_nonzero();
+    t46_real_presses_do_not_pollute_the_glitch_ruler();
+    t47_promoted_high_is_not_a_rejected_glitch();
+    t48_glitch_ruler_survives_wraparound();
 
     std::printf("\n검사 %d건 · 실패 %d건\n", g_checks, g_failures);
     if (g_failures != 0) {

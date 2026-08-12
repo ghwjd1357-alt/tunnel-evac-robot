@@ -29,9 +29,16 @@
 //      무엇이 고쳤는지 영원히 못 가린다.
 //
 // 🔴 관측 필드를 같이 둔다 (08-12 에 6시간을 태운 이유)
-//   `rawEdges`·`maxHighMs` 는 **필터가 먹어치운 글리치**를 밖으로 내보낸다.
 //   이게 없으면 "필터가 잘 듣는지"도, "30ms 가 충분한지"도 알 수 없다.
 //   → `/firmware/info` 로 발행한다.
+//
+//   ⚠ **두 종류를 절대 한 칸에 섞지 않는다** (§63.1 지적 — 1회차 검토):
+//     `maxHighMs` 는 **모든** HIGH 의 최대다. 그런데 굽기 직후 필수로 도는
+//     `§5-G6` 은 진짜 버튼을 500ms 씩 10번 누르는 절차다. 그 한 칸만 있으면
+//     첫 주행 전에 이미 `499` 로 차고, 정작 알고 싶은 **글리치 길이**를
+//     영원히 못 읽는다. 그래서 `rejectedHighCount`·`maxRejectedHighMs` 로
+//     **승격된 적 없는 HIGH 구간만** 따로 완결한다. 진짜 누름은 승격되므로
+//     이 두 칸에 절대 안 들어온다 = `§5-G6` 을 돌려도 안 오염된다.
 //
 // 이 파일은 Arduino 헤더에 의존하지 않는다 — `tools/rearm_gate_host_test.cpp` 가
 // PC 에서 그대로 include 해서 결정론적으로 시험한다.
@@ -53,8 +60,16 @@ struct EstopDebounce {
   bool lastRaw;          // 직전 원시 읽기
   uint32_t lastEdgeMs;   // 원시값이 마지막으로 바뀐 시각
   uint32_t highSinceMs;  // 내부 — 현재 HIGH 구간의 시작
-  uint32_t rawEdges;     // [관측] 원시 전이 누계
-  uint32_t maxHighMs;    // [관측] 원시 HIGH 최대 지속
+  bool highPromoted;     // 내부 — 현재 HIGH 구간이 stable 로 승격된 적 있나
+
+  // [관측 — 전체] 진짜 누름을 포함한 모든 HIGH
+  uint32_t rawEdges;     // 원시 전이 누계
+  uint32_t maxHighMs;    // 원시 HIGH 최대 지속
+
+  // [관측 — 필터가 먹은 것만] 🔴 여기가 "30ms 가 충분한가"의 답이 나오는 자리다.
+  // 승격 없이 끝난 HIGH 구간만 센다. 진짜 누름(500ms)은 승격되므로 안 들어온다.
+  uint32_t rejectedHighCount;
+  uint32_t maxRejectedHighMs;
 };
 
 // 🔴 부팅 시에는 읽은 값을 **그대로 믿는다.** 필터를 태우지 않는다 —
@@ -67,8 +82,13 @@ static inline void estopDebounceInit(struct EstopDebounce* d,
   d->lastRaw = rawActive;
   d->lastEdgeMs = nowMs;
   d->highSinceMs = nowMs;
+  // 부팅 HIGH 는 곧바로 stable 이므로 **승격된 것으로** 시작한다. 아니면 버튼을
+  // 누른 채로 켰다가 놓는 정상 절차가 "필터가 먹은 글리치"로 기록된다.
+  d->highPromoted = rawActive;
   d->rawEdges = 0;
   d->maxHighMs = 0;
+  d->rejectedHighCount = 0;
+  d->maxRejectedHighMs = 0;
 }
 
 // 매 루프 호출. 반환 = 디바운스된 판정.
@@ -77,12 +97,24 @@ static inline bool estopDebounceUpdate(struct EstopDebounce* d,
                                        uint32_t nowMs)
 {
   if (rawActive != d->lastRaw) {
+    if (rawActive) {
+      d->highSinceMs = nowMs;
+      d->highPromoted = false;
+    } else {
+      // HIGH 구간이 방금 끝났다 — 여기서만 완결한다. 승격된 적이 없으면
+      // 그것이 곧 "필터가 먹은 글리치"이고, 그 길이가 우리가 알고 싶은 값이다.
+      // (uint32 뺄셈이라 millis() 랩어라운드에서도 길이는 옳다.)
+      if (!d->highPromoted) {
+        const uint32_t rejected = nowMs - d->highSinceMs;
+        d->rejectedHighCount++;
+        if (rejected > d->maxRejectedHighMs) {
+          d->maxRejectedHighMs = rejected;
+        }
+      }
+    }
     d->lastRaw = rawActive;
     d->lastEdgeMs = nowMs;
     d->rawEdges++;
-    if (rawActive) {
-      d->highSinceMs = nowMs;
-    }
   }
 
   // HIGH 가 유지되는 동안 최대 지속을 갱신한다. 전이에서만 재면 아직 안 끝난
@@ -97,6 +129,10 @@ static inline bool estopDebounceUpdate(struct EstopDebounce* d,
   if (rawActive != d->stable &&
       (nowMs - d->lastEdgeMs) >= ESTOP_DEBOUNCE_MS) {
     d->stable = rawActive;
+    if (rawActive) {
+      // 이 HIGH 구간은 승격됐다 = 글리치가 아니다. 끝날 때 세지 않는다.
+      d->highPromoted = true;
+    }
   }
   return d->stable;
 }

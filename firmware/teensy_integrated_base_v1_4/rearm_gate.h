@@ -81,7 +81,13 @@ enum DriveReject : uint8_t {
   //    태웠다(ELECTRICAL_BASELINE §4-f). 이제 푼 주체가 자기 이름을 남긴다.
   //    ⚠ 값 1~3 의 뜻은 바뀌지 않는다 — 기존 표(`JETSON_SETUP §7-c-E`)는 그대로 유효하다.
   //    ⚠ `y` 는 **가장 최근 사건**만 담는다. 누계가 필요하면 `x`(서비스)와
-  //      `/firmware/info` 의 estop 계수를 같이 본다.
+  //      `/firmware/info` 의 disarm/estop 계수를 같이 본다.
+  //
+  //    🔴 4~6 은 **무장이 실제로 풀린 순간에만** 쓴다 (§63.1 지적 — 1회차 검토).
+  //       구판은 이미 DISARMED 인데도 다음 비영 명령마다 6 을 덮어썼다. `/cmd_vel`
+  //       10Hz · `/drive/diag` 1Hz 이므로, E-stop 이 푼 4 는 진단이 나가기 전에
+  //       평균 10번 덮여 **밖에서는 영영 안 보였다.** 원인을 밝히려고 넣은 칸이
+  //       원인을 지우고 있었다. 이제 전이가 없으면 이 칸을 건드리지 않는다.
   REARM_DISARM_ESTOP = 4,        // checkSafety()/cmdVelCallback 이 E-stop 으로 풀었다
   REARM_DISARM_NONFINITE = 5,    // 유한하지 않은 /cmd_vel (§54.3)
   REARM_DISARM_NONZERO = 6,      // ARMED 아닌 상태에서 비영 = 장벽 위반 (§54.2)
@@ -99,7 +105,14 @@ struct RearmGate {
   uint32_t zeroSinceMs;     // 센티널로 0 을 못 쓴다.
   uint32_t quietSinceMs;    // PENDING 진입 시각
   uint32_t serviceCalls;    // 도달한 서비스 호출 누계 (거절 포함)
-  uint8_t rejectReason;
+  uint8_t rejectReason;     // 가장 최근 **사건** 하나 (0~3 = 거절 / 4~6 = 전이 시점의 해제)
+
+  // 🔴 사유별 단조 증가 누계 — `y` 는 한 칸뿐이라 최근 사건 하나만 담는다.
+  //    "이번 주행에서 E-stop 이 몇 번 풀었나"는 이쪽으로만 답이 나온다.
+  //    → `/firmware/info`. 전이 1회 = 1 증가 (해제 상태가 유지되는 동안은 안 센다).
+  uint32_t disarmEstopCount;
+  uint32_t disarmNonfiniteCount;
+  uint32_t disarmNonzeroCount;
 };
 
 // ── 전이표 ───────────────────────────────────────────────────────────────────
@@ -127,6 +140,9 @@ static inline void rearmGateInit(struct RearmGate* g)
   g->quietSinceMs = 0;
   g->serviceCalls = 0;
   g->rejectReason = REARM_OK;
+  g->disarmEstopCount = 0;
+  g->disarmNonfiniteCount = 0;
+  g->disarmNonzeroCount = 0;
 }
 
 // DISARMED 로 가는 유일한 문. 타이머를 전부 지운다 — 남겨 두면 다음 hold 가
@@ -137,6 +153,27 @@ static inline void rearmGateDisarm(struct RearmGate* g)
   g->zeroHolding = false;
   g->zeroSinceMs = 0;
   g->quietSinceMs = 0;
+}
+
+// 해제 + **전이했을 때만** 사유를 남긴다. 반환 = 이번 호출이 실제로 풀었는가.
+// 🔴 이미 DISARMED 면 사유·누계를 건드리지 않는다. 그래야 E-stop 이 남긴 4 가
+//    뒤이어 쏟아지는 10Hz 비영 명령의 6 에 덮이지 않는다 (§63.1).
+static inline bool rearmGateDisarmWithReason(struct RearmGate* g, uint8_t reason)
+{
+  const bool transitioned = (g->state != DRIVE_DISARMED);
+  rearmGateDisarm(g);
+  if (!transitioned) {
+    return false;
+  }
+  g->rejectReason = reason;
+  if (reason == REARM_DISARM_ESTOP) {
+    g->disarmEstopCount++;
+  } else if (reason == REARM_DISARM_NONFINITE) {
+    g->disarmNonfiniteCount++;
+  } else if (reason == REARM_DISARM_NONZERO) {
+    g->disarmNonzeroCount++;
+  }
+  return true;
 }
 
 // /cmd_vel 한 건. 반환이 DRIVE 가 아니면 호출자는 정지한다.
@@ -150,8 +187,8 @@ static inline enum DriveEffect rearmGateOnCommand(struct RearmGate* g,
   // 여기서 return 만 해서 zero-hold 타이머가 살아남았고, NaN 을 사이에 끼운
   // zero@0 → NaN@250 → zero@500 이 "zero 0.5초 연속"으로 승인됐다.
   if (!isfinite(linearX) || !isfinite(angularZ)) {
-    rearmGateDisarm(g);
-    g->rejectReason = REARM_DISARM_NONFINITE;   // 🔴 누가 풀었는지 남긴다 (08-13)
+    // 🔴 전이했을 때만 사유를 남긴다 — 이미 풀려 있으면 앞선 사유를 지키는 쪽이다.
+    rearmGateDisarmWithReason(g, REARM_DISARM_NONFINITE);
     return DRIVE_EFFECT_HOLD;
   }
 
@@ -164,8 +201,9 @@ static inline enum DriveEffect rearmGateOnCommand(struct RearmGate* g,
   if (!isZero) {
     // 멈춘 적 없는 발행자는 READY 에도 ARMED 에도 못 간다. ARMING·PENDING 에서는
     // 이것이 곧 "응답 전후에 큐에 있던 잔류 명령"이므로 장벽을 깨고 떨어뜨린다.
-    rearmGateDisarm(g);
-    g->rejectReason = REARM_DISARM_NONZERO;     // 🔴 누가 풀었는지 남긴다 (08-13)
+    // 🔴 여기가 §63.1 의 반례 지점이었다. DISARMED 에서 계속 들어오는 비영은
+    //    새로 푼 것이 아니라 **이미 풀린 결과**다 — 사유를 덮을 자격이 없다.
+    rearmGateDisarmWithReason(g, REARM_DISARM_NONZERO);
     return DRIVE_EFFECT_HOLD;
   }
 

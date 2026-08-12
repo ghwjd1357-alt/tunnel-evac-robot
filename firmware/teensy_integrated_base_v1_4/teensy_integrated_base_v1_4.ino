@@ -784,6 +784,12 @@ void disarmDrive()
   driveDisarm(&driveGate, driveSink);
 }
 
+// 사유를 남기는 해제. 기록은 drive_wiring.h 가 전이와 한 동작으로 묶는다 (§63.1).
+void disarmDriveWithReason(uint8_t reason)
+{
+  driveDisarmWithReason(&driveGate, reason, driveSink);
+}
+
 void checkSafety()
 {
   // 🔴 판정 직전에 핀을 표본한다. 루프마다 두 번 불리므로 필터 표본 주기 = 루프 주기.
@@ -793,8 +799,9 @@ void checkSafety()
     // The E-stop latches the drive off. Releasing the button does not undo
     // this by itself — the zero hold, the service, and the quiet barrier do.
     // disarmDrive() stops the motors as part of the transition.
-    disarmDrive();
-    driveGate.rejectReason = REARM_DISARM_ESTOP;  // 🔴 누가 풀었는지 남긴다 (08-13)
+    // 🔴 사유는 전이한 순간에만 남는다. E-stop 이 유지되는 동안 매 루프 다시
+    //    쓰지 않으므로, 뒤이어 쏟아지는 비영 명령이 이 값을 못 덮는다 (§63.1).
+    disarmDriveWithReason(REARM_DISARM_ESTOP);
     return;
   }
 
@@ -1127,8 +1134,7 @@ void cmdVelCallback(const void* messageInput)
       static_cast<const geometry_msgs__msg__Twist*>(messageInput);
 
   if (isEstopActive()) {
-    disarmDrive();
-    driveGate.rejectReason = REARM_DISARM_ESTOP;  // 🔴 (08-13)
+    disarmDriveWithReason(REARM_DISARM_ESTOP);  // 🔴 전이 시에만 기록 (§63.1)
     return;
   }
 
@@ -1249,6 +1255,10 @@ void publishFirmwareInfo()
       "low_speed_mode=continuous_start_boost; min_speed=%.3f; "
       "start_boost_ms=%lu; hold_pwm=%d,%d,%d,%d; encoder_polarity=%d,%d,%d,%d; "
       "estop_debounce_ms=%lu; estop_raw_edges=%lu; estop_max_high_ms=%lu; "
+      // 🔴 위 max 는 **진짜 누름 포함** 전체 최대다 (§5-G6 을 돌면 500 근처가 된다).
+      //    아래 rejected 쌍만이 "필터가 먹은 글리치"다 = 30ms 판정의 근거 (§63.1).
+      "estop_rejected=%lu; estop_rejected_max_ms=%lu; "
+      "disarm_estop=%lu; disarm_nonfinite=%lu; disarm_nonzero=%lu; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1276,6 +1286,11 @@ void publishFirmwareInfo()
       static_cast<unsigned long>(ESTOP_DEBOUNCE_MS),
       static_cast<unsigned long>(estopFilter.rawEdges),
       static_cast<unsigned long>(estopFilter.maxHighMs),
+      static_cast<unsigned long>(estopFilter.rejectedHighCount),
+      static_cast<unsigned long>(estopFilter.maxRejectedHighMs),
+      static_cast<unsigned long>(driveGate.disarmEstopCount),
+      static_cast<unsigned long>(driveGate.disarmNonfiniteCount),
+      static_cast<unsigned long>(driveGate.disarmNonzeroCount),
       FW_LIBRARY_LIST);
 
   rosidl_runtime_c__String__assign(&firmwareInfoMessage.data, infoBuffer);
