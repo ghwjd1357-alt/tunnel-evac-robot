@@ -101,9 +101,15 @@ done
 #   유일한 자동 굽기 차단이 미승인 구동 상수를 "굽어도 된다"로 통과시킨 것이다 — 되돌렸다.
 #   → 순서는 `코드 수정 → 빌드 → 구판 지문으로 rc=1 → 독립 검토 → **지문 전용 별도 커밋**`.
 #   → 지문은 오염 검출기이지 **의미 승인자가 아니다.**
+#   ✅ **2026-08-12 — 그 순서대로 옮긴 값이 지금의 `.ino` 기본값이다.** 예약 32 계수
+#   `FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN 375→335` 이 3회차 독립 검토
+#   (`~/Desktop/개발현황/CODEX 현황/0812검토현황.md §62`)에서
+#   **P0 0 · 조건부 수용**을 받은 뒤, 그 판정이 지정한 blob(`47661a8f…`)을 이 커밋에서만 옮겼다.
+#   🔴 §62 는 P1 1 · P2 2 를 **열어 둔 채** 승인했다 — `rc=0` 은 "굽어도 되는 상태"지
+#   "결함이 없다"가 아니다. 재개방 조건은 `MASTER_PLAN §7` 예약 32-a.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=199,15,aa8e75ec2d5884bf12ee3110b7140fc9b75ab3368865a739b558ab867f334d02"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=232,18,47661a8f1fea198442bc2cb9ed395d36de1e7374c9bd4f819f75925bc3cde3fb"
         "firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978"
         "firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663"
     )
