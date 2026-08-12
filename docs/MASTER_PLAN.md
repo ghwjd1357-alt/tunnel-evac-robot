@@ -66,6 +66,15 @@
 | R7 무인 전체 미션 | 상태머신 실차 | PATROL→…→ESCAPED + abort 실정지 실차판 |
 | R8 감독하 추종 | 사람 포함 (안전요원+E-stop) | 추종감시·SEARCH_BACK 동작, 오탐 기록 → 역할 B 융합 요구사항 |
 
+🔴 **2026-08-12 — R5 는 지금 "미측정 한 줄"에 막혀 있다.** `tunnel_bringup/urdf/robot_real.urdf:175`
+의 `base_link → lidar_link` 오프셋이 `xyz="0 0 0"` 이고, 그건 값이 아니라 **"아직 안 쟀다"는
+표시**다(라이다가 바퀴축 높이에 있다는 뜻이라 물리적으로 불가능). 그대로 지도를 그리면 스캔이
+로봇 엉뚱한 자리에 붙어 **지도 자체를 못 쓴다** — `real_mapping.launch.py` 가 자기 맨 위에
+경고로 달아 놨다. **줄자 5분이면 되는 일이고, 복도 세션 하루가 여기에 걸려 있다.**
+⚠ 같이 확인할 것 = **스캔 평면이 몸통 최상면 +5cm 이상**(`PITFALLS §7`). 낮으면 레이저가 자기
+몸통을 때려 지나간 자리마다 유령 장애물이 생긴다 — 그러면 라이다를 올려 다는 것이 선행 작업이다.
+🔴 일정 정본(08-13~19 날짜별·축소 결정일·위험 3종) = `~/Desktop/0813_12시간_작업가이드.md`.
+
 사전 준비(S4~S5, 트리거 임박 시): **`tunnel_bringup` 별도 패키지** (시뮬 파일은 한 글자도 안 바꿈),
 실측 URDF/footprint·collision ON·velocity_smoother 명시·절대경로 제거·use_sim_time false·Jetson aarch64 소스 빌드.
 실측 수치·반영 지점 정본 = **`docs/REAL_ROBOT_VALUES.md`**.
