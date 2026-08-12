@@ -166,16 +166,27 @@ static const int MIN_RUNNING_PWM[4] = {15, 15, 15, 15};
 // 곧바로 FEEDFORWARD_MAX_PWM(145) 로 포화했고, 그 PWM 의 실제 속도가 0.33 m/s 였다.
 // PI 가 되돌릴 수 있는 폭은 WHEEL_KP*오차 + INTEGRAL_PWM_LIMIT = 약 26 PWM 뿐이라
 // 119~145 PWM 에 갇혔다 = 그 구간에서 속도 제어가 사실상 열려 있었다.
-// 🔴 이 값은 "교정값"이 아니라 **후보**다 (검토 §60.1). 회귀에 쓴 69/145 는 명령에서 계산한
-// **명목 feedforward 값**이지 관측된 appliedPwm 이 아니다 — 실제 출력은 FF + Kp*error +
-// Ki*integral 을 거치고 보드가 그 값을 발행하지 않는다. 검토자의 PI 포함 근사는 0.12 m/s 의
-// 실제 출력을 ~60.5 PWM(기울기 ~305)로 본다.
-// ⚠ 다만 고쳐야 할 것은 기울기의 정확도가 아니라 **포화**다: 구값에서 필요한 보정이 약
-// -75 PWM 으로 PI 권한(INTEGRAL_PWM_LIMIT 기준 +-20)을 넘었다. 375 는 그 보정을 0.12 에서
-// -7 PWM, 0.05 에서 -5.6 PWM 으로 만들어 **적분이 오차를 0 으로 몰 수 있는 범위**에 넣는다.
-// 🔴 그래도 확정은 굽고 지면에서 0.12 = 0.12 +-10% 를 재는 것이다.
-// 근거 bag = r1_ground_0811_2127, d0_drive_0811_2146 · 정본 = docs/MASTER_PLAN.md §7 예약 32.
-static const double FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN = 375.0;
+// 🔴 2026-08-12 재산출 = 335. 앞선 후보 375 는 검토 §60.1·§61.1 이 두 번 불승인했다 —
+// 회귀에 쓴 69/145 가 명령에서 계산한 **명목 feedforward 값**이지 관측된 appliedPwm 이
+// 아니었기 때문이다. 이 값은 손으로 내지 않고 tools/drive_ff_calibrate.py 가 뽑았다:
+//   python3 tools/drive_ff_calibrate.py \
+//     --point 0.04:<ff_probe_0812_1419>:470 --point 0.045:<ff_probe_0812_1436>:582 \
+//     --point 0.05:<r1_ground_0811_2127>:685
+// 각 점 = 지면 시행 bag + 줄자(시작 표시~최종 정지). 도구가 FF 항을 재현하고 Kp 로 실제
+// PWM 을 재구성한 뒤 줄자로 odom 배율만 고친 정상구간 속도에 최소제곱을 건다.
+//   plant  : v = 0.003691 * (PWM - 30.99)   (점 3개 · 잔차 RMS 0.00121 m/s)
+//   목표 0.12 m/s -> 63.5 PWM -> 기울기 335. 목표가 측정점 사이에 있어 **내삽**이다.
+// 🔴 이 계수의 한계 두 가지 — 숨기지 않는다:
+//   (1) 적합 구간은 재구성 PWM 54.6~66.5 뿐이다. 그 밖에서 plant 는 직선이 아니다 —
+//       145 PWM 에서 모델은 0.4208 m/s 를 예측하는데 08-11 실측 정상구간은 0.3269 였다.
+//   (2) 335 는 0.12 에서만 명령 = 실제다. 0.05 명령의 예측은 0.033 m/s(0.67배)인데,
+//       FF 직선이 (0.020, HOLD_PWM) 에 고정돼 있고 plant 데드밴드가 30.99 PWM 이라
+//       기울기 하나로 전 구간을 맞출 수 없다. HOLD_PWM 을 같이 옮기는 것은 원인 분리를
+//       깨므로 이 묶음 밖이다. ⚠ 그 0.033 예측 자체도 적합 구간 아래 외삽이라 방향만
+//       믿고 크기는 믿지 않는다 — 굽은 뒤 저속 명령은 실측으로 다시 본다.
+// 🔴 확정은 굽고 지면에서 0.12 = 0.12 +-10% 를 재는 것이다. 그전까지 이 값도 후보다.
+// 정본 = docs/MASTER_PLAN.md §7 예약 32.
+static const double FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN = 335.0;
 static const int FEEDFORWARD_MAX_PWM = 145;
 
 // Closed-loop output safety limit. Raise only after ground-speed verification.
