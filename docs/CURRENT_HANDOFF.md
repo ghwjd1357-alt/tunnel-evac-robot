@@ -76,7 +76,7 @@
 1. `doc_check --strict` rc=0 · `handoff_single_check` OK · `test_ai_context` **37** ·
    🔴 **`firmware_precheck` `rc=1`**(구 지문 = 의도된 굽기 차단. `rc=0` 은 승인 뒤 지문
    전용 커밋의 완료조건이다). 회귀: pytest **184 passed** · colcon **247 tests** ·
-   신규 `test_drive_checks` **14** + `test_drive_ff_calibrate` **12** ·
+   신규 `test_drive_checks` **18** + `test_drive_ff_calibrate` **12** ·
    harness guards **24 검사** · gate regression **14 케이스** · watchdog **54**/**20**.
 2. 🔴 **독립 검토 통과 전에는 굽지 않는다** — `firmware/**` 는 Tier A 다.
 3. 🔴 **지면 주행 금지** — 굽고 `§7-c-E` 13행 + `§5-G6` 10회 + 지면 `0.12 ±10%` 확인까지.

@@ -191,6 +191,74 @@ class GroundReportTest(unittest.TestCase):
         v = gr.analyze(cmds, odoms[:1])
         self.assertFalse(v['ok'])
 
+    # ── 08-12 실측 고장: bag 이 명령 앞부분을 못 받았다 ──────────────────
+    def test_18_bag_missing_the_command_start_does_not_shrink_the_window(self):
+        """🔴 2026-08-12 실측 — rosbag2 가 발행자를 늦게 발견해 앞 1.45s 가 빠졌다.
+
+        줄자는 **시작 표시부터 최종 정지 위치까지**라 창이 늦게 시작하면 둘이 다른
+        구간이 된다. 실측 배율이 `0.753` 으로 나왔고 움직임 구간으로 맞추자 `0.966`.
+        여기서 보는 것은 **창이 줄자와 같은 구간을 덮는가**다.
+        """
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=1.5)
+        tape = v_path(odoms)                      # 줄자 = 움직인 전 구간
+        v = gr.analyze(cmds, odoms, tape_mm=tape)
+        self.assertTrue(v['ok'], v.get('reason'))
+        self.assertAlmostEqual(1.0, v['odom_over'], places=2)
+        self.assertGreater(v['cmd_lead_s'], 1.0, 'bag 결손이 판정에 안 남았다')
+
+    def test_19_the_dropped_lead_would_have_broken_the_scale(self):
+        """🔴 이 검사가 없으면 위 검사는 "그냥 통과"다 — 결손분이 실제로 크다는 증거.
+
+        창을 기록된 첫 명령에서 잡았을 때의 경로장을 같이 세서, 그것이 줄자와
+        **5% 가드를 넘게** 어긋난다는 것을 보인다(= 예전 동작이면 경보가 떴을 자리).
+        """
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=1.5)
+        tape = v_path(odoms)
+        t0 = cmds[0][0]
+        late = [o for o in odoms if o[0] >= t0]
+        self.assertLess(v_path(late) / tape, 0.95,
+                        '결손분이 5% 미만이면 이 회귀는 고장을 재현하지 못한다')
+
+    def test_20_a_normal_run_is_left_alone(self):
+        """역회귀 — 결손이 없으면 창도 판정도 예전 그대로여야 한다."""
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=0.0)
+        v = gr.analyze(cmds, odoms, tape_mm=v_path(odoms))
+        self.assertTrue(v['ok'], v.get('reason'))
+        self.assertEqual(0.0, v['cmd_lead_s'])
+        self.assertAlmostEqual(1.0, v['odom_over'], places=2)
+
+    def test_21_cruise_excludes_the_coast_tail(self):
+        """🔴 관성 꼬리를 정상구간에 넣으면 순항속도가 낮게 나온다(08-12 에 한 실수)."""
+        cmds, odoms = run_with_coast(0.09, 5.0, 1.3, drop_lead_s=0.0)
+        v = gr.analyze(cmds, odoms)
+        self.assertAlmostEqual(0.09, v['cruise_mps'], places=3)
+
+
+def run_with_coast(v_true, cmd_s, coast_s, drop_lead_s=0.0, t0=10 * NS, dt=0.02):
+    """명령 구간 등속 → 명령이 끊기면 선형 감속 → 정지.
+
+    `drop_lead_s` = rosbag2 가 발행자를 아직 못 찾아 **bag 에 안 들어온** 앞 구간.
+    `/odom` 은 처음부터 기록되므로(구독자가 이미 붙어 있다) 결손은 `/cmd_vel` 에만 난다 —
+    08-12 실측이 정확히 이 모양이었다.
+    """
+    cmds = [(t0 + int(i * 0.1 * NS), 0.05, 0.0)
+            for i in range(int(round(cmd_s / 0.1)))
+            if i * 0.1 >= drop_lead_s]
+    odoms, x = [], 0.0
+    for i in range(int(round(0.5 / dt))):        # 출발 전 정지 구간
+        odoms.append((t0 - int((0.5 - i * dt) * NS), 0.0, 0.0, 0.0, 0.0))
+    for i in range(int(round((cmd_s + coast_s + 1.0) / dt)) + 1):
+        el = i * dt
+        if el <= cmd_s:
+            v = v_true
+        elif el <= cmd_s + coast_s:
+            v = v_true * (1.0 - (el - cmd_s) / coast_s)
+        else:
+            v = 0.0
+        odoms.append((t0 + int(el * NS), x, 0.0, 0.0, v))
+        x += v * dt
+    return cmds, odoms
+
 
 def v_path(odoms):
     """합성 열의 경로장(mm) — 기대값을 손으로 안 적기 위해 같은 방식으로 센다."""

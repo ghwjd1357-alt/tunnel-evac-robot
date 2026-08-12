@@ -38,6 +38,38 @@ WHEEL_BASE_M = 0.62
 COAST_TAIL_S = 1.5
 # 가속 구간을 뺀 "정상 구간"의 시작. 08-11 실측에서 약 1.5s 면 twist 가 평탄해졌다.
 CRUISE_START_S = 1.5
+# 🔴 "움직이는 중"의 판정선. `/odom` 정지 잡음보다 크고 최저 순항속도(약 0.09)보다 훨씬 작다.
+MOVE_EPS_MPS = 0.002
+# 움직임 한 덩어리 안에서 허용하는 표본 간격. 이보다 벌어지면 다른 시행으로 본다.
+MOTION_GAP_S = 0.3
+
+
+def motion_start_before(odoms, anchor_ns):
+    """`anchor_ns` 시점에 **이미 움직이고 있었다면** 그 움직임이 시작된 표본을 돌려준다.
+
+    🔴 **왜 필요한가** (08-12 실측): 창을 `/cmd_vel` 첫 비영으로 잡으면, rosbag2 가
+    `ros2 topic pub` 의 **발행자를 발견하기까지 걸린 시간**만큼 앞부분 명령이 bag 에
+    안 들어왔을 때 창이 늦게 시작한다. 그런데 줄자가 재는 것은 **시작 표시부터 최종
+    정지 위치까지**라 창과 줄자가 **다른 구간**이 되고, 스케일이 조용히 틀어진다.
+    실측: 앞 1.45초가 빠져 배율이 `0.753` 으로 나왔고, 움직임 구간으로 맞추자
+    `0.966` 이었다. 🔴 5% 가드가 이걸 잡아 줬지만 가드는 경보이지 정정이 아니다.
+
+    anchor 에서 로봇이 서 있었으면(정상 순서) `None` — 그때는 창을 옮길 이유가 없다.
+    """
+    i = None
+    for k, o in enumerate(odoms):
+        if o[0] > anchor_ns:
+            break
+        i = k
+    if i is None or abs(odoms[i][4]) <= MOVE_EPS_MPS:
+        return None
+    while i > 0:
+        if (odoms[i][0] - odoms[i - 1][0]) > MOTION_GAP_S * 1e9:
+            break
+        if abs(odoms[i - 1][4]) <= MOVE_EPS_MPS:
+            break
+        i -= 1
+    return i
 
 
 class UsageError(Exception):
@@ -81,9 +113,20 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         return {'ok': False, 'reason': '비영 /cmd_vel 이 없다 — 무장이 안 됐을 수 있다'}
     t0, t1 = nz[0][0], nz[-1][0]
 
-    seg = [o for o in odoms if t0 <= o[0] <= t1 + COAST_TAIL_S * 1e9]
+    # 🔴 창의 시작은 **움직이기 시작한 시점**이다 — 줄자와 같은 구간을 재기 위해서다.
+    # 기록된 첫 명령 시점에 이미 굴러가고 있었다면 bag 이 명령 앞부분을 놓친 것이므로
+    # 그 움직임의 앞끝까지 되돌아간다(근거 = `motion_start_before` 머리말).
+    mi = motion_start_before(odoms, t0)
+    w0 = odoms[mi][0] if mi is not None else t0
+    lead_s = (t0 - w0) / 1e9
+
+    seg = [o for o in odoms if w0 <= o[0] <= t1 + COAST_TAIL_S * 1e9]
     if len(seg) < 2:
         return {'ok': False, 'reason': f'판정 구간의 /odom 표본이 {len(seg)}개뿐이다'}
+    # 꼬리의 정지 표본은 창에서 뺀다 — 안 그러면 관측 시간만 늘어 평균속도가 흐려진다.
+    last_move = max((k for k, o in enumerate(seg) if abs(o[4]) > MOVE_EPS_MPS), default=None)
+    if last_move is not None and last_move >= 1:
+        seg = seg[:last_move + 1]
 
     x0, y0, yaw0 = seg[0][1], seg[0][2], seg[0][3]
     dx, dy = seg[-1][1] - x0, seg[-1][2] - y0
@@ -96,8 +139,10 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
     dur_seg = (seg[-1][0] - seg[0][0]) / 1e9
     dyaw = math.degrees((seg[-1][3] - yaw0 + math.pi) % (2 * math.pi) - math.pi)
 
+    # 정상구간도 같은 시작점에서 센다. 🔴 끝은 **명령 종료**다 — 관성 꼬리를 평균에
+    # 넣으면 순항속도가 실제보다 낮게 나온다(08-12 에 그 실수를 한 번 했다).
     cruise = [o[4] for o in odoms
-              if t0 + CRUISE_START_S * 1e9 <= o[0] <= t1]
+              if w0 + CRUISE_START_S * 1e9 <= o[0] <= t1]
 
     v = {
         'ok': True,
@@ -105,6 +150,8 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         'cmd_angular': nz[0][2],
         'n_nonzero': len(nz),
         'cmd_dur_s': (t1 - t0) / 1e9,
+        # 🔴 bag 이 명령 앞부분을 놓친 양. 0 보다 크면 기록 결손이지 로봇 이상이 아니다.
+        'cmd_lead_s': lead_s,
         'obs_dur_s': dur_seg,
         'n_odom': len(seg),
         'path_mm': path * 1000.0,
@@ -139,6 +186,11 @@ def report(v, name=''):
     print(f'  명령 linear={v["cmd_linear"]:.3f} angular={v["cmd_angular"]:.3f} · '
           f'비영 {v["n_nonzero"]}건 · 발행 {v["cmd_dur_s"]:.2f}s · '
           f'관측 {v["obs_dur_s"]:.2f}s(정지까지) · /odom {v["n_odom"]}표본')
+    if v['cmd_lead_s'] > 0.2:
+        print(f'  ⚠ bag 이 명령 앞 {v["cmd_lead_s"]:.2f}s 를 못 받았다 '
+              f'(rosbag2 발행자 발견 지연) — 창을 움직임 시작으로 되돌려 잡았다.')
+        print('     🔴 로봇 이상이 아니라 기록 결손이다. 그대로 뒀으면 줄자와 다른 '
+              '구간을 재서 배율이 틀어진다.')
     print()
     print(f'  경로장(odom)        = {v["path_mm"]:9.1f} mm')
     print(f'  전진 성분           = {v["fwd_mm"]:9.1f} mm')
