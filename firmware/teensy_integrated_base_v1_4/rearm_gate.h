@@ -74,6 +74,17 @@ enum DriveReject : uint8_t {
   REARM_REJECT_ESTOP = 1,        // E-stop 활성
   REARM_REJECT_ZERO_HOLD = 2,    // zero-hold 미충족 (= 아직 READY 가 아니다)
   REARM_REJECT_ALREADY = 3,      // 이미 ARMED · ARMING · PENDING (무장 절차 진행 중)
+
+  // 🔴 2026-08-13 신설 — 여기부터는 "거절 사유"가 아니라 **무장이 풀린 사유**다.
+  //    구판은 서비스 경로에서만 이 칸을 채웠다. 그래서 E-stop·NaN·부팅으로 풀린
+  //    경우가 전부 `y=0` 으로 보였고, 08-12 에 **진단으로 원인을 못 가려** 6시간을
+  //    태웠다(ELECTRICAL_BASELINE §4-f). 이제 푼 주체가 자기 이름을 남긴다.
+  //    ⚠ 값 1~3 의 뜻은 바뀌지 않는다 — 기존 표(`JETSON_SETUP §7-c-E`)는 그대로 유효하다.
+  //    ⚠ `y` 는 **가장 최근 사건**만 담는다. 누계가 필요하면 `x`(서비스)와
+  //      `/firmware/info` 의 estop 계수를 같이 본다.
+  REARM_DISARM_ESTOP = 4,        // checkSafety()/cmdVelCallback 이 E-stop 으로 풀었다
+  REARM_DISARM_NONFINITE = 5,    // 유한하지 않은 /cmd_vel (§54.3)
+  REARM_DISARM_NONZERO = 6,      // ARMED 아닌 상태에서 비영 = 장벽 위반 (§54.2)
 };
 
 // 호출자가 이번 명령으로 무엇을 해야 하는가. 기본이 정지다.
@@ -140,6 +151,7 @@ static inline enum DriveEffect rearmGateOnCommand(struct RearmGate* g,
   // zero@0 → NaN@250 → zero@500 이 "zero 0.5초 연속"으로 승인됐다.
   if (!isfinite(linearX) || !isfinite(angularZ)) {
     rearmGateDisarm(g);
+    g->rejectReason = REARM_DISARM_NONFINITE;   // 🔴 누가 풀었는지 남긴다 (08-13)
     return DRIVE_EFFECT_HOLD;
   }
 
@@ -153,6 +165,7 @@ static inline enum DriveEffect rearmGateOnCommand(struct RearmGate* g,
     // 멈춘 적 없는 발행자는 READY 에도 ARMED 에도 못 간다. ARMING·PENDING 에서는
     // 이것이 곧 "응답 전후에 큐에 있던 잔류 명령"이므로 장벽을 깨고 떨어뜨린다.
     rearmGateDisarm(g);
+    g->rejectReason = REARM_DISARM_NONZERO;     // 🔴 누가 풀었는지 남긴다 (08-13)
     return DRIVE_EFFECT_HOLD;
   }
 

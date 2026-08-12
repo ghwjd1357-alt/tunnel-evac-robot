@@ -30,6 +30,7 @@
 
 #include "../firmware/teensy_integrated_base_v1_4/rearm_gate.h"
 #include "../firmware/teensy_integrated_base_v1_4/drive_wiring.h"
+#include "../firmware/teensy_integrated_base_v1_4/estop_debounce.h"
 
 #include <cstdio>
 #include <cstring>
@@ -1036,6 +1037,123 @@ static void t35_disable_while_driving()
     m.expectInvariant("T35 disable 뒤");
 }
 
+
+// ============================================================================
+// 2026-08-13 신설 — E-stop 디바운스 (estop_debounce.h)
+//
+// 왜: 08-12 에 주행 중 PIN21 이 스스로 떠서 무장이 12회 이상 풀렸다. 사람 누름은
+//     수백 ms, 글리치는 수 ms~수십 ms 이므로 **시간**으로 가른다.
+// 🔴 여기서 보는 것은 두 가지다 — ① 짧은 글리치를 먹는가 ② **진짜 누름을 놓치지
+//     않는가**. ②가 깨지면 이 필터는 안전 기능을 망가뜨린 것이다.
+// ============================================================================
+
+static void t36_debounce_boot_trusts_the_pin()
+{
+    // 🔴 부팅 시엔 필터를 태우지 않는다. 켰을 때 눌려 있으면 즉시 눌린 것이다.
+    EstopDebounce d;
+    estopDebounceInit(&d, true, 1000);
+    expectBool("T36 부팅 시 눌림은 즉시 눌림 (fail-closed)", d.stable, true);
+
+    EstopDebounce e;
+    estopDebounceInit(&e, false, 1000);
+    expectBool("T36 부팅 시 해제는 해제", e.stable, false);
+}
+
+static void t37_short_glitch_is_swallowed()
+{
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    // 0~20ms 동안 HIGH 로 떴다가 돌아온다 (디바운스 30ms 미만)
+    bool tripped = false;
+    for (uint32_t t = 1; t <= 20; ++t) {
+        if (estopDebounceUpdate(&d, true, t)) { tripped = true; }
+    }
+    for (uint32_t t = 21; t <= 60; ++t) {
+        if (estopDebounceUpdate(&d, false, t)) { tripped = true; }
+    }
+    expectBool("T37 20ms 글리치는 E-stop 으로 승격되지 않는다", tripped, false);
+    expectBool("T37 글리치는 계수에 남는다 (rawEdges>=2)", d.rawEdges >= 2, true);
+    expectBool("T37 최대 HIGH 지속이 기록된다 (>=19ms)", d.maxHighMs >= 19, true);
+}
+
+static void t38_real_press_is_not_missed()
+{
+    // 🔴 이게 안전 계약이다 — 진짜 누름은 반드시 잡혀야 한다.
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    bool tripped = false;
+    for (uint32_t t = 1; t <= 500; ++t) {
+        if (estopDebounceUpdate(&d, true, t)) { tripped = true; }
+    }
+    expectBool("T38 500ms 누름은 반드시 잡힌다", tripped, true);
+    expectBool("T38 누름 중에는 판정이 유지된다", d.stable, true);
+}
+
+static void t39_threshold_boundary()
+{
+    // 🔴 경계는 **전이 시각 기준**이다. 아래 열은 t=1 에서 LOW→HIGH 로 바뀌므로
+    //    승격은 t=31(= 전이 + 30ms)이고, t=30 은 아직 29ms 라 안 된다.
+    EstopDebounce a;
+    estopDebounceInit(&a, false, 0);
+    bool tripped_before = false;
+    for (uint32_t t = 1; t <= 30; ++t) {
+        if (estopDebounceUpdate(&a, true, t)) { tripped_before = true; }
+    }
+    expectBool("T39 전이 후 29ms 에서는 아직 아니다", tripped_before, false);
+
+    EstopDebounce b;
+    estopDebounceInit(&b, false, 0);
+    bool tripped_at = false;
+    for (uint32_t t = 1; t <= 31; ++t) {
+        if (estopDebounceUpdate(&b, true, t)) { tripped_at = true; }
+    }
+    expectBool("T39 전이 후 30ms 에서 승격된다", tripped_at, true);
+}
+
+static void t40_release_is_also_filtered()
+{
+    // 해제 방향도 같은 시간을 쓴다. 늦어지는 것은 **정지 유지**라 안전한 방향이다.
+    EstopDebounce d;
+    estopDebounceInit(&d, true, 0);
+    bool released_early = false;
+    for (uint32_t t = 1; t <= 20; ++t) {
+        if (!estopDebounceUpdate(&d, false, t)) { released_early = true; }
+    }
+    expectBool("T40 20ms 해제는 아직 해제가 아니다 (정지를 더 유지)", released_early, false);
+    for (uint32_t t = 21; t <= 40; ++t) { estopDebounceUpdate(&d, false, t); }
+    expectBool("T40 30ms 넘으면 해제된다", d.stable, false);
+}
+
+static void t41_chatter_never_arms_the_gate()
+{
+    // 🔴 08-12 실물 모양 — 계속 채터링하는 접점. 필터가 있으면 판정이 안 흔들려야 한다.
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    bool tripped = false;
+    uint32_t t = 0;
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        for (int i = 0; i < 5; ++i)  { if (estopDebounceUpdate(&d, true,  ++t)) tripped = true; }
+        for (int i = 0; i < 15; ++i) { if (estopDebounceUpdate(&d, false, ++t)) tripped = true; }
+    }
+    expectBool("T41 5ms HIGH 채터링 200회로도 안 뜬다", tripped, false);
+    expectU32("T41 그래도 400 전이가 전부 계수된다", d.rawEdges, 400);
+    expectBool("T41 최대 HIGH 지속은 5ms 이하로 기록", d.maxHighMs <= 5, true);
+}
+
+static void t42_long_glitch_is_not_hidden()
+{
+    // 🔴 필터가 못 막는 경우를 시험한다. 30ms 를 넘는 글리치는 **통과한다** —
+    //    그때는 값을 키울 게 아니라 원인을 고쳐야 한다. 계수가 그 사실을 남긴다.
+    EstopDebounce d;
+    estopDebounceInit(&d, false, 0);
+    bool tripped = false;
+    for (uint32_t t = 1; t <= 50; ++t) {
+        if (estopDebounceUpdate(&d, true, t)) { tripped = true; }
+    }
+    expectBool("T42 50ms 글리치는 필터를 넘는다 (숨기지 않는다)", tripped, true);
+    expectBool("T42 그 지속시간이 계수에 남는다 (>=49ms)", d.maxHighMs >= 49, true);
+}
+
 int main()
 {
     std::printf("=== re-arm 래치 상태 전이 + 정지 배선 harness (검토 §54·§55) ===\n");
@@ -1079,6 +1197,14 @@ int main()
     t33_service_stops_before_response();
     t34_sketch_model_invariant();
     t35_disable_while_driving();
+    // 2026-08-13 — E-stop 디바운스
+    t36_debounce_boot_trusts_the_pin();
+    t37_short_glitch_is_swallowed();
+    t38_real_press_is_not_missed();
+    t39_threshold_boundary();
+    t40_release_is_also_filtered();
+    t41_chatter_never_arms_the_gate();
+    t42_long_glitch_is_not_hidden();
 
     std::printf("\n검사 %d건 · 실패 %d건\n", g_checks, g_failures);
     if (g_failures != 0) {

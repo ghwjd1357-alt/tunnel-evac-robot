@@ -26,6 +26,7 @@
 
 #include "rearm_gate.h"
 #include "drive_wiring.h"
+#include "estop_debounce.h"
 
 // ============================================================================
 // Firmware identity
@@ -431,10 +432,23 @@ double applyGyroDeadband(double value)
   return (fabs(value) < GYRO_ZERO_THRESHOLD_RAD_S) ? 0.0 : value;
 }
 
-bool isEstopActive()
+struct EstopDebounce estopFilter;
+
+// 🔴 핀을 실제로 읽는 유일한 자리. 필터를 전진시키는 것도 여기뿐이다.
+//    `checkSafety()` 가 루프마다 두 번 부르므로 표본 주기는 루프 주기와 같다.
+void updateEstopFilter()
 {
   const bool rawHigh = digitalRead(ESTOP_PIN) == HIGH;
-  return ESTOP_ACTIVE_LOW ? !rawHigh : rawHigh;
+  const bool rawActive = ESTOP_ACTIVE_LOW ? !rawHigh : rawHigh;
+  estopDebounceUpdate(&estopFilter, rawActive, millis());
+}
+
+// 🔴 순수 조회다 — 부수효과가 없다. 8곳에서 불리는데 그중 일부는 콜백 안이라,
+//    읽을 때마다 필터가 전진하면 "누가 언제 읽었나"가 판정에 섞인다.
+//    2026-08-13 이전에는 이 함수가 핀을 직접 읽었다(디바운스 없음).
+bool isEstopActive()
+{
+  return estopFilter.stable;
 }
 
 uint64_t getMonotonicTimestampNs()
@@ -772,11 +786,15 @@ void disarmDrive()
 
 void checkSafety()
 {
+  // 🔴 판정 직전에 핀을 표본한다. 루프마다 두 번 불리므로 필터 표본 주기 = 루프 주기.
+  updateEstopFilter();
+
   if (isEstopActive()) {
     // The E-stop latches the drive off. Releasing the button does not undo
     // this by itself — the zero hold, the service, and the quiet barrier do.
     // disarmDrive() stops the motors as part of the transition.
     disarmDrive();
+    driveGate.rejectReason = REARM_DISARM_ESTOP;  // 🔴 누가 풀었는지 남긴다 (08-13)
     return;
   }
 
@@ -1110,6 +1128,7 @@ void cmdVelCallback(const void* messageInput)
 
   if (isEstopActive()) {
     disarmDrive();
+    driveGate.rejectReason = REARM_DISARM_ESTOP;  // 🔴 (08-13)
     return;
   }
 
@@ -1229,6 +1248,7 @@ void publishFirmwareInfo()
       "wheel_radius=%.5f; control=%s; kp=%.3f; ki=%.3f; kd=%.3f; "
       "low_speed_mode=continuous_start_boost; min_speed=%.3f; "
       "start_boost_ms=%lu; hold_pwm=%d,%d,%d,%d; encoder_polarity=%d,%d,%d,%d; "
+      "estop_debounce_ms=%lu; estop_raw_edges=%lu; estop_max_high_ms=%lu; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1253,6 +1273,9 @@ void publishFirmwareInfo()
       ENCODER_POLARITY[RL],
       ENCODER_POLARITY[FR],
       ENCODER_POLARITY[RR],
+      static_cast<unsigned long>(ESTOP_DEBOUNCE_MS),
+      static_cast<unsigned long>(estopFilter.rawEdges),
+      static_cast<unsigned long>(estopFilter.maxHighMs),
       FW_LIBRARY_LIST);
 
   rosidl_runtime_c__String__assign(&firmwareInfoMessage.data, infoBuffer);
@@ -1297,6 +1320,14 @@ void setup()
 {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(ESTOP_PIN, INPUT_PULLUP);
+  // 🔴 부팅 시엔 읽은 값을 그대로 신뢰한다 — 필터를 태우지 않는다. 켰을 때 눌려
+  //    있으면 즉시 눌린 것으로 읽는 쪽이 fail-closed 다 (estop_debounce.h).
+  {
+    const bool bootRawHigh = digitalRead(ESTOP_PIN) == HIGH;
+    estopDebounceInit(&estopFilter,
+                      ESTOP_ACTIVE_LOW ? !bootRawHigh : bootRawHigh,
+                      millis());
+  }
 
   analogWriteResolution(8);
 
