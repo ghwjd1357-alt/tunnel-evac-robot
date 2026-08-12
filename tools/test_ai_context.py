@@ -63,6 +63,17 @@ WATCHDOG_REPLY_ONLY = re.compile(
 )
 
 
+# 🔴 후속 회차가 앞 회차의 P0/P1 을 **닫았다고 적은 제목**은 새 발견이 아니다 — 제목 형태가
+#   발견과 같아서 스캐너가 한 건 더 세고, 그러면 재고(`ai_known_p0_p1.json`)와 갈라진다.
+#   0729 §17.2 는 `충족 확인`, 0813 §64.1 은 `P1 닫힘` 으로 같은 뜻을 썼다. 🔴 계약을 맞추려고
+#   **검토자 원문 제목을 고치지 않는다** — 스캐너가 두 표기를 다 안다(08-13 · 검토 §64).
+# ⚠ `닫힘` 은 제목의 **상태 절(첫 `—` 앞)** 에서만 닫힘으로 읽는다 — 뒤쪽 본문 절에서는 진짜
+#   발견이 그 낱말을 **인용**한다. 0801-3 §43.6 이 정확히 그런 P1 이다(*"미착수인데 …
+#   `닫힘/완료`로 기록했고"*). 낱말이 어디 있느냐가 뜻을 가른다.
+REVIEW_HISTORY_CLOSURE_MARKS = ("충족 확인",)
+REVIEW_HISTORY_CLOSURE_STATUS_MARKS = ("닫힘",)
+
+
 def review_history_findings(review_dir: Path):
     """Return every primary P0/P1 finding from every review-history file."""
     files = sorted(review_dir.glob(REVIEW_HISTORY_GLOB))
@@ -76,7 +87,11 @@ def review_history_findings(review_dir: Path):
                 or re.match(r"^## \d+\. P[01] —", line)
             )
             primary_table = re.match(r"^\| P0(?:\([^)]*\))? \|", line)
-            if (primary_heading and "충족 확인" not in line) or primary_table:
+            status = line.split("—", 1)[0]
+            closure = any(m in line for m in REVIEW_HISTORY_CLOSURE_MARKS) or any(
+                m in status for m in REVIEW_HISTORY_CLOSURE_STATUS_MARKS
+            )
+            if (primary_heading and not closure) or primary_table:
                 found.append((path.name, line))
     return files, found
 
