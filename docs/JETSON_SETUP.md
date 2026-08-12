@@ -404,15 +404,20 @@ set_microros_transports();      // ← 인자가 없다. baudrate 를 받지 않
   (~/Desktop/teensy_integrated_base_v1_4/SHA256SUMS.txt 대조 성공)
 ```
 
-🔴 **정체 문자열은 지금 두 상태다 — 어느 쪽을 보는지 먼저 정한다** (검토 §60.4).
+✅ **2026-08-12 — 두 상태가 하나로 합쳐졌다.** 예약 32 계수를 구우면서 보드가 저장소를
+따라잡았다. 🔴 **이 표는 `§5-d` 에 산다** — 다른 문서에서 "2상태 표"를 가리킬 때 `§7-a` 라고
+쓰던 자리가 셋 있었고 08-12 에 고쳤다(예약 34 와 같은 클래스).
 
 | | `FW_VERSION` | `FW_SOURCE_PATH` | `FW_GIT_SHA` | `build` |
 |---|---|---|---|---|
-| **보드(현재)** | `…-low-speed-1.3.0` | `/home/park/…v1_3.ino` | `0` | **`Aug 11 2026 15:13:20`** |
-| **저장소(다음 굽기)** | `rearm-latch-pi-continuous-low-speed-1.4.0` | `firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino` | `0` | 굽는 시각 |
+| **보드 = 저장소 (08-12~)** | `rearm-latch-pi-continuous-low-speed-1.4.0` | `firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino` | `0` | **`Aug 12 2026 15:24:31`** |
+| ~~보드(08-11 판)~~ | ~~`…-low-speed-1.3.0`~~ | ~~`/home/park/…v1_3.ino`~~ | `0` | ~~`Aug 11 2026 15:13:20`~~ |
 
-🔴 **굽기 전에는 보드 행이 정상이다** — `1.3.0` 을 보고 "오염"으로 읽지 않는다.
-🔴 **굽고 나면 새 행이 정상이다** — 그때 `1.3.0` 이 나오면 **안 구워진 것**이다.
+🔴 **지금 `1.3.0` 이나 `/home/park/…` 가 보이면 그건 구판이다** — 안 구워졌거나 다른 보드다.
+🔴 **`version`·`source` 는 이제 참이다.** 08-06 부터 셋 다 거짓이라 정체 판별에서 뺐었는데,
+`.ino` 를 열어 고치면서 두 필드가 실물과 맞게 됐다(`FIRMWARE_REBUILD §4-c-2`).
+⚠ **그래도 정체 정본은 여전히 `build` 다** — `version` 은 사람이 적는 문자열이라 고쳐 굽는 것을
+잊으면 조용히 거짓이 된다. `build` 는 컴파일러가 넣으므로 거짓말을 할 수 없다.
 ⚠ `FW_GIT_SHA` 는 양쪽 다 `0` 이라 **바이너리를 커밋에 결박하지 못한다**(자기참조라 빌드 시
 주입이 필요 · `FIRMWARE_REBUILD §4` 표 항목 1). 그래서 정체의 외부 체인은
 **검토받은 내용 sha256 + clean 빌드 기록 + 업로드 뒤 `build` 관측** 셋이 같이 맡는다.
@@ -457,7 +462,14 @@ pushbutton**이다. 누르면 사용자 펌웨어가 멈추고 HalfKay bootloade
 들어가 `/dev/ttyACM*`가 사라진다. 2026-08-03 D+0에서 실제로 `16c0:0483` Serial →
 `16c0:0478` HID 전이를 재현했다. **13~17초 길게 누르면 플래시 전체 삭제와 기본 blink
 복원까지 실행될 수 있으므로 절대 시도하지 않는다.** Teensy 4.1은 하드웨어 reset 신호도
-외부에 제공하지 않는다. 애플리케이션 재시작은 이 런북에서 **USB 전원 재인가**로만 한다.
+외부에 제공하지 않는다. 애플리케이션 재시작은 이 런북에서 **Teensy 전원 재인가**로만 한다.
+
+🔴 **2026-08-12 정정 — 그 "전원 재인가"는 이제 USB 가 아니다.** `ELECTRICAL_BASELINE §2-⑪`
+로 바닥면 `VUSB`–`VIN` 트레이스를 잘랐기 때문에 **USB 는 통신만 하고 급전을 안 한다.**
+USB 를 뽑았다 꽂아도 Teensy 는 안 죽으므로 **재기동이 아니다.** 실제로 전원을 끊는 자리는
+**5V DCDC 쪽 `+단자`** 다. (`§4-e` 가 "로직 전원 배터리화 완료 시 함께 고친다"고 예고해
+둔 문장이고, 08-06 배터리화로 조건이 발동했는데 08-12 까지 안 고쳐져 있었다.)
+⚠ 뺐다 꽂을 때는 **E-stop 을 누른 채**로 한다 — 모터 가지만 0V 이고 로직은 산다(`§5-b`).
 
 **이유**: 소스에 **재연결 로직이 아예 없다.** `setup()` 에서 micro-ROS 를 1회 초기화할
 뿐이고 세션이 끊겼을 때 복구하는 경로가 없다. **agent 를 나중에 띄우거나 재시작하면
@@ -1046,6 +1058,36 @@ ros2 topic type /drive/diag       # → geometry_msgs/msg/Vector3
 다르다.** → **08-07 범위와 모순되지 않는 값**일 뿐이고 `#11` 은 그대로 열려 있다.
 이 행이 판정한 것은 하나다 — **re-arm 이 watchdog 을 가리지 않았다.**
 
+#### 7-c-E 결과 (2) — ✅ **2026-08-12 13행 전항목 재통과** (펌웨어 `build=Aug 12 2026 15:24:31`)
+
+예약 32 계수(`335`)로 다시 구웠으므로 `REAL_ROBOT_VALUES §1-f` 에 따라 **전량 재수행**했다.
+🔴 **08-11 표는 그때 보드의 것이고, 지금 보드의 근거는 이 표다.**
+
+| 행 | 결과 | 08-12 관측값 |
+|---|---|---|
+| 부정 1 | ✅ | E-stop 해제 시 잔류 `0.05` 로 **안 돎** · `z=0` 유지 |
+| 부정 2 | ✅ | `success:false` · `y=2` · `x` 1→2 |
+| 부정 3 | ✅ | `success:false` · `y=1` · `z=0` (E-stop 이 zero-hold 보다 **우선**) |
+| 전환 1 | ✅ | zero 지속 → `z=1` |
+| 전환 2 | ✅ | `success:true` · **`z=3` 실제 관측**(⚠ 또 확률로 잡혔다 — 정정 ①) |
+| 전환 3 | ✅ | `z=2` · `/drive/enabled=true` |
+| 역회귀 1 | ✅ | ARMED 에서 `0.05` 주행 · 바퀴 돎 ⚠ **구판보다 눈에 띄게 느리다** — 계수를 `1300→335` 로 낮춰 `0.05` 의 FF 출력이 `69→40 PWM` 이 됐다. **느린 것을 고장으로 읽지 않는다** |
+| 역회귀 2 | ✅ | 발행 끊자 즉시 정지 · 🔴 **`z=2` 유지** (watchdog 은 모터만 세우고 무장은 안 푼다 — `.ino:791`) |
+| 부정 4 | ✅ | 주행 중 E-stop → 즉시 정지 · `z=0` · `enabled=false` |
+| 부정 5 | ✅ | `success:false` · `y=3` |
+| **부정 6** | 🔴✅ | **주입지연 0.3ms**(08-11 과 동일) · `z` 1→**0** · `enabled=true` **0건** · 바퀴 안 돎(육안) · 로그 = `~/robot_evidence/neg6_0812.log` |
+| **부정 7** | ✅ | *"응답 이후 이동 관측 **없음**"* · `t_resp=7.850s` · `z=0` · 로그 = `disarm_0812.log` |
+| **부정 8** | ✅ | NaN 이후 **이동 0** · `z=0` · 🔴 **`x` 불변**(서비스가 아니라 NaN 자체가 게이트를 떨어뜨렸다 = 결정 ⓐ) |
+| 해제 | ✅ | `success:true` · `z=0` |
+
+⚠ **도구 전제 하나를 기록한다** — `rearm_neg6_field.py` 는 `zero 2초 → READY` 로 시작하므로
+**ARMED 상태에서 돌리면 거절한다**(*"READY 가 아니다"*). 부정 5 가 ARMED 로 끝나므로
+그 사이에 명시적 해제가 필요하다. 결함이 아니라 fail-closed 설계다.
+
+⚠ **이 표가 보장하지 않는 것** — 13행은 전부 *"이런 입력에 이렇게 반응하는가"* 다.
+**아무 입력도 없는데 무장이 풀리는 거짓 정지는 이 절이 원리적으로 못 잡는다.**
+같은 날 그 고장이 4회 났다 → `ELECTRICAL_BASELINE §4-f` · 예약 32-b.
+
 🔴 **08-11 신설 관측 — watchdog 정지는 무장을 풀지 않는다.** 역회귀 2 구간에서 `z=2`(ARMED)가
 watchdog 정지를 사이에 두고 **끊기지 않고 유지**됐다. 설계상 틀린 것은 아니다(래치가 막는 것은
 *E-stop 해제 순간의 잔류 명령*이지 통신 끊김이 아니다). 🔴 **다만 함의는 분명하다 — 발행자가
@@ -1227,7 +1269,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
-| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. ✅ **잔여 종결(08-12)** — `FW_VERSION` 1.3.0 vs 폴더명 v1_4 불일치는 **08-05 당시의 잔여**였고, 저장소는 08-12 에 `rearm-latch-pi-continuous-low-speed-1.4.0` 으로 정정했다(예약 32 묶음). 🔴 **구동부 확인 사항이 아니다** — 08-06 합의로 펌웨어는 역할 A 소유다. ⚠ **다음 굽기 전까지 보드가 `1.3.0` 을 방송하는 것은 정상**이고, 굽은 뒤 `1.3.0` 이면 안 구워진 것이다(2상태 표 = `§7-a`) |
+| 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. ✅ **잔여 종결(08-12)** — `FW_VERSION` 1.3.0 vs 폴더명 v1_4 불일치는 **08-05 당시의 잔여**였고, 저장소는 08-12 에 `rearm-latch-pi-continuous-low-speed-1.4.0` 으로 정정했다(예약 32 묶음). 🔴 **구동부 확인 사항이 아니다** — 08-06 합의로 펌웨어는 역할 A 소유다. ✅ **08-12 굽기로 보드도 `1.4.0` 이 됐다** — 이제 `1.3.0` 이 보이면 안 구워진 것이다(정체 표 = `§5-d`) |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
 | 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |

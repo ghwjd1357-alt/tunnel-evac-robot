@@ -180,7 +180,7 @@ VELOCITY_FILTER_ALPHA = 0.10;   // 20ms 주기 → 시정수 ≈ 0.2초
 | clamp 방식 | 바퀴 상한 초과 시 **좌우를 같은 비율로 축소** → **곡률은 보존되고 속도만 느려진다.** 경로 형상은 안 틀어진다 |
 | PI 게인 | `Kp=30, Ki=5, Kd=0`, `USE_PID_D_TERM=false`, 적분 상한 20 PWM |
 | 시작 부스트 | `START_BOOST_PWM=75`, 80ms, **1회만**(주기적 반복 아님) |
-| 버전 표기 | ⚠ **보드/저장소가 두 상태다**(검토 §60.4 · 표 = `JETSON_SETUP §7-a`). 보드(현재) = `…1.3.0` + `build=Aug 11 15:13:20`, 저장소(다음 굽기) = `…1.4.0`. 🔴 **`FW_GIT_SHA` 는 양쪽 다 0** 이라 `/firmware/info` 만으로 커밋 판별 **불가** → **내용 sha256 + clean 빌드 기록 + 굽기 뒤 `build` 관측**이 같이 근거다 |
+| 버전 표기 | ✅ **08-12 굽기로 보드와 저장소가 같아졌다**(정체 표 = `JETSON_SETUP §5-d` — 🔴 `§7-a` 가 아니다. 08-12 에 3곳을 고쳤다). 지금 = `rearm-latch-pi-continuous-low-speed-1.4.0` + `build=Aug 12 2026 15:24:31` + `source=firmware/…v1_4.ino`. **`version`·`source` 는 이제 참이다.** 🔴 **`FW_GIT_SHA` 는 여전히 `0`** 이라 `/firmware/info` 만으로 커밋 판별 **불가** → **내용 sha256 + clean 빌드 기록 + 굽기 뒤 `build` 관측**이 같이 근거다. ⚠ `version` 은 사람이 적는 문자열이라 고쳐 굽는 것을 잊으면 조용히 거짓이 된다 — **정체 정본은 `build`** 다 |
 
 ### ★ §1-e. E-stop 전장 선정 입력값 (08-04 전면 개정 — 설치 전 정본)
 
