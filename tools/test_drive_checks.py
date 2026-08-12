@@ -271,6 +271,18 @@ class GroundReportTest(unittest.TestCase):
         # 창이 공백 **뒤**에서 시작해야 한다 = 알 수 없는 구간을 안 먹었다.
         self.assertGreater((odoms[mi][0] - odoms[0][0]) / NS, 3.0)
 
+    def test_25_tape_anchored_cruise_beats_the_diluted_average(self):
+        """🔴 평균속도는 가감속이 섞여 아래로 희석된다 — 짧은 주행일수록 심하다.
+
+        합격선을 평균 하나로만 보면 **멀쩡한 계수가 불합격으로 보인다**(08-12 사용자
+        지적). 줄자앵커 순항 = 순항 × (줄자/odom) 은 희석이 없고 스케일도 외부 앵커다.
+        여기서는 ① 그 값이 실제 등속에 맞고 ② 평균은 그보다 **낮게** 나온다를 같이 본다.
+        """
+        cmds, odoms = run_with_coast(0.12, 5.0, 1.3, drop_lead_s=0.0)
+        v = gr.analyze(cmds, odoms, tape_mm=v_path(odoms))
+        self.assertAlmostEqual(0.12, v['cruise_true_mps'], places=3)
+        self.assertLess(v['true_mps'], v['cruise_true_mps'])
+
 
 def run_with_coast(v_true, cmd_s, coast_s, drop_lead_s=0.0, t0=10 * NS, dt=0.02):
     """명령 구간 등속 → 명령이 끊기면 선형 감속 → 정지.

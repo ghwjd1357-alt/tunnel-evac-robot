@@ -192,6 +192,19 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         v['tape_mm'] = tape_mm
         v['odom_over'] = path * 1000.0 / tape_mm if tape_mm > 0 else float('nan')
         v['true_mps'] = (tape_mm / 1000.0) / dur_seg if dur_seg > 0 else float('nan')
+        # 🔴 08-12 신설 — 평균속도와 순항속도는 **약점이 서로 반대**다.
+        #   · 평균(`true_mps`) 은 줄자에 앵커돼 스케일은 믿을 수 있지만, 창에 출발
+        #     가속과 관성 꼬리가 같이 들어가 **아래로 희석된다**. 짧은 주행일수록 심하다
+        #     (실측 `0.12` 기준 10초 −7.5% · 20초 −3.8% · 25초 −2.9%).
+        #   · 순항(`cruise_mps`) 은 희석이 없지만 odom·twist 둘 다 **같은 엔코더 파생**이라
+        #     스케일을 스스로 검증하지 못한다.
+        # 두 약점은 곱하면 상쇄된다: 순항 × (줄자/odom) = 외부에 앵커된 순항속도.
+        # ⚠ 그래도 `cruise_mps` 는 EMA(α=0.10) 파생이라, 순항이 짧으면 이 값도 덜 앉는다.
+        if v.get('cruise_mps') is not None and v['odom_over'] == v['odom_over'] \
+                and v['odom_over'] > 0:
+            v['cruise_true_mps'] = v['cruise_mps'] * v['odom_over']
+        else:
+            v['cruise_true_mps'] = None
     return v
 
 
@@ -231,6 +244,12 @@ def report(v, name=''):
         print(f'     odom / 줄자      = {v["odom_over"]:9.3f} 배')
         print(f'     실제 평균속도    = {v["true_mps"]:9.4f} m/s'
               f'   ← 명령의 {v["true_mps"] / max(abs(v["cmd_linear"]), 1e-9):.2f}배')
+        if v.get('cruise_true_mps') is not None:
+            print(f'     줄자앵커 순항    = {v["cruise_true_mps"]:9.4f} m/s'
+                  f'   ← 명령의 '
+                  f'{v["cruise_true_mps"] / max(abs(v["cmd_linear"]), 1e-9):.2f}배')
+            print('     ⚠ 평균속도는 가감속이 섞여 **아래로 희석된다**(짧은 주행일수록 심함).')
+            print('       이 줄은 순항 × (줄자/odom) 이라 희석이 없고 스케일도 외부 앵커다.')
         if abs(v['odom_over'] - 1.0) > 0.05:
             print('     🔴 odom 과 줄자가 5% 넘게 어긋난다 — 오도메트리 스케일을 의심한다')
         else:
