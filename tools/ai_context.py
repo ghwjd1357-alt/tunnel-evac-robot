@@ -218,6 +218,11 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "firmware/**", "firmware/*",
         "tools/firmware_precheck.sh", "tools/test_firmware_precheck.sh",
         "tools/rearm_gate_host_test.cpp", "tools/rearm_gate_host_test.sh",
+        # 검토 §66.2: `.ino` 원문을 떼어다 host 로 컴파일하는 회귀들이다. 펌웨어가
+        # 바뀌면 같이 깨지므로 **펌웨어와 같은 프로필**이어야 문맥이 안 끊긴다.
+        "tools/ino_host_probe.py",
+        "tools/firmware_constants.py", "tools/firmware_info_length_check.py",
+        "tools/test_control_feedback_scale.py", "tools/test_applied_pwm_epoch.py",
     )),
     ("docs", ("docs/*.md",)),
 )

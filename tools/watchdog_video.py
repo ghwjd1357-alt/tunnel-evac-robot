@@ -61,9 +61,13 @@
 4분의 1까지 **과소평가**됐다 — 방향이 안전 반대쪽이라 P1 이다.
 
 사용법:
-    python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522
-    python3 tools/watchdog_video.py <영상> --t0-frame 670 \\
+    python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522 --pre-plate
+    python3 tools/watchdog_video.py <영상> --t0-frame 670 --pre-plate \\
         --center 480,446 --axes 112,178 --range 610,895 --bag-ms 516.2
+
+🔴 판재 이전(08-12 까지) 영상은 그때의 반지름으로 재야 그때의 수가 나온다 (검토 §65.3).
+   기록된 preset 은 자기 시대를 `profile` 로 물고 있어 `--pre-plate` 를 잊어도 옳게
+   나온다(§66.1). 직접 `--center/--axes/--range` 를 줄 때는 **플래그가 유일한 단서**다.
     종료코드 0 = 판정 유효 / 1 = 판정 불능·FAIL / 2 = 사용법·입력 오류
 """
 import argparse
@@ -448,7 +452,11 @@ PRESETS = {
     # 2026-08-07 15:22:58 촬영(`IMG_3461.mov`) · bag `d0_watchdog_0807_1522` 와 같은 시행.
     # 중심은 **분석 시작 프레임(610)** 시점의 크롬 림 타원 중심, 4K 원본 좌표계. 2026-08-11 실측.
     # T0=670 · 축은 림 외곽(반축 112 × 178, 수직축이 긴 것은 바퀴가 비스듬히 보이기 때문).
-    '0807-1522': dict(center=(439.3, 531.1), axes=(112.0, 178.0), frame_range=(610, 895)),
+    # 🔴 `profile` = 이 영상이 찍힌 **시대**다 (검토 §66.1). preset 이 자기 반지름을
+    #    물고 오므로 `--pre-plate` 를 잊어도 기록된 수가 그대로 재현된다. 플래그는
+    #    이제 문서용 명시일 뿐이고, 잊었을 때 조용히 1.238 배 틀리는 길이 없다.
+    '0807-1522': dict(center=(439.3, 531.1), axes=(112.0, 178.0), frame_range=(610, 895),
+                      profile='pre-plate'),
     # 2026-08-11 19:41 촬영(`IMG_3483.mov`) · bag `d0_watchdog_0811_1938` 과 같은 시행.
     # 🔴 **현행 펌웨어**(`build=Aug 11 2026 15:13:20`) 재측정 — 08-07 증거의 승계가
     # 불인정돼(§57.5) 다시 찍은 물건이다. T0=473(472=`#29`→473=`#30`).
@@ -461,7 +469,14 @@ PRESETS = {
     #   흔들림(배경 아핀 평행이동이 프레임당 2~3px)이 잡음 바닥을 판정선 위로 올려
     #   도구가 fail-closed 로 거부한다. **전 구간 413~790 은 판정 불능**이고 그 사실을
     #   숨기지 않는다(정본 = `JETSON_SETUP.md §7-c-0`).
-    '0811-1938': dict(center=(865.0, 1236.0), axes=(290.0, 237.0), frame_range=(413, 651)),
+    '0811-1938': dict(center=(865.0, 1236.0), axes=(290.0, 237.0), frame_range=(413, 651),
+                      profile='pre-plate'),
+}
+
+#: 반지름 profile 이름 -> 값. preset 과 `--pre-plate` 가 같은 표를 본다.
+PROFILE_RADIUS_M = {
+    'pre-plate': PRE_PLATE_WHEEL_RADIUS_M,
+    'post-plate': WHEEL_RADIUS_M,
 }
 
 
@@ -530,7 +545,28 @@ def parse_inputs(a, fps_probe=None):
         raise UsageError('fps 를 읽지 못했다 — --fps 로 양수를 준다')
 
     bag_ms = None if a.bag_ms is None else _finite(a.bag_ms, '--bag-ms')
-    return cfg, t0, fps, bag_ms
+    return cfg, t0, fps, bag_ms, resolve_profile(cfg, a.pre_plate)
+
+
+def resolve_profile(cfg, pre_plate_flag):
+    """어느 시대의 반지름으로 잴지 정한다 (검토 §66.1).
+
+    preset 이 `profile` 을 들고 있으면 **그것이 정본**이다 — 영상이 찍힌 시대는
+    사람이 플래그로 기억할 일이 아니라 자료에 붙어 있는 사실이다. 08-13 이전
+    watchdog 명령들이 `--pre-plate` 없이 문서에 남아 1.238 배 틀린 수를 재현하던
+    것이 이 규칙이 없어서였다.
+
+    🔴 preset 이 말하는 시대와 플래그가 **모순되면** 판정 불능이다. 둘 중 하나를
+       조용히 이기게 하면 어느 쪽이 이겼는지 출력만 보고는 알 수 없다.
+    """
+    declared = cfg.pop('profile', None)
+    if declared is None:
+        return 'pre-plate' if pre_plate_flag else 'post-plate'
+    if pre_plate_flag and declared != 'pre-plate':
+        raise UsageError(
+            f'--pre-plate 를 줬는데 preset 이 선언한 시대는 {declared!r} 이다 '
+            f'— 둘 중 무엇이 맞는지 정하기 전에는 재지 않는다')
+    return declared
 
 
 def main(argv, series_fn=None):
@@ -548,15 +584,10 @@ def main(argv, series_fn=None):
     ap.add_argument('--bag-ms', help='같은 시행의 bag 값 — 관측계 차이를 적어 둔다')
     # 🔴 검토 §65.3 — 판재 이전 영상은 그때의 반지름으로 재야 그때의 수가 재현된다.
     ap.add_argument('--pre-plate', action='store_true',
-                    help='08-13 상판 판재 이전 영상 — 반지름 %.5f 로 환산한다'
+                    help='08-13 상판 판재 이전 영상 — 반지름 %.5f 로 환산한다 '
+                         '(기록된 preset 은 스스로 선언하므로 생략해도 된다)'
                          % PRE_PLATE_WHEEL_RADIUS_M)
     a = ap.parse_args(argv[1:])
-
-    # 🔴 검토 §65.3 — 반지름 profile 을 여기서 한 번만 고른다. 환산 함수들이 이 전역을
-    #    읽으므로 아래 모든 수치(mm/s 판정선·drift)가 같은 profile 로 통일된다.
-    global ACTIVE_WHEEL_RADIUS_M                              # noqa: PLW0603
-    ACTIVE_WHEEL_RADIUS_M = (
-        PRE_PLATE_WHEEL_RADIUS_M if a.pre_plate else WHEEL_RADIUS_M)
 
     def probe():
         """영상에서 fps 를 읽는다. 실패는 값이 아니라 `UsageError` 로 돌려준다."""
@@ -570,16 +601,24 @@ def main(argv, series_fn=None):
         return fps
 
     try:
-        cfg, t0_frame, fps, bag_ms = parse_inputs(a, fps_probe=probe)
+        cfg, t0_frame, fps, bag_ms, profile = parse_inputs(a, fps_probe=probe)
     except UsageError as exc:
         print(f'입력 오류 — {exc}', file=sys.stderr)
         return 2
 
+    # 🔴 검토 §65.3·§66.1 — 반지름 profile 을 여기서 한 번만 갈아 끼운다. 환산 함수들이
+    #    이 전역을 읽으므로 아래 모든 수치(mm/s 판정선·drift)가 같은 시대로 통일된다.
+    global ACTIVE_WHEEL_RADIUS_M                              # noqa: PLW0603
+    ACTIVE_WHEEL_RADIUS_M = PROFILE_RADIUS_M[profile]
+
     print('=' * 78)
     print('VIDEO:', os.path.basename(a.video))
-    print('  바퀴 반지름 profile = %.5f m%s'
-          % (ACTIVE_WHEEL_RADIUS_M,
-             '  🔴 판재 이전(--pre-plate)' if a.pre_plate else '  (08-13 재교정)'))
+    print('  바퀴 반지름 profile = %s %.5f m%s'
+          % (profile, ACTIVE_WHEEL_RADIUS_M,
+             '  🔴 판재 이전' if profile == 'pre-plate' else '  (08-13 재교정)'))
+    if profile == 'pre-plate' and not a.pre_plate:
+        print('    ↑ preset %r 이 선언한 시대다 — `--pre-plate` 를 안 줘도 '
+              '기록된 수가 재현된다 (검토 §66.1)' % a.preset)
     try:
         series = (series_fn or rotation_series)(
             a.video, cfg['center'], cfg['axes'], cfg['frame_range'],

@@ -23,11 +23,16 @@ format 문자열을 이 파일에 복사해 두면, `.ino` 가 바뀌었는데 �
 2. 변환지시자와 인자를 **순서대로 짝지어** 타입별 최악 인자를 만든다.
    - `%s`  : 그 자리에 실제로 들어가는 `.ino` 의 문자열 상수 길이. 못 풀면 보수값 32자.
              (모든 `%s` 에 최장 상수를 먹이면 실제보다 500자 부풀어 쓸모가 없다)
-   - `%d`  : `INT_MIN` (부호까지 11자로 제일 길다)
-   - `%lu` : 4294967295 (펌웨어 카운터는 전부 uint32)
-   - `%f`  : 999999.999999 계열
+   - `%d`  : `INT_MIN` — 이건 **타입 경계**다. int 로 이보다 긴 출력은 없다.
+   - `%lu` : 4294967295 — 이것도 타입 경계 (펌웨어 카운터는 전부 uint32).
+   - `%f`  : 🔴 그 자리에 실제로 들어가는 `.ino` 의 **상수 값**을 그대로 넣는다.
+             초판은 `-999999.999999` 를 넣고 결과를 "타입 이론 최악"이라 불렀다 —
+             검토 §66.3 이 그건 타입 경계가 아니라 임의로 고른 시나리오라고 지적했다.
+             지금은 상수를 못 풀 때만 그 시나리오로 물러서고, **그 사실을 표시한다.**
 3. 그 인자로 host `gcc` 를 돌려 실제 길이를 잰다. 추정하지 않는다.
 4. 최악 길이 >= N 이면 **FAIL**. 여유도 함께 찍는다.
+5. 🔴 **변이 주입 자가검사** — format 을 늘려 버퍼를 넘기면 이 도구가 반드시 FAIL
+   해야 한다. 안 그러면 "안 넘는다"는 판정에 근거가 없다 (검토 §66.3).
 
 사용
 ----
@@ -182,12 +187,34 @@ def build_args(fmt, ino_args, source):
         elif spec.endswith("lu"):
             built.append("4294967295UL")  # 펌웨어 카운터는 전부 uint32
         elif spec.endswith("d"):
-            built.append("INT_MIN")       # 부호 포함 11자 = %d 최악
+            built.append("INT_MIN")       # 부호 포함 11자 = %d **타입 경계**
         elif spec.endswith("f"):
-            built.append("-999999.999999")
+            value, note = double_value_of(arg, source)
+            built.append(value)
+            notes.append("    %-6s ← %-28s %s" % (spec, note, value))
         else:
             fail("모르는 변환지시자 %s — 도구를 먼저 고쳐라" % spec)
     return built, notes
+
+
+#: `%f` 가 상수를 못 풀 때 물러설 자리. 🔴 타입 경계가 아니라 **검사 시나리오**다.
+FALLBACK_DOUBLE = "-999999.999999"
+
+
+def double_value_of(arg, source):
+    """`%f` 자리에 실제로 들어가는 `.ino` 상수 값을 찾아 그대로 쓴다 (검토 §66.3).
+
+    이 format 의 `%f` 는 전부 `static const double` 이다 — 반지름·윤거·게인. 값이
+    소스에 적혀 있는데 `-999999.999999` 를 넣고 "타입 이론 최악"이라 부르면, 실제로는
+    일어날 수 없는 길이를 근거로 버퍼를 판정하는 것이다. 값을 못 풀 때만 물러선다.
+    """
+    name = arg.strip()
+    match = re.search(
+        r"static\s+const\s+double\s+%s\s*=\s*([0-9.eE+-]+)\s*;" % re.escape(name),
+        source)
+    if match is not None:
+        return match.group(1), "%s (소스 상수)" % name
+    return FALLBACK_DOUBLE, "%s 🔴 상수 미해결 — 시나리오값" % name
 
 
 def measure(fmt, args):
@@ -220,32 +247,67 @@ def measure(fmt, args):
         return int(run.stdout.strip())
 
 
-def main():
-    source = read_ino()
+#: 여유가 이보다 얇으면 문자열 하나 늘리는 순간 넘는다. 넘기 전에 멈춘다.
+MIN_HEADROOM = 128
+
+
+def evaluate(source):
+    """한 소스에 대한 판정을 dict 로 돌려준다. 🔴 인쇄와 판정을 나눠 둔 이유는
+    변이 주입 자가검사가 **같은 판정 경로**를 다시 타야 하기 때문이다 (검토 §66.3).
+    """
     buffer_size, fmt, ino_args = extract(source)
     built, notes = build_args(fmt, ino_args, source)
     worst = measure(fmt, built)
-
     payload_limit = buffer_size - 1  # NUL 한 칸
     headroom = payload_limit - worst
+    return dict(buffer_size=buffer_size, payload_limit=payload_limit,
+                specs=len(ino_args), notes=notes, worst=worst,
+                headroom=headroom,
+                verdict=("OVERFLOW" if headroom < 0
+                         else "THIN" if headroom < MIN_HEADROOM
+                         else "OK"))
 
-    print("── /firmware/info 길이 검사 (검토 §65.5) ─────────────────────")
-    print("  버퍼            : %d 바이트 (payload 한계 %d)" % (buffer_size, payload_limit))
-    print("  변환지시자      : %d 개 (인자와 짝 맞음)" % len(ino_args))
-    for note in notes:
+
+def self_check(source, payload_limit):
+    """🔴 길이 초과 변이가 반드시 FAIL 하는가 (검토 §66.3).
+
+    "안 넘는다"는 판정은 "넘는 것을 넘는다고 부를 수 있다"가 전제다. 그 전제를
+    확인하지 않으면 이 도구가 무엇을 재고 있는지 알 수 없다. format 을 여유보다
+    길게 늘려 다시 판정한다 — 저장소 파일은 안 건드리고 문자열만 바꾼다.
+    """
+    padding = "P" * (payload_limit + 64)
+    anchor = 'libraries=%s'
+    if source.count(anchor) != 1:
+        fail("변이 지점 %r 을 하나로 특정하지 못했다" % anchor)
+    mutated = source.replace(anchor, padding + anchor)
+    return evaluate(mutated)["verdict"] == "OVERFLOW"
+
+
+def main():
+    source = read_ino()
+    result = evaluate(source)
+
+    print("── /firmware/info 길이 검사 (검토 §65.5·§66.3) ────────────────")
+    print("  버퍼            : %d 바이트 (payload 한계 %d)"
+          % (result["buffer_size"], result["payload_limit"]))
+    print("  변환지시자      : %d 개 (인자와 짝 맞음)" % result["specs"])
+    for note in result["notes"]:
         print(note)
-    print("  타입 이론 최악  : %d 자" % worst)
-    print("  여유            : %d 자" % headroom)
+    # 🔴 명칭 정정 (검토 §66.3). %d·%lu 는 타입 경계지만 %s·%f 는 현재 소스의 값이다.
+    #    전체를 "타입 이론 최악" 이라 부르면 실제보다 강한 주장이 된다.
+    print("  현재 소스 상한  : %d 자  (%%d·%%lu = 타입 경계 · %%s·%%f = 소스 실값)"
+          % result["worst"])
+    print("  여유            : %d 자" % result["headroom"])
 
-    if headroom < 0:
-        fail("버퍼를 %d 자 넘는다 — snprintf 가 조용히 자른다" % (-headroom))
-
-    # 여유가 이보다 얇으면 문자열 하나 늘리는 순간 넘는다. 넘기 전에 경고한다.
-    if headroom < 128:
-        print("  \033[33m경고\033[0m  여유 %d 자 — 버퍼를 키워라" % headroom)
+    if result["verdict"] == "OVERFLOW":
+        fail("버퍼를 %d 자 넘는다 — snprintf 가 조용히 자른다" % (-result["headroom"]))
+    if result["verdict"] == "THIN":
+        print("  \033[33m경고\033[0m  여유 %d 자 — 버퍼를 키워라" % result["headroom"])
         sys.exit(1)
 
-    print("  \033[32mOK\033[0m  넘지 않는다")
+    if not self_check(source, result["payload_limit"]):
+        fail("길이 초과 변이를 넣었는데 OVERFLOW 가 안 났다 — 이 도구의 판정은 근거가 없다")
+    print("  \033[32mOK\033[0m  넘지 않는다 (초과 변이는 잡는 것을 확인함)")
     return 0
 
 

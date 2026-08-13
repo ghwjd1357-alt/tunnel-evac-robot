@@ -1,49 +1,57 @@
 #!/usr/bin/env python3
-"""`applied_pwm_max` 가 **시행별** 최대인지 본다 (검토 §65.2 역회귀).
+"""`applied_pwm_max` 가 **시행마다** 다시 세는지 생산 코드로 확인한다 (§65.2·§66.2).
 
-무엇이 문제였나
+무엇을 증명하나
 ---------------
-08-13 첫 판의 `appliedPwmMaxMagnitude` 는 부팅 시 0 에서 시작해 더 큰 값을 만날 때만
-갱신되고 어디서도 리셋되지 않았다. 그래서 부팅 뒤 한 번 160 에 닿으면, 다음 시행이
-80 이었는지 160 이었는지 **영원히 구분되지 않는다** — 둘 다 "시작=끝=160, 차이 0" 이다.
-포화 관측 수단이 첫 고출력 시행에서 죽는다. 예약 33(FF·게인 조정)이 그 값을 근거로
-쓰려던 것이므로, 그대로 두면 잘못된 튜닝 근거가 된다.
+`applied_pwm_max` 는 부팅 이후 최대였다. 그래서 한 번 160 을 찍으면 그 뒤 모든 시행이
+영원히 160 으로 보인다 — "이번 주행에서 포화했나"를 물을 수 없다. 보완판은 무장
+전이(`!ARMED -> ARMED`)에서만 최댓값을 0 으로 되돌리고 `applied_pwm_epoch` 를 하나
+올린다. epoch 는 **무장 횟수**지 폴링 횟수가 아니다.
 
-보완 = 무장 전이(!ARMED -> ARMED)마다 0 으로 리셋하고 `applied_pwm_epoch` 를 1 올린다.
-`/firmware/info` 를 읽는 쪽은 **epoch 가 같은 표본끼리만** max 를 비교한다.
+어떻게 확인하나 (검토 §66.2 완료판정)
+  실제 `rearm_gate.h` 상태기계로 무장 절차를 두 번 밟고, `.ino` 에서 떼어온
+  `updateAppliedPwmEpoch()` · `updateMotorOutputs()` 원문을 그대로 돌린다.
+  ① 1회차 최대 160 -> 해제 -> 2회차 최대 **80** (160 이 안 남는다)
+  ② epoch 는 정확히 **2** — 무장 두 번 = 2 이지 폴링 수가 아니다
+  ③ 시행 안에서는 단조증가 (한 번 찍은 포화가 뒤에 지워지지 않는다)
+  ④ 음수 PWM 은 크기로 센다
+  ⑤ 🔴 **변이 주입 자가검사** — 검토 §66.2 가 뚫은 `== -> !=` 를 포함해 세 변이가
+     전부 이 시험을 깨야 한다.
 
-무엇을 보나
------------
-  구조 ① `rearm_gate.h` 를 안 건드렸다 — §64 에서 막 승인된 상태기계 계약이다.
-  구조 ② 리셋이 ARMED **진입 순간**에만 일어난다 (ARMED 안에서 매 루프 지우면
-         시행 중 포화가 사라진다).
-  구조 ③ epoch 갱신이 `updateMotorOutputs()` **앞**에서 불린다 — 무장 직후 첫 PWM 이
-         새 epoch 에 들어가야 한다.
-  구조 ④ `/firmware/info` 가 epoch 를 실제로 내보낸다 — 안 내보내면 밖에서 시행 경계를
-         못 긋고, 절대값 비교가 다시 의미를 잃는다.
-  동작 ⑤ 첫 시행 최대 160, 둘째 시행 최대 80 -> 둘째가 **80** 으로 나와야 한다.
-  동작 ⑥ 한 시행 안에서는 단조증가다 (160 뒤 80 을 봐도 160 을 유지).
-  동작 ⑦ ARMED 를 안 거치면 epoch 가 안 는다 (READY·PENDING 왕복은 시행이 아니다).
+왜 파이썬 복제 모형을 버렸나
+----------------------------
+초판은 `PwmObserver` 라는 파이썬 사본을 돌렸다. 검토 §66.2 가 생산 코드의 ARMED
+조건을 `==` 에서 `!=` 로 뒤집었는데 전량 통과했다 — 돌아간 것은 사본이었기 때문이다.
+`rearm_gate.h` 무수정 검사도 `git diff HEAD` 로 봐서, **커밋된 뒤에는 항상 비어**
+영원히 초록인 검사였다. 지금은 내용 sha256 으로 못 박는다.
 
 사용
 ----
     python3 tools/test_applied_pwm_epoch.py
-    echo $?      # 0 = 통과
+    echo $?      # 0 = 통과 / 1 = 계약 위반 / 2 = 판정 불능(컴파일러·추출)
 
-정본 = docs/MASTER_PLAN.md §7 예약 33 · 검토현황 §65.2.
+정본 = docs/REAL_ROBOT_VALUES.md §1-b-2 · 검토현황 §65.2 · §66.2.
 """
 
+import hashlib
 import os
 import re
-import subprocess
 import sys
 
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-FW = os.path.join(ROOT, "firmware", "teensy_integrated_base_v1_4")
-INO = os.path.join(FW, "teensy_integrated_base_v1_4.ino")
-GATE = os.path.join(FW, "rearm_gate.h")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ino_host_probe as probe  # noqa: E402
 
-DISARMED, READY, ARMED, PENDING, ARMING = 0, 1, 2, 3, 4
+ROOT = probe.ROOT
+SKETCH = probe.SKETCH_DIR
+
+#: 🔴 게이트 헤더 내용 고정. `git diff HEAD` 는 커밋 뒤 항상 비어 무의미했다(§66.2).
+#:   이 값이 바뀌면 967/0 재검증 없이는 이 시험이 통과하면 안 된다.
+GATE_SHA256 = {
+    "rearm_gate.h":
+        "ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340",
+    "drive_wiring.h":
+        "f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860",
+}
 
 FAILURES = []
 
@@ -56,137 +64,288 @@ def check(label, condition, detail=""):
         FAILURES.append(label)
 
 
-# ── 동작 모형 — `.ino` 의 updateAppliedPwmEpoch() 를 그대로 옮긴 것 ──────────
-class PwmObserver:
-    """무장 epoch 별 최대 PWM 관측기."""
+# ── shim — 게이트·PWM 출력의 바깥쪽만 흉내낸다 ───────────────────────────────
+SHIM = """
+#include "rearm_gate.h"
+#include "drive_wiring.h"
 
-    def __init__(self):
-        self.max_magnitude = 0
-        self.epoch = 0
-        self.previous_state = DISARMED
+int movePwmTowardTarget(int, int);
+void updateAppliedPwmEpoch();
+void updateMotorOutputs();
+bool isEstopActive();
+uint32_t millis();
+void writeMotorPwm(int, int);
 
-    def observe_state(self, state):
-        if state == ARMED and self.previous_state != ARMED:
-            self.max_magnitude = 0
-            self.epoch += 1
-        self.previous_state = state
+struct FakeDriveSink {
+  int stopCalls = 0;
+  bool cmdVelReceived = false;
+  uint32_t lastCmdVelMs = 0;
+  void stopAllMotors();
+  void setCmdVelReceived(bool value) { cmdVelReceived = value; }
+  void noteCommandAccepted(uint32_t nowMs)
+  {
+    lastCmdVelMs = nowMs;
+    cmdVelReceived = true;
+  }
+};
 
-    def observe_pwm(self, applied):
-        magnitude = abs(applied)
-        if magnitude > self.max_magnitude:
-            self.max_magnitude = magnitude
+RearmGate driveGate;
+FakeDriveSink driveSink;
+
+int desiredPwm[4] = {0, 0, 0, 0};
+int appliedPwm[4] = {0, 0, 0, 0};
+int appliedPwmMaxMagnitude = 0;
+uint32_t appliedPwmEpoch = 0;
+uint8_t appliedPwmEpochPrevState = 0;
+double targetWheelVelocity[4] = {0.0, 0.0, 0.0, 0.0};
+uint32_t startBoostUntilMs[4] = {0, 0, 0, 0};
+uint32_t lastPwmUpdateMs = 0;
+
+static uint32_t g_nowMs = 0;
+static bool g_estop = false;
+static int g_lastWritten[4] = {0, 0, 0, 0};
+
+uint32_t millis() { return g_nowMs; }
+bool isEstopActive() { return g_estop; }
+void writeMotorPwm(int motor, int pwm) { g_lastWritten[motor] = pwm; }
+void FakeDriveSink::stopAllMotors()
+{
+  ++stopCalls;
+  for (int motor = 0; motor < 4; ++motor) {
+    appliedPwm[motor] = 0;
+    g_lastWritten[motor] = 0;
+  }
+}
+
+/* 매 루프 한 칸. .ino loop() 의 순서를 그대로 지킨다 —
+   rearmGateTick -> updateAppliedPwmEpoch -> updateMotorOutputs. */
+static void tickOnce(uint32_t stepMs)
+{
+  g_nowMs += stepMs;
+  rearmGateTick(&driveGate, g_nowMs);
+  updateAppliedPwmEpoch();
+  updateMotorOutputs();
+}
+
+/* 무장 절차 = 실제 게이트 API 로만. 상태를 손으로 대입하지 않는다. */
+static void armThroughGate()
+{
+  for (int i = 0; i < 4; ++i) {          /* zero-hold 충족 -> READY */
+    rearmGateOnCommand(&driveGate, 0.0, 0.0, g_nowMs);
+    tickOnce(200);
+  }
+  rearmGateOnService(&driveGate, true, g_estop);   /* -> ARMING */
+  rearmGateArmBarrierStart(&driveGate, g_nowMs);   /* -> PENDING */
+  for (int i = 0; i < 8; ++i) {                    /* quiet 장벽 완주 -> ARMED */
+    tickOnce(100);
+  }
+}
+
+/* 목표 PWM 을 주고 램프가 다 오를 때까지 돌린다. */
+static void driveTo(int pwm, int loops)
+{
+  for (int motor = 0; motor < 4; ++motor) {
+    targetWheelVelocity[motor] = 0.10;
+    desiredPwm[motor] = pwm;
+  }
+  for (int i = 0; i < loops; ++i) {
+    rearmGateOnCommand(&driveGate, 0.10, 0.0, g_nowMs);
+    tickOnce(20);
+  }
+}
+
+static void report(const char* tag)
+{
+  printf("%s state=%d max=%d epoch=%lu applied=%d\\n",
+         tag, (int)driveGate.state, appliedPwmMaxMagnitude,
+         (unsigned long)appliedPwmEpoch, appliedPwm[0]);
+}
+"""
+
+MAIN = """
+int main()
+{
+  rearmGateInit(&driveGate);
+  report("boot");
+
+  /* ── 1회차: 160 까지 포화 ─────────────────────────────────────────── */
+  armThroughGate();
+  report("trial1-armed");
+  driveTo(160, 120);
+  report("trial1-peak");
+
+  /* 시행 안에서 목표를 낮춰도 최댓값은 안 내려간다 */
+  driveTo(40, 120);
+  report("trial1-after-drop");
+
+  /* ── 해제 ─────────────────────────────────────────────────────────── */
+  driveDisarm(&driveGate, driveSink);
+  for (int i = 0; i < 5; ++i) tickOnce(100);
+  report("disarmed");
+
+  /* ── 2회차: 80 까지만 ─────────────────────────────────────────────── */
+  armThroughGate();
+  report("trial2-armed");
+  driveTo(80, 120);
+  report("trial2-peak");
+
+  /* ── ARMED 를 유지하면 epoch 는 안 올라간다 ───────────────────────── */
+  for (int i = 0; i < 50; ++i) tickOnce(20);
+  report("trial2-held");
+
+  /* ── 후진(음수 PWM)도 크기로 센다 ─────────────────────────────────── */
+  driveDisarm(&driveGate, driveSink);
+  for (int i = 0; i < 5; ++i) tickOnce(100);
+  armThroughGate();
+  for (int motor = 0; motor < 4; ++motor) {
+    targetWheelVelocity[motor] = -0.10;
+    desiredPwm[motor] = -120;
+  }
+  for (int i = 0; i < 120; ++i) {
+    rearmGateOnCommand(&driveGate, -0.10, 0.0, g_nowMs);
+    tickOnce(20);
+  }
+  report("trial3-reverse");
+  return 0;
+}
+"""
+
+FUNCTIONS = ["movePwmTowardTarget", "updateAppliedPwmEpoch", "updateMotorOutputs"]
 
 
-def structural_checks():
-    with open(INO, encoding="utf-8") as handle:
-        ino = handle.read()
+def run(source, tag="epoch"):
+    """생산 코드를 컴파일해 각 지점의 관측값을 dict 로 돌려준다."""
+    pieces = [probe.constants(source), SHIM]
+    pieces += [probe.function(source, name) for name in FUNCTIONS]
+    pieces.append(MAIN)
 
-    # ① 게이트 헤더는 이 묶음에서 안 바뀐다.
-    changed = subprocess.run(
-        ["git", "-C", ROOT, "diff", "--name-only", "HEAD", "--",
-         "firmware/teensy_integrated_base_v1_4/rearm_gate.h"],
-        capture_output=True, text=True).stdout.strip()
-    check("① rearm_gate.h 를 안 건드렸다 (§64 상태기계 계약 유지)",
-          changed == "",
-          "게이트를 고치면 967+7 회귀의 의미가 달라진다")
-
-    # ② 리셋은 진입 전이에서만. 조건에 '이전 상태가 ARMED 가 아니다' 가 있어야 한다.
-    body = re.search(
-        r"void\s+updateAppliedPwmEpoch\(\)\s*\{(.*?)\n\}", ino, re.S)
-    check("② updateAppliedPwmEpoch() 가 존재한다", body is not None)
-    if body:
-        text = body.group(1)
-        has_entry_guard = (
-            "appliedPwmEpochPrevState !=" in text and "DRIVE_ARMED" in text)
-        check("② 리셋이 ARMED **진입**에서만 일어난다",
-              has_entry_guard and "appliedPwmMaxMagnitude = 0" in text,
-              "이전 상태 비교가 없으면 ARMED 동안 매 루프 지워 포화가 사라진다")
-        check("② epoch 가 같은 자리에서 증가한다", "++appliedPwmEpoch" in text)
-
-    # ③ 호출 순서 — loop() 안에서 updateMotorOutputs() 보다 앞이어야 한다.
-    loop_body = re.search(r"void\s+loop\(\)\s*\{(.*?)\n\}", ino, re.S)
-    check("③ loop() 를 읽었다", loop_body is not None)
-    if loop_body:
-        text = loop_body.group(1)
-        epoch_at = text.find("updateAppliedPwmEpoch();")
-        motor_at = text.find("updateMotorOutputs();")
-        check("③ epoch 갱신이 updateMotorOutputs() 보다 먼저 불린다",
-              0 <= epoch_at < motor_at,
-              "뒤에 있으면 무장 직후 첫 PWM 이 앞 시행 epoch 로 샌다")
-
-    # ④ 밖으로 나가야 시행 경계를 그을 수 있다.
-    check("④ /firmware/info 가 applied_pwm_epoch 를 발행한다",
-          "applied_pwm_epoch=%lu" in ino and "appliedPwmEpoch" in ino)
-
-    # 낡은 계약 문구가 남아 있으면 읽는 사람이 옛 방식으로 읽는다.
-    check("④ '시행 시작·끝의 차이로 읽는다' 는 옛 안내가 지워졌다",
-          "시행 시작·끝의 차이" not in ino,
-          "그 문장은 부팅 이후 단조증가일 때의 읽는 법이다")
+    out = probe.compile_and_run(pieces, "%s.cpp" % tag, include_sketch=True)
+    marks = {}
+    for line in out.strip().split("\n"):
+        parts = line.split()
+        marks[parts[0]] = {
+            key: int(value)
+            for key, value in (piece.split("=") for piece in parts[1:])
+        }
+    return marks
 
 
-def behavioural_checks():
-    # ⑤ 첫 시행 160, 둘째 시행 80.
-    observer = PwmObserver()
-    for state in (DISARMED, READY, ARMING, PENDING, ARMED):
-        observer.observe_state(state)
-    for pwm in (60, 120, 160, 140):
-        observer.observe_pwm(pwm)
-    first_max, first_epoch = observer.max_magnitude, observer.epoch
+# ── 구조 검사 — 배선은 텍스트로만 볼 수 있다 (약한 증거인 줄 알고 쓴다) ───────
+def structural_checks(source):
+    for name, expected in GATE_SHA256.items():
+        path = os.path.join(SKETCH, name)
+        with open(path, "rb") as handle:
+            actual = hashlib.sha256(handle.read()).hexdigest()
+        check("게이트 헤더 %s 내용이 967/0 계약 시점 그대로다" % name,
+              actual == expected,
+              "sha256 %s\n      기대   %s\n"
+              "      🔴 헤더를 고쳤으면 rearm_gate_host_test 재실행 뒤 이 값을 갱신한다"
+              % (actual, expected))
 
-    for state in (DISARMED, READY, ARMING, PENDING, ARMED):
-        observer.observe_state(state)
-    for pwm in (40, 80, 70):
-        observer.observe_pwm(pwm)
-    second_max, second_epoch = observer.max_magnitude, observer.epoch
+    loop_body = re.search(r"void\s+loop\(\)\s*\{(.*?)\n\}", source, re.S)
+    if loop_body is None:
+        check("loop() 를 찾았다", False)
+        return
+    body = loop_body.group(1)
+    epoch_at = body.find("updateAppliedPwmEpoch();")
+    outputs_at = body.find("updateMotorOutputs();")
+    check("loop() 가 updateMotorOutputs() **앞에서** updateAppliedPwmEpoch() 를 부른다",
+          0 <= epoch_at < outputs_at,
+          "뒤에서 부르면 리셋이 그 루프의 관측을 지운다 (epoch=%d, outputs=%d)"
+          % (epoch_at, outputs_at))
 
-    check("⑤ 첫 시행 최대 = 160 (실측 %d)" % first_max, first_max == 160)
-    check("⑤ 둘째 시행 최대 = 80 (실측 %d) — 부모판이면 160 이 남는다" % second_max,
-          second_max == 80,
-          "이 자리가 검토 §65.2 가 짚은 정보 손실 지점이다")
-    check("⑤ epoch 가 시행마다 는다 (%d -> %d)" % (first_epoch, second_epoch),
-          second_epoch == first_epoch + 1)
+    check("/firmware/info 가 applied_pwm_epoch 를 발행한다",
+          "applied_pwm_epoch=%lu" in source,
+          "epoch 를 못 읽으면 현장에서 시행 경계를 확인할 방법이 없다")
 
-    # ⑥ 시행 안에서는 단조증가 — 큰 값 뒤 작은 값이 와도 안 내려간다.
-    observer = PwmObserver()
-    observer.observe_state(ARMED)
-    for pwm in (160, 30, -20, 90):
-        observer.observe_pwm(pwm)
-    check("⑥ 시행 중에는 단조증가 (160 뒤 30 을 봐도 160)",
-          observer.max_magnitude == 160)
+    check("`시행 시작·끝의 차이` 안내가 정본에서 빠졌다",
+          "시행 시작·끝의 차이" not in source,
+          "epoch 가 생긴 뒤에는 그 안내가 틀린 사용법이다")
 
-    # 부호는 크기로 본다 — 후진 -160 도 포화다.
-    observer = PwmObserver()
-    observer.observe_state(ARMED)
-    observer.observe_pwm(-160)
-    check("⑥ 후진 -160 도 크기 160 으로 잡힌다", observer.max_magnitude == 160)
 
-    # ⑦ ARMED 를 안 거치면 시행이 아니다.
-    observer = PwmObserver()
-    for state in (DISARMED, READY, ARMING, PENDING, DISARMED, READY, DISARMED):
-        observer.observe_state(state)
-    check("⑦ ARMED 없이 왕복하면 epoch 가 0 그대로 (실측 %d)" % observer.epoch,
-          observer.epoch == 0,
-          "READY·PENDING 은 시행이 아니다 — 모터가 안 돈다")
+# ── 변이 주입 자가검사 ───────────────────────────────────────────────────────
+ARMED_CONDITION = ("  if (nowState == static_cast<uint8_t>(DRIVE_ARMED) &&\n"
+                   "      appliedPwmEpochPrevState != "
+                   "static_cast<uint8_t>(DRIVE_ARMED)) {")
 
-    # ARMED 를 유지하는 동안 재진입으로 세면 안 된다.
-    observer = PwmObserver()
-    for state in (ARMED, ARMED, ARMED, ARMED):
-        observer.observe_state(state)
-    check("⑦ ARMED 유지 중에는 epoch 가 안 는다 (실측 %d)" % observer.epoch,
-          observer.epoch == 1)
+MUTATIONS = [
+    ("ARMED 비교를 == 에서 != 로 뒤집는다 (검토 §66.2 가 통과시킨 변이)",
+     ARMED_CONDITION,
+     ARMED_CONDITION.replace("nowState == static_cast",
+                             "nowState != static_cast")),
+    ("무장 전이의 최댓값 리셋을 지운다",
+     "    appliedPwmMaxMagnitude = 0;\n    ++appliedPwmEpoch;",
+     "    ++appliedPwmEpoch;"),
+    ("epoch 증가를 지운다",
+     "    appliedPwmMaxMagnitude = 0;\n    ++appliedPwmEpoch;",
+     "    appliedPwmMaxMagnitude = 0;"),
+]
+
+
+def contract(marks):
+    """계약을 한 곳에서 판정한다 — 변이 검사도 같은 잣대를 쓴다."""
+    violations = []
+    if marks["trial1-peak"]["max"] != 160:
+        violations.append("1회차 최대 %d (160 이어야)" % marks["trial1-peak"]["max"])
+    if marks["trial1-after-drop"]["max"] != 160:
+        violations.append("시행 중 단조증가 깨짐 %d"
+                          % marks["trial1-after-drop"]["max"])
+    if marks["trial2-peak"]["max"] != 80:
+        violations.append("2회차 최대 %d (80 이어야 — 160 이면 시행 분리 실패)"
+                          % marks["trial2-peak"]["max"])
+    if marks["trial2-held"]["epoch"] != 2:
+        violations.append("무장 두 번 뒤 epoch %d (2 여야 — 폴링 수가 아니다)"
+                          % marks["trial2-held"]["epoch"])
+    if marks["trial3-reverse"]["max"] != 120:
+        violations.append("음수 PWM 크기 관측 %d (120 이어야)"
+                          % marks["trial3-reverse"]["max"])
+    if marks["trial3-reverse"]["epoch"] != 3:
+        violations.append("세 번째 무장 뒤 epoch %d"
+                          % marks["trial3-reverse"]["epoch"])
+    return violations
 
 
 def main():
-    print("── applied_pwm_max 시행 경계 검사 (검토 §65.2) ────────────────")
-    print("  [구조] .ino / rearm_gate.h")
-    structural_checks()
-    print("  [동작] 무장 epoch 모형")
-    behavioural_checks()
-    print("──────────────────────────────────────────────────────────────")
+    print("생산 코드 실행 회귀 — applied_pwm_max 가 시행마다 다시 세는가 (§65.2·§66.2)")
+    print("  받침대 = tools/ino_host_probe.py (`.ino` + 실제 rearm_gate.h 를 g++ 로)")
+
+    try:
+        source = probe.load()
+        print("\n[1] 실제 게이트로 무장 -> 주행 -> 해제 -> 재무장을 두 번 밟는다")
+        marks = run(source)
+    except probe.ProbeError as error:
+        print("\n\033[31m판정 불능\033[0m — %s" % error)
+        return 2
+
+    for tag in ("trial1-peak", "trial1-after-drop", "disarmed",
+                "trial2-peak", "trial2-held", "trial3-reverse"):
+        print("      %-18s state=%d max=%3d epoch=%d"
+              % (tag, marks[tag]["state"], marks[tag]["max"], marks[tag]["epoch"]))
+
+    violations = contract(marks)
+    check("① ~ ④ 시행 경계 계약", not violations, "\n      ".join(violations))
+
+    print("\n[2] 구조 검사 (약한 증거 — 배선은 텍스트로만 보인다)")
+    structural_checks(source)
+
+    print("\n[3] 변이 주입 자가검사")
+    for label, old, new in MUTATIONS:
+        try:
+            mutant = run(probe.mutate(source, old, new), "mutant")
+        except probe.ProbeError as error:
+            print("\n\033[31m판정 불능\033[0m — 변이 컴파일 실패: %s" % error)
+            return 2
+        caught = bool(contract(mutant))
+        check("⑤ %s -> 계약이 깨진다" % label, caught,
+              "변이를 넣었는데 계약이 통과하면 이 시험은 생산 코드를 안 돌린 것이다")
+        if caught:
+            print("      잡은 위반: %s" % contract(mutant)[0])
+
+    print()
     if FAILURES:
-        print("  실패 %d 건" % len(FAILURES))
+        print("\033[31m%d 건 위반\033[0m" % len(FAILURES))
         return 1
-    print("  전량 통과 — max 는 이번 무장 안의 최대다.")
+    print("\033[32m전량 통과\033[0m — 시행 경계가 서 있고, 무너뜨리면 이 시험이 잡는다")
     return 0
 
 

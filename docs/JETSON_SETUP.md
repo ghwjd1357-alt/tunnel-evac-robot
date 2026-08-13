@@ -439,10 +439,23 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
 ⚠ **굽기 전 보드에서 `version=…-1.3.0` 이 나오는 것이 정상이다**(위 두 상태 표).
-🔴 **다음 굽기 뒤에는 `…-1.4.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
+🔴 **다음 굽기 뒤에는 `…-1.5.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
 `FW_GIT_SHA` 는 양쪽 다 0 이라 **이 필드로 커밋을 판별할 수 없다.**
-대신 `wheel_radius=0.05698` · `kp=30.000` · `ki=5.000` 이 소스와 일치하는지 본다
-(`d0_check.sh` 검사 [7] 이 이걸 자동으로 한다).
+
+🔴 **08-13 부터 정체 키가 갈라졌다** (검토 §65.1·§65.3 → §66.1). 구판은 `wheel_radius`
+한 개였고 그 하나가 odom 과 제어에 같이 들어가 있었다. 지금은 계열마다 다른 이름이다:
+
+| 필드 | 무엇의 눈금인가 |
+|---|---|
+| `odom_wheel_radius` | `/odom` 발행 전용 — 지면이 동의한 거리 |
+| `control_wheel_radius` | PI 피드백 전용 — **제어 튜닝이 측정된 옛 눈금** |
+| `cmd_wheel_base` | `cmd_vel` → 바퀴 목표 |
+| `odom_wheel_base` | odom yaw 적분 전용 |
+
+🔴 **여기에 값을 베껴 적지 않는다** — 그게 이 문서가 08-13 까지 `0.05698` 로 남아
+있던 이유다(§66.1). 판정은 `bash tools/d0_check.sh` 검사 [7] 이 한다. 그 검사는
+기대값을 `.ino` 에서 직접 읽어 대조하고 **화면에 자기 기대값을 같이 찍는다.**
+현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
@@ -579,7 +592,7 @@ bash tools/d0_check.sh
 | 4 | `/odom` QoS | 발행자 **RELIABLE**(소스 v1.4) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
 | 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(소스 v1.4) · 위와 동일 |
 | 6 | 전진 부호 | 바퀴를 손으로 앞으로 굴리면 `linear.x > 0` |
-| 7 | 펌웨어 정체 | `/firmware/info` 의 `wheel_radius=0.05698` · `kp=30 ki=5` |
+| 7 | 펌웨어 정체 | `/firmware/info` 의 정체 키가 **`.ino` 와 일치** — 기대값은 스크립트가 소스에서 읽어 화면에 같이 찍는다(§5-d). 🔴 08-13 부터 `wheel_radius` 한 개가 아니라 `odom_wheel_radius`·`control_wheel_radius`·`cmd_wheel_base`·`odom_wheel_base` 넷이다 |
 | 8 | E-stop 배선 | 버튼을 **누르면** `/estop/state` 가 `true` 로 바뀐다 |
 | — | 재확인 | 종료 직전에 `ekf_filter_node` 가 **아직 살아 있는가**(마지막 `topic info` 가 **rc 0 으로 완주**했을 때만 판독) |
 
@@ -765,8 +778,11 @@ bag 3회(`~/Desktop/d0_evidence/d0_watchdog_0807_15{19,21,22}`, 노트북 보존
 영상 = `~/Desktop/d0_evidence/video/IMG_3461.mov` (iPhone 14 Pro · 3840×2160 HEVC ·
 **실측 `59.9955 fps`**(`r_frame_rate=60/1`, 슬로모션 아님) · 1327 프레임 / 22.118초).
 🔴 **촬영 시각 `2026-08-07 15:22:58 KST` 라 bag `d0_watchdog_0807_1522` 와 같은 시행**이고,
-화면 로그에도 그 bag 경로가 찍혀 있다. 재계산 = `python3 tools/watchdog_video.py <영상>
---t0-frame 670 --preset 0807-1522 --bag-ms 516.2` (그래프 = 같은 디렉터리 `wd_result.png`).
+화면 로그에도 그 bag 경로가 찍혀 있다. 🔴 **판재 이전 시행**이라 반지름 profile 이
+`pre-plate` 여야 그때의 수가 재현된다(검토 §65.3·§66.1 — preset 이 스스로 선언하므로
+플래그를 잊어도 옳게 나오지만, 읽는 사람이 시대를 알도록 명시한다).
+재계산 = `python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522
+--pre-plate --bag-ms 516.2` (그래프 = 같은 디렉터리 `wd_result.png`).
 
 | 항목 | 값 |
 |---|---|
@@ -834,7 +850,7 @@ zero 발행기를 껐다.
 | 교차 차이 | bag `516.0` − 영상 `450.1` = **+65.9 ms** | — |
 
 재계산 = `python3 tools/watchdog_video.py <영상> --t0-frame 473 --preset 0811-1938
---bag-ms 516.0` · `python3 tools/watchdog_report.py <bag>`.
+--pre-plate --bag-ms 516.0` (🔴 **판재 이전** profile — §66.1) · `python3 tools/watchdog_report.py <bag>`.
 
 - ✅ **1-b(`≤600ms`) 실측 충족** — `516.0 ms`. 08-07 의 `516.2 ms` 와 **0.2ms** 차이라,
   안전 경로 배선이 바뀌어도 총 정지가 같은 자리에 있음을 **이 시행이 직접** 보였다.

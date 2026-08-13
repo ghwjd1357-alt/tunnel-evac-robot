@@ -534,5 +534,69 @@ class CliContractTest(unittest.TestCase):
         self.assertIn('조기 EOF', buf.getvalue())
 
 
+class HistoricalProfileTest(unittest.TestCase):
+    """검토 §66.1 — 판재 이전 자료는 판재 이전 반지름으로만 그때의 수가 나온다.
+
+    필수 부정·역회귀: 기본(판재 이후) profile 로 재면 **불일치해야** 하고, 역사
+    profile 에서는 **일치해야** 한다. 한쪽만 보면 "아무 profile 이나 같은 수를
+    낸다" 와 구별이 안 된다.
+    """
+
+    def test_45_the_two_profiles_differ_by_the_radius_ratio(self):
+        ratio = wv.PRE_PLATE_WHEEL_RADIUS_M / wv.WHEEL_RADIUS_M
+        self.assertAlmostEqual(1.0 / 0.80783, ratio, places=4)
+        self.assertEqual(wv.PROFILE_RADIUS_M['pre-plate'],
+                         wv.PRE_PLATE_WHEEL_RADIUS_M)
+        self.assertEqual(wv.PROFILE_RADIUS_M['post-plate'], wv.WHEEL_RADIUS_M)
+
+    def test_46_recorded_presets_declare_the_era_they_were_shot_in(self):
+        """🔴 `--pre-plate` 를 잊는 길이 있으면 안 된다 — preset 이 자기 시대를 안다."""
+        for name in ('0807-1522', '0811-1938'):
+            with self.subTest(preset=name):
+                self.assertEqual('pre-plate', wv.PRESETS[name]['profile'])
+
+    def test_47_a_forgotten_flag_still_reproduces_the_recorded_number(self):
+        """플래그 없이 preset 만 줘도 판재 이전 반지름이 걸린다."""
+        cfg = dict(wv.PRESETS['0807-1522'])
+        self.assertEqual('pre-plate', wv.resolve_profile(cfg, False))
+        self.assertNotIn('profile', cfg, 'profile 은 기하 인자와 섞이면 안 된다')
+
+    def test_48_a_flag_that_contradicts_the_preset_is_undecidable(self):
+        """🔴 모순은 조용히 한쪽이 이기지 않는다 — 판정 불능이다."""
+        with self.assertRaises(wv.UsageError):
+            wv.resolve_profile({'profile': 'post-plate'}, True)
+
+    def test_49_new_data_without_a_preset_keeps_the_current_radius(self):
+        """판재 **이후** 자료는 기본 profile 을 유지한다 — 역사 값이 새 자료를 안 먹는다."""
+        self.assertEqual('post-plate', wv.resolve_profile({}, False))
+        self.assertEqual('pre-plate', wv.resolve_profile({}, True))
+
+    def test_50_the_default_profile_does_not_reproduce_pre_plate_evidence(self):
+        """🔴 필수 부정 — 판재 이후 반지름으로 재면 기록된 drift 가 안 나온다."""
+        deg = wv.mm_s_to_deg_per_frame(wv.RECORDED['drift_mm_s'], FPS)
+        try:
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.PRE_PLATE_WHEEL_RADIUS_M
+            historical = wv.deg_per_frame_to_mm_s(deg, FPS)
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M
+            current = wv.deg_per_frame_to_mm_s(deg, FPS)
+        finally:
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M
+        self.assertAlmostEqual(wv.RECORDED['drift_mm_s'], historical, places=9)
+        self.assertNotAlmostEqual(wv.RECORDED['drift_mm_s'], current, places=3)
+        self.assertAlmostEqual(0.80783, current / historical, places=5)
+
+    def test_51_the_active_profile_is_printed_with_its_name(self):
+        """현장에서 화면만 보고 어느 시대로 쟀는지 알 수 있어야 한다."""
+        buf, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err):
+            wv.main(['watchdog_video.py', 'x.mov', '--t0-frame', '670',
+                     '--preset', '0807-1522', '--fps', str(FPS)],
+                    series_fn=lambda *a, **k: series())
+        out = buf.getvalue()
+        self.assertIn('pre-plate', out)
+        self.assertIn('%.5f' % wv.PRE_PLATE_WHEEL_RADIUS_M, out)
+        self.assertIn('preset', out)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

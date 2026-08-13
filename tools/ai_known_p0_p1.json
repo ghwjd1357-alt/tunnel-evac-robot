@@ -558,5 +558,15 @@
     "id": "0813-handoff-directed-two-bundles-65",
     "path": "docs/CURRENT_HANDOFF.md",
     "anchor": "전부 **같은 하나의 묶음**을 가리켜야 한다"
+  },
+  {
+    "id": "0813-historical-profile-not-propagated-to-active-runbooks-66",
+    "path": "tools/watchdog_video.py",
+    "anchor": "역사 자료는 그 시대의 값으로만 그때의 수가 재현된다"
+  },
+  {
+    "id": "0813-regressions-ran-a-python-copy-not-the-firmware-66",
+    "path": "tools/ino_host_probe.py",
+    "anchor": "펌웨어 계약을 지키는 회귀는 `.ino` 원문을 떼어다 host 에서 컴파일해 돌린다"
   }
 ]
