@@ -241,8 +241,11 @@ done < <(grep -rhoP '`[^`]+`' "${SRC[@]}" 2>/dev/null | tr -d '`' \
 
 # ── 7. Desktop 역사 문서 참조 (이름 변경·이동 감지) ──────────────────────
 MISSD=""
+# 🔴 08-13 — 검색 자리가 `개발현황/` 하나뿐이라는 전제가 틀렸다. 날짜별 현황은 거기 있지만
+#   정찰·작업가이드 같은 1차 기록은 **Desktop 루트**에 쓰인다(`0813_복도정찰.md`). 한 자리만
+#   보면 실재하는 문서를 "없다"고 부른다 — 이름 변경 감지라는 목적에 두 자리 다 필요하다.
 for f in $(grep -rhoP '[0-9]{4}_[가-힣A-Za-z_]+\.md' "${SRC[@]}" 2>/dev/null | sort -u); do
-    [ -f "$DESK/$f" ] || MISSD="$MISSD $f"
+    [ -f "$DESK/$f" ] || [ -f "$HOME/Desktop/$f" ] || MISSD="$MISSD $f"
 done
 [ -z "$MISSD" ] && ok "Desktop 역사 문서 참조 유효" || bad "Desktop 에 없는 문서:$MISSD"
 
