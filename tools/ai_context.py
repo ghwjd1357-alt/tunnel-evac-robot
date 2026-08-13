@@ -186,6 +186,9 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 회수했다. 짝 도구와 **같은 프로필**이다 — 둘은 같은 기준(`§7-c-0`)에 수치를
         # 넣고 서로를 교차검증하므로, 한쪽만 라우팅되면 그 교차가 문맥에서 끊긴다.
         "tools/watchdog_video.py", "tools/test_watchdog_video.py",
+        # 08-13 밤: 여러 지면 주행을 한 표로 세운다 — 짝 도구(drive_ground_report)와
+        # 같은 프로필이어야 "한 시행은 상수를 못 정한다"는 규율이 문맥에서 안 끊긴다.
+        "tools/ground_run_table.py",
     )),
     ("nav2", (
         "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",
@@ -223,6 +226,8 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "tools/ino_host_probe.py",
         "tools/firmware_constants.py", "tools/firmware_info_length_check.py",
         "tools/test_control_feedback_scale.py", "tools/test_applied_pwm_epoch.py",
+        # 08-13 밤: odom 상수를 지면 실측으로 검증한다(예약 32-e) · 배선 6행 실기 도구.
+        "tools/test_odom_constants.py", "tools/rearm_field_wiring.py",
     )),
     ("docs", ("docs/*.md",)),
 )

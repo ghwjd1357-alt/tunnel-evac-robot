@@ -1469,13 +1469,29 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     않는다. ⚠ `/estop/state`·`/drive/diag` 는 1 Hz 라 조용한 것을 "무사"로 읽지 않는다.
 
     🔴 **정찰이 다루지 않은 08-14 선행 조건이 둘 더 있다** —
-    ⓐ `tunnel_bringup/urdf/robot_real.urdf:175` 의 `lidar_joint` 가 아직 `xyz="0 0 0"` 이다.
-    정찰은 스캔 평면 **832 mm** 를 전제로 §8-① 위험을 판정했는데 **그 값이 URDF 에 안
-    들어가 있다.** 그대로 지도를 그리면 스캔이 엉뚱한 자리에 붙는다(§3 R5 경고). 🔴 이건
-    `src/**` 라 **동결 예외가 필요하다** — 정찰의 "예외를 한 번도 안 써도 된다"는
-    `inflation_radius` 얘기이고 이 건은 별개다.
-    ⓑ `/dev/rplidar` udev 규칙(시리얼 `78824f27dc6ff011a04a8c301045c30f` · `10c4:ea60`)이
-    아직 없다.
+
+    **ⓐ URDF 라이다 오프셋** — `tunnel_bringup/urdf/robot_real.urdf:175` 의 `lidar_joint`
+    가 아직 `xyz="0 0 0"` 이다. 정찰은 스캔 평면 **832 mm** 를 전제로 §8-① 위험을
+    판정했는데 **그 값이 URDF 에 안 들어가 있다.** 그대로 지도를 그리면 스캔이 엉뚱한
+    자리에 붙어 지도를 못 쓴다(§3 R5 경고).
+    🔴 **`src/**` 라 동결 예외가 필요하다**(5 회차. 4 회 소진) — 정찰의 *"예외를 한 번도
+    안 써도 된다"* 는 `inflation_radius` 얘기이고 이 건은 별개다.
+    **절차(현장에서 고민하지 않도록 미리 적는다)**:
+    1. 줄자로 **바닥 → 라이다 스캔 평면** 높이를 잰다(라이다 몸체의 광학 창 중심).
+    2. URDF 의 `base_link` 는 **바닥이 아니라 축 높이 `0.053`** 에 있다
+       (`base_footprint → base_link`). 그러므로 넣을 값은 **`잰 높이 − 0.053`** 이다.
+       정찰 전제 `832 mm` 라면 `0.832 − 0.053 = 0.779`.
+    3. `<origin xyz="0 0 <그 값>" rpy="0 0 0"/>` · TODO 주석을 실측 기록으로 교체.
+    4. `colcon build --symlink-install --packages-select tunnel_bringup` 뒤
+       `ros2 run tf2_ros tf2_echo base_link lidar_link` 로 값이 실제로 반영됐는지 본다.
+    ⚠ **스캔 평면이 몸통 최상면 +5cm 이상**인지 같이 확인한다(`PITFALLS §7`) — 낮으면
+    레이저가 자기 몸통을 때려 지나간 자리마다 유령 장애물이 생긴다.
+
+    **ⓑ `/dev/rplidar` udev** — ✅ 규칙 파일은 **08-13 밤에 작성했다**
+    (`tools/udev/99-rplidar.rules`). 설치·확인 명령은 그 파일 머리말에 있고, 실행은
+    Jetson 에서 사람이 한다. 🔴 `10c4:ea60` 은 CP210x 장치가 전부 공유하므로 **시리얼까지
+    함께 잠갔다.** 쓰는 법 = `ros2 launch … real_mapping.launch.py lidar_port:=/dev/rplidar`
+    (런치가 `lidar_port` 인자를 받으므로 `src/**` 를 안 건드린다).
 
     **남은 결정 1건** — 시연 경로: 한쪽 복도(약 2분) vs 양쪽 + 연결 통로(약 5분 30초).
     ✅ SLAM 위험이 닫혔으므로 **안전 판단이 아니라 영상 길이 판단**이다.
@@ -1912,8 +1928,8 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 
     | | 무엇이 아직 안 봉인됐나 | 완료판정 | 재개방 |
     |---|---|---|---|
-    | **67.3** | 회귀가 봉인한 것은 `desiredPwm` 궤적과 **시행별** `appliedPwm` 최대·epoch 이다. **매 tick applied 궤적 전체가 아니다** — `PWM_RAMP_STEP` `2→3` 변이가 통과한다 | epoch harness 가 tick 별 applied 배열을 출력해 부모/현행을 나란히 비교하고 ramp `2→3` 이 실패하면 완료. 또는 `.ino` 주석·정본의 주장을 **봉인된 범위로 낮추면** 완료 | ramp 상수나 `movePwmTowardTarget()` 을 건드릴 때 |
-    | **67.4** | `.ino` 주석이 길이 상한을 `1157/378` 로 적는데 도구 실행값은 **`1102/433`** 이다(`%f` 를 소스 상수 실값으로 풀면서 바뀌었다) | 다음 firmware 변경 때 주석을 실행값으로 맞추면 완료 | 같은 묶음에서 `.ino` 를 열 때 |
+    | **67.3** | ✅ **08-13 밤 닫힘** — `test_applied_pwm_epoch` 가 매 tick `appliedPwm` 배열을 찍어 기준 궤적과 견주고, 검토가 뚫었던 `PWM_RAMP_STEP` `2→3` 변이를 **step 120 에서 잡는다**(`157` vs `158`) | — | ramp 상수·`movePwmTowardTarget()` 을 건드리면 기준 궤적을 다시 잡는다 |
+    | **67.4** | ✅ **08-13 밤 닫힘** — `.ino` 주석을 도구 실행값으로 맞췄다(`control_wheel_radius` 필드가 빠지며 **`1072/463`**). `TEST_GATES` 의 `53`·`105` 도 `61`·`114` 로 정정 | — | `/firmware/info` 필드를 더하거나 뺄 때 |
 
     1. **§65.1** 반지름 변경이 odom 뿐 아니라 **PI 피드백도 바꿨다** → 상수 분리 (위)
     2. **§65.2** `applied_pwm_max` 가 부팅 이후 단조증가라 **시행별 최대를 못 낸다**

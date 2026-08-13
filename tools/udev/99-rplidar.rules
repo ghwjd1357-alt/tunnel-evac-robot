@@ -1,0 +1,53 @@
+# 99-rplidar.rules — RPLIDAR C1 에 고정 이름 `/dev/rplidar` 를 붙인다 (2026-08-13 밤 신설)
+# =============================================================================
+# 무엇을 해결하는가:
+#   라이다도 Teensy 와 같은 USB 시리얼이라 꽂힌 순서대로 /dev/ttyUSB0, ttyUSB1 … 을
+#   받는다. Teensy 는 /dev/teensy_drive 로 고정돼 있는데 라이다는 아직 안 붙어 있어,
+#   🔴 **둘을 같이 꽂는 08-14 지도 세션에서 번호가 뒤바뀌면 그 자리에서 막힌다.**
+#   ⚠ Teensy 는 ttyACM 계열(CDC-ACM)이고 라이다는 ttyUSB 계열(CP210x)이라 서로
+#     번호를 뺏지는 않는다. 그래도 라이다를 여러 개 꽂거나 다른 USB 시리얼(디버그
+#     어댑터 등)을 붙이면 바로 흔들린다 — 고정 이름은 그때를 위한 것이다.
+#
+# 왜 `src/**` 를 안 건드리고 이걸 쓰나:
+#   런치가 `lidar_port` 인자를 받으므로 `lidar_port:=/dev/rplidar` 로 넘기면 된다.
+#   포트를 소스에 박으면 동결 예외를 써야 하고, 그건 지금 4 회 소진 상태다.
+#   정본 = docs/REAL_ROBOT_VALUES.md §5 · docs/MASTER_PLAN.md §7 예약 38.
+#
+# =============================================================================
+# 🔴 아래 값의 출처 — **실측이다**(docs/REAL_ROBOT_VALUES.md §5):
+#     idVendor=10c4 · idProduct=ea60 (Silicon Labs CP210x)
+#     ID_SERIAL_SHORT=78824f27dc6ff011a04a8c301045c30f
+#
+#   ⚠ `10c4:ea60` 은 CP210x 를 쓰는 **모든** 장치가 공유한다 — USB-시리얼 어댑터,
+#     다른 센서까지 같은 값이다. 그래서 VID/PID 만으로 규칙을 걸면 엉뚱한 장치에
+#     /dev/rplidar 가 붙는다. **시리얼까지 함께 잠근다.**
+#
+#   [설치 전 실측 — 값이 다르면 규칙을 고치고 설치한다]
+#     라이다를 Jetson USB 에 꽂은 뒤:
+#       udevadm info -q property -n /dev/ttyUSB0 \
+#         | grep -E '^ID_VENDOR_ID=|^ID_MODEL_ID=|^ID_SERIAL_SHORT='
+#     기대:
+#       ID_VENDOR_ID=10c4
+#       ID_MODEL_ID=ea60
+#       ID_SERIAL_SHORT=78824f27dc6ff011a04a8c301045c30f
+#     🔴 세 값 중 하나라도 다르면 **다른 개체**다. 그대로 설치하지 말고 아래 값을
+#        실측으로 바꾼 뒤 설치한다(그리고 REAL_ROBOT_VALUES §5 도 같이 고친다).
+#
+#   [설치]
+#     sudo cp ~/ros2_ws/tools/udev/99-rplidar.rules /etc/udev/rules.d/
+#     sudo udevadm control --reload-rules && sudo udevadm trigger
+#     # USB 를 뽑았다 다시 꽂는 것이 가장 확실하다
+#
+#   [확인]
+#     ls -l /dev/rplidar          # -> /dev/rplidar -> ttyUSB0 처럼 나와야 한다
+#     🔴 심볼릭 링크가 안 생기면 규칙이 안 걸린 것이다. 값 대조부터 다시 한다.
+#
+#   [쓰는 법 — src/** 를 안 건드린다]
+#     ros2 launch tunnel_bringup real_mapping.launch.py lidar_port:=/dev/rplidar
+#
+# ⚠ `MODE="0666"` 은 dialout 그룹에 안 들어간 계정에서도 열리게 한다. Jetson 계정이
+#   dialout 에 있으면 필요 없지만, 있어서 해로운 설정은 아니고 08-06 에 권한 때문에
+#   한 번 막힌 적이 있어 남긴다(docs/JETSON_SETUP.md §5-0 과 같은 사고).
+# =============================================================================
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="78824f27dc6ff011a04a8c301045c30f", SYMLINK+="rplidar", MODE="0666"

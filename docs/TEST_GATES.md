@@ -279,6 +279,20 @@ bash tools/doc_check.sh --after-push                        # 원격 ahead/behin
 | **동결 게이트** (platform-core-freeze · mission-logic-RC · mission-v1-freeze) | **전량 + 쌍굴 + 지도 승격 evidence** |
 | **위에 없는 런타임 변경** (`follower_monitor.py` · waypoints yaml · launch/wiring 등) | ★ **fail-closed — 검토자가 관련 E2E 를 직접 선정**하고 그 근거를 검토본에 남긴다. "표에 없으니 생략"은 금지 |
 
+★★★★★★★★ **08-13 밤 — odom 상수·지면 실측 도구 4종 신설** (예약 32-e · `PITFALLS §12`).
+`python3 tools/test_odom_constants.py` — `.ino` 상수를 **지면 실측**(줄자·바퀴 회전수)과
+대조한다. 🔴 비교 대상 둘 중 하나는 반드시 **저장소 밖에서 온 사실**이다. 기각쌍
+`(0.04603/0.670)` 과 하중 반지름 `0.0451` 을 넣으면 **반드시 실패**한다(역회귀 2종).
+`tools/ground_run_table.py` — 여러 주행을 한 표로 세운다. 🔴 **한 시행은 상수를 못 정한다** —
+08-13 에 11 개를 나란히 놓고서야 회전 거동이 오후·밤 동일함이 드러났다. `odom/줄자` 판정은
+안 낸다(창 정의가 달라 `drive_ground_report` 와 값이 갈린다 — 권위는 하나여야 한다).
+`tools/drive_ground_report.py` — 🔴 **줄자 타당성 관문** 신설. `줄자 ÷ 시간` 이 명령 속도의
+`0.85~1.30` 배를 벗어나면 *"이 값으로 상수를 바꾸지 마라"* 를 찍는다. 08-13 오후 값(0.77배)은
+걸리고 밤 값(1.02배)은 통과한다 — **이 검사 한 줄이 하루를 막았을 것이다.**
+`tools/rearm_field_wiring.py` — `§7-c-E` 축소판(배선 6 행 · 약 8 분). 🔴 게이트 헤더
+sha256 이 다르면 **거부하고 13 행 전량으로 돌려보낸다**(`JETSON_SETUP §7-c-E2`).
+⚠ 실기 도구라 저장소 회귀가 없다(예약 21 과 같은 자리) — 검토자는 게이트 거부 경로를 직접 친다.
+
 ★★★★★★★ **08-11 §57·§58 — R0 watchdog 영상 판정기** (`tools/watchdog_video.py` · 회귀
 `python3 -m unittest tools.test_watchdog_video` **61**, 짝 도구 `test_watchdog_report` **20**).
 🔴 **08-13 §66.1 로 8 건이 늘었다** — 판재 이전 자료를 기본 profile 로 재면 기록값과

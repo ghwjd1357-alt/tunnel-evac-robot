@@ -719,24 +719,16 @@ if [ "$CLK_RC" = "0" ] && [ -s "$FWOUT" ]; then
   #   그건 검사가 아니라 장애물이다.
   #   ⚠ 굽기 **전**에는 이 검사가 NG 로 나오는 것이 정상이다 — 보드에 아직 옛 펌웨어가
   #     들어 있다는 사실을 정확히 말하는 것이다.
-  FW_KEYS=$(D0_INO="$D0_ROOT/firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino" \
-            python3 - <<'PYEOF'
-import os, re, sys
+  # 🔴 08-13 밤 2차 — 기대 **키 목록**도 손으로 안 든다. 앞 판은 네 키를 튜플로 박아
+  #   두었는데, 같은 날 `CONTROL_WHEEL_RADIUS` 를 지우자(예약 32-e) 목록이 `.ino` 와
+  #   어긋나 검사가 통째로 멈췄다 — 값을 베낀 것(§65.3)과 같은 병이 **목록**에서 재발.
+  #   이제 `/firmware/info` 의 format·인자에서 `이름=%.Nf` 짝을 직접 읽는다.
+  FW_KEYS=$(PYTHONPATH="$D0_ROOT/tools" python3 -c \
+    'import sys; from firmware_constants import firmware_identity_keys
 try:
-    src = open(os.environ["D0_INO"], encoding="utf-8").read()
-except OSError:
-    sys.exit(1)
-c = dict(re.findall(r"static\s+const\s+double\s+(\w+)\s*=\s*([0-9][0-9.eE+-]*)\s*;", src))
-need = ("ODOM_WHEEL_RADIUS", "CONTROL_WHEEL_RADIUS", "CMD_WHEEL_BASE", "ODOM_WHEEL_BASE")
-if not all(k in c for k in need):
-    sys.exit(1)
-print("odom_wheel_radius=%.5f" % float(c["ODOM_WHEEL_RADIUS"]))
-print("control_wheel_radius=%.5f" % float(c["CONTROL_WHEEL_RADIUS"]))
-print("cmd_wheel_base=%.3f" % float(c["CMD_WHEEL_BASE"]))
-print("odom_wheel_base=%.3f" % float(c["ODOM_WHEEL_BASE"]))
-print("kp=%.3f; ki=%.3f" % (float(c["WHEEL_KP"]), float(c["WHEEL_KI"])))
-PYEOF
-)
+    print("\n".join(firmware_identity_keys()))
+except Exception as exc:
+    print(exc, file=sys.stderr); sys.exit(1)' 2>/dev/null)
   if [ -z "$FW_KEYS" ]; then
     ng '.ino 에서 기대 상수를 못 읽었다 — 정체 검사를 못 한다 (도구를 먼저 고쳐라)'
   else

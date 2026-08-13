@@ -15,8 +15,10 @@
   ② epoch 는 정확히 **2** — 무장 두 번 = 2 이지 폴링 수가 아니다
   ③ 시행 안에서는 단조증가 (한 번 찍은 포화가 뒤에 지워지지 않는다)
   ④ 음수 PWM 은 크기로 센다
-  ⑤ 🔴 **변이 주입 자가검사** — 검토 §66.2 가 뚫은 `== -> !=` 를 포함해 세 변이가
-     전부 이 시험을 깨야 한다.
+  ⑤ 매 tick `appliedPwm` 배열 — 🔴 **정본이 '부모판과 같은 궤적' 이라고 말하므로
+     봉인이 거기까지 닿아야 한다** (검토 §67.3)
+  ⑥ 🔴 **변이 주입 자가검사** — 검토 §66.2 가 뚫은 `== -> !=` 와 §67.3 이 뚫은
+     `PWM_RAMP_STEP 2 -> 3` 을 포함해 **네 변이**가 전부 이 시험을 깨야 한다.
 
 왜 파이썬 복제 모형을 버렸나
 ----------------------------
@@ -141,7 +143,19 @@ static void armThroughGate()
   }
 }
 
+/* 🔴 검토 §67.3 — 매 tick 의 appliedPwm 배열을 찍는다.
+   앞 판은 시행별 **최대**와 epoch 만 봉인했다. 검토가 PWM_RAMP_STEP 2->3 을 주입하자
+   과도 궤적이 달라졌는데도 endpoint 가 같아 통과했다. 정본과 .ino 주석은 부모판과
+   '같은 desiredPwm/appliedPwm 궤적' 이라고 말하므로, 봉인이 그 문장까지 닿아야 한다. */
+static void trace(int step)
+{
+  printf("T %d %d %d %d %d\\n", step,
+         appliedPwm[0], appliedPwm[1], appliedPwm[2], appliedPwm[3]);
+}
+
 /* 목표 PWM 을 주고 램프가 다 오를 때까지 돌린다. */
+static int g_traceStep = 0;
+
 static void driveTo(int pwm, int loops)
 {
   for (int motor = 0; motor < 4; ++motor) {
@@ -151,6 +165,7 @@ static void driveTo(int pwm, int loops)
   for (int i = 0; i < loops; ++i) {
     rearmGateOnCommand(&driveGate, 0.10, 0.0, g_nowMs);
     tickOnce(20);
+    trace(g_traceStep++);          /* 🔴 §67.3 — 과도 궤적 전량 */
   }
 }
 
@@ -160,6 +175,7 @@ static void report(const char* tag)
          tag, (int)driveGate.state, appliedPwmMaxMagnitude,
          (unsigned long)appliedPwmEpoch, appliedPwm[0]);
 }
+
 """
 
 MAIN = """
@@ -220,13 +236,17 @@ def run(source, tag="epoch"):
     pieces.append(MAIN)
 
     out = probe.compile_and_run(pieces, "%s.cpp" % tag, include_sketch=True)
-    marks = {}
+    marks, track = {}, []
     for line in out.strip().split("\n"):
         parts = line.split()
+        if parts[0] == "T":                     # 🔴 §67.3 — 매 tick applied 배열
+            track.append(tuple(int(v) for v in parts[2:]))
+            continue
         marks[parts[0]] = {
             key: int(value)
             for key, value in (piece.split("=") for piece in parts[1:])
         }
+    marks["_track"] = track
     return marks
 
 
@@ -279,12 +299,31 @@ MUTATIONS = [
     ("epoch 증가를 지운다",
      "    appliedPwmMaxMagnitude = 0;\n    ++appliedPwmEpoch;",
      "    appliedPwmMaxMagnitude = 0;"),
+    # 🔴 검토 §67.3 이 뚫은 변이 — 과도 궤적만 바꾸고 endpoint 는 그대로 두는 변이다.
+    #    최대·epoch 만 보면 안 잡히고, 매 tick 배열을 견줘야 잡힌다.
+    ("PWM_RAMP_STEP 을 2 에서 3 으로 (과도 궤적만 바뀐다 · 검토 §67.3)",
+     "static const int PWM_RAMP_STEP = 2;",
+     "static const int PWM_RAMP_STEP = 3;"),
 ]
 
 
-def contract(marks):
-    """계약을 한 곳에서 판정한다 — 변이 검사도 같은 잣대를 쓴다."""
+def contract(marks, baseline_track=None):
+    """계약을 한 곳에서 판정한다 — 변이 검사도 같은 잣대를 쓴다.
+
+    `baseline_track` 을 주면 **매 tick appliedPwm 배열**까지 견준다 (검토 §67.3).
+    """
     violations = []
+    if baseline_track is not None:
+        got = marks.get("_track") or []
+        if got != baseline_track:
+            first = next((i for i, (a, b) in enumerate(zip(got, baseline_track))
+                          if a != b), min(len(got), len(baseline_track)))
+            violations.append(
+                "applied 궤적이 기준과 다르다 (step %d: %s vs %s · 길이 %d vs %d)"
+                % (first,
+                   got[first] if first < len(got) else "-",
+                   baseline_track[first] if first < len(baseline_track) else "-",
+                   len(got), len(baseline_track)))
     if marks["trial1-peak"]["max"] != 160:
         violations.append("1회차 최대 %d (160 이어야)" % marks["trial1-peak"]["max"])
     if marks["trial1-after-drop"]["max"] != 160:
@@ -322,6 +361,8 @@ def main():
         print("      %-18s state=%d max=%3d epoch=%d"
               % (tag, marks[tag]["state"], marks[tag]["max"], marks[tag]["epoch"]))
 
+    baseline = marks.get("_track") or []
+    print("      매 tick applied 궤적 %d 스텝 확보 (검토 §67.3)" % len(baseline))
     violations = contract(marks)
     check("① ~ ④ 시행 경계 계약", not violations, "\n      ".join(violations))
 
@@ -335,11 +376,11 @@ def main():
         except probe.ProbeError as error:
             print("\n\033[31m판정 불능\033[0m — 변이 컴파일 실패: %s" % error)
             return 2
-        caught = bool(contract(mutant))
+        caught = bool(contract(mutant, baseline))
         check("⑤ %s -> 계약이 깨진다" % label, caught,
               "변이를 넣었는데 계약이 통과하면 이 시험은 생산 코드를 안 돌린 것이다")
         if caught:
-            print("      잡은 위반: %s" % contract(mutant)[0])
+            print("      잡은 위반: %s" % contract(mutant, baseline)[0])
 
     print()
     if FAILURES:

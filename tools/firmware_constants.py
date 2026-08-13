@@ -82,3 +82,50 @@ def firmware_constants():
 if __name__ == "__main__":
     for key, val in sorted(firmware_constants().items()):
         print("%-34s = %s" % (key, val))
+
+
+def firmware_identity_keys():
+    """`/firmware/info` 가 발행하는 **실수 필드**를 `키=값` 문자열 목록으로 돌려준다.
+
+    왜 이렇게 뽑나 (08-13 밤)
+    ------------------------
+    `d0_check.sh` 검사 7 은 기대 키 목록을 **손으로 들고** 있었다. 08-13 밤에
+    `CONTROL_WHEEL_RADIUS` 를 지우자(예약 32-e) 그 목록이 `.ino` 와 어긋나 검사가
+    `sys.exit(1)` 로 빠졌다 — 🔴 **현장에서 정체 검사가 통째로 멈추는 상태**였다.
+    구판이 `wheel_radius=0.05698` 을 박아 두었다가 겪은 것(§65.3)과 **같은 병**이고,
+    그때는 값을 베꼈고 이번엔 **키 목록**을 베꼈다.
+
+    → 그래서 목록도 안 든다. `/firmware/info` 의 **format 문자열과 인자 목록**에서
+    `이름=%.Nf` 짝을 직접 읽는다. 펌웨어가 필드를 더하거나 빼면 이 함수가 **따라온다.**
+
+    반환 예: `['odom_wheel_radius=0.05698', 'cmd_wheel_base=0.620', ...]`
+    """
+    import firmware_info_length_check as fil          # noqa: PLC0415
+
+    source = fil.read_ino()
+    _buffer, fmt, args = fil.extract(source)
+    table = _load()
+
+    out = []
+    specs = fil.SPEC.findall(fmt)
+    if len(specs) != len(args):
+        raise ValueError("변환지시자 %d 개 vs 인자 %d 개 — 짝이 안 맞는다"
+                         % (len(specs), len(args)))
+    # `이름=%.Nf` 의 '이름' 은 그 지시자 **직전**의 format 조각 꼬리에 있다.
+    cursor = 0
+    for spec, arg in zip(specs, args):
+        at = fmt.index(spec, cursor)
+        cursor = at + len(spec)
+        if not spec.endswith("f"):
+            continue
+        head = fmt[:at]
+        if not head.endswith("="):
+            continue
+        name = re.split(r"[;\s]", head[:-1])[-1]
+        value = table.get(arg.strip())
+        if name and value is not None:
+            digits = int(re.search(r"\.(\d+)", spec).group(1))
+            out.append("%s=%.*f" % (name, digits, value))
+    if not out:
+        raise ValueError("`/firmware/info` format 에서 실수 필드를 하나도 못 뽑았다")
+    return out
