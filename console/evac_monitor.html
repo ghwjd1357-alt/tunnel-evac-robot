@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>터널 대피 로봇 원격 관제탑</title>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/eventemitter2@6.4.9/lib/eventemitter2.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+    <style>
+        body { font-family: 'Arial', sans-serif; background-color: #1e272e; color: white; text-align: center; padding: 50px; }
+        .status-box { background-color: #485460; padding: 40px; border-radius: 15px; display: inline-block; margin-top: 30px; }
+        #connection { color: #ffa801; font-weight: bold; }
+        #robot_state { font-size: 50px; font-weight: bold; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🚨 터널 로봇 원격 관제 모니터</h1>
+    <p>통신 상태: <span id="connection">서버 찾는 중...</span></p>
+
+    <div class="status-box">
+        <h3>현재 로봇 상태</h3>
+        <div id="robot_state">데이터 대기중...</div>
+    </div>
+
+    <script type="text/javascript">
+        // ROS 2 브릿지 서버와 웹소켓 연결
+        var ros = new ROSLIB.Ros({
+            url : 'ws://localhost:9090' 
+        });
+
+        ros.on('connection', function() {
+            document.getElementById("connection").innerHTML = "🟢 정상 연결됨";
+            document.getElementById("connection").style.color = "#0be881";
+        });
+        ros.on('error', function(error) {
+            document.getElementById("connection").innerHTML = "🔴 연결 에러";
+            document.getElementById("connection").style.color = "#ff3f34";
+        });
+        ros.on('close', function() {
+            document.getElementById("connection").innerHTML = "⚫ 연결 끊김";
+            document.getElementById("connection").style.color = "#ff3f34";
+        });
+
+        // 로봇의 상태 토픽 구독
+        var stateListener = new ROSLIB.Topic({
+            ros : ros,
+            name : '/robot_state',
+            messageType : 'std_msgs/msg/String'
+        });
+
+        stateListener.subscribe(function(message) {
+            var stateDiv = document.getElementById("robot_state");
+
+            if (message.data.includes("탈출")) {
+                stateDiv.innerHTML = "EMERGENCY: EVACUATE";
+                stateDiv.style.color = "#ff3f34"; // 빨간색
+            } else {
+                stateDiv.innerHTML = "NORMAL: PATROL";
+                stateDiv.style.color = "#0be881"; // 초록색
+            }
+        });
+    </script>
+</body>
+</html>

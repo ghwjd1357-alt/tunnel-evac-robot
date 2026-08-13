@@ -117,7 +117,7 @@
     <h2>지도·위치 뷰</h2>
     <canvas id="mapCanvas"></canvas>
     <div class="muted" style="margin-top:6px">
-      🔺 로봇 · 🔥 화재 · <span style="color:#6fe08d">─</span> 계획 경로(/plan) ·
+      🔺 로봇 · 🔥 화재 · 경로: <b id="planLabel">경로 없음</b> ·
       <b>지도 클릭 → 화재 좌표 입력칸에 반영</b> (발행은 🔥 버튼으로)
     </div>
   </div>
@@ -141,6 +141,7 @@
 </div>
 
 <script src="roslib.min.js"></script>
+<script src="mock.js"></script>   <!-- ?mock=1 일 때만 동작. 없으면 아무 일도 안 한다 -->
 <script>
 /* ════════════════════════════════════════════════════════════════
    관제 콘솔 C1+C2 초안 (2026-07-18)
@@ -182,6 +183,9 @@ function setupTopics() {
       document.getElementById('lastseen').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
       if (msg.data !== lastState) {          // 전이 시에만 로그 (상시 발행 스팸 방지)
         if (lastState !== null) log('state', `상태 전이: ${lastState} → ${msg.data}`);
+        // ★ T1: 임무 초기화(PATROL 복귀)는 "상황 종료" → 이전 화재 마커·경로를 지운다.
+        //   전이 시점(edge)에만 지운다. 매 tick 지우면 화재 직후 마커가 즉시 사라진다.
+        if (msg.data === 'PATROL' && lastState !== null) { fireXY = null; planPts = []; }
         lastState = msg.data;
         document.querySelectorAll('#fsm span').forEach(el => {
           el.classList.toggle('on', el.dataset.s === msg.data);
@@ -284,6 +288,23 @@ let mapInfo = null, mapImage = null;      // 지도 메타 + 렌더 캐시
 let tfMapOdom = null, tfOdomBase = null;  // 2D 변환 {x,y,yaw}
 let robot = null, planPts = [], fireXY = null;
 
+/* ★ T1: 경로 신선도 — Nav2 는 목표가 끝나면 /plan 발행을 "그냥 멈춘다".
+   지우는 주체가 없으면 마지막 경로가 화면에 영원히 남는다(디스플레이는 계속 켜두는 물건).
+   §5.5 의 헬스 신선도와 같은 사상: 마지막 수신 시각만 들고 있다가 오래되면 버린다.
+   🔴 타임아웃 값: Nav2 재발행이 약 1Hz 라 1~2초로 잡으면 정상 주행 중에 깜빡인다. */
+let lastPlanAt = 0;
+const PLAN_TIMEOUT_MS = 3500;
+
+/* ★ T2: /plan 은 상태마다 의미가 다르다. 상태를 같이 보지 않으면
+   순찰 경로나 역행 재탐색 경로가 "탈출 경로"로 보인다 — 재난 화면에서 치명적 오표시. */
+const PLAN_STYLE = {
+  GUIDE:       { label: '🟢 탈출 경로',   color: '#39d353', width: 5   },
+  APPROACH:    { label: '집결지 이동',     color: '#ffb04d', width: 3   },
+  SEARCH_BACK: { label: '⚠ 역행 재탐색',  color: '#ff5c5c', width: 3   },
+  PATROL:      { label: '순찰 경로',       color: '#6b7c8d', width: 1.5 },
+  // GATHER · ESCAPED · FAULT = 표시할 경로 없음 (그리지 않는다)
+};
+
 const quatToYaw = q => Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
 // 2D 변환 합성 a∘b (a 좌표계에서 본 b)
 function compose(a, b) {
@@ -340,7 +361,7 @@ function setupMap() {
     });
 
   new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/msg/Path', throttle_rate: 500 })
-    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); });
+    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); lastPlanAt = Date.now(); });
 
   new ROSLIB.Topic({ ros, name: '/alarm', messageType: 'geometry_msgs/msg/PoseStamped' })
     .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
@@ -362,9 +383,19 @@ function drawMap() {
   mctx.imageSmoothingEnabled = false;
   mctx.drawImage(mapImage, 0, 0, mapInfo.width * scale, mapInfo.height * scale);
 
-  // 계획 경로
-  if (planPts.length > 1) {
-    mctx.strokeStyle = '#6fe08d'; mctx.lineWidth = 2; mctx.beginPath();
+  // ★ T1: 발행이 끊긴 지 오래면 경로를 버린다 (Nav2 는 멈출 뿐 "지워라"를 보내지 않는다)
+  if (planPts.length && Date.now() - lastPlanAt > PLAN_TIMEOUT_MS) {
+    planPts = [];
+    log('state', `계획 경로 소거 (/plan ${(PLAN_TIMEOUT_MS / 1000).toFixed(1)}초 이상 미수신)`);
+  }
+
+  // ★ T2: 계획 경로 — 상태에 따라 색·굵기·라벨이 달라진다
+  const style = PLAN_STYLE[lastState];
+  const hasPlan = planPts.length > 1 && !!style;
+  if (hasPlan) {
+    mctx.strokeStyle = style.color; mctx.lineWidth = style.width;
+    mctx.lineJoin = 'round'; mctx.lineCap = 'round';
+    mctx.beginPath();
     planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y, scale); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
     mctx.stroke();
   }
@@ -382,6 +413,18 @@ function drawMap() {
     mctx.moveTo(10, 0); mctx.lineTo(-6, 6); mctx.lineTo(-6, -6); mctx.closePath(); mctx.fill();
     mctx.restore();
   }
+
+  // ★ T2: 경로 라벨 — 지도 위에 직접(멀리서 읽혀야 한다) + 지도 아래 텍스트에도 반영
+  const label = hasPlan ? style.label : '경로 없음';
+  const color = hasPlan ? style.color : '#5d6b7a';
+  mctx.font = 'bold 16px "Noto Sans KR", sans-serif';
+  mctx.textAlign = 'left'; mctx.textBaseline = 'top';
+  const tw = mctx.measureText(label).width;
+  mctx.fillStyle = 'rgba(0,0,0,.55)'; mctx.fillRect(8, 8, tw + 20, 28);
+  mctx.fillStyle = color; mctx.fillText(label, 18, 14);
+
+  const lblEl = document.getElementById('planLabel');
+  if (lblEl) { lblEl.textContent = label; lblEl.style.color = color; }
 }
 setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
 
