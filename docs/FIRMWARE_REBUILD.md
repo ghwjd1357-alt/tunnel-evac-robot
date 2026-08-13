@@ -142,18 +142,38 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 "새 지문"으로 미리 적어 두면 승인 뒤 그 값을 옮겼을 때 **정상 소스인데도 계속 `rc=1`** 이 된다.
 이관은 승인 시점에 `sha256sum` 을 **한 번 새로 계산**해 여기와 검사기 두 자리에만 넣는다.
 
+✅ **2026-08-13 — 네 지문을 §67 승인본으로 옮겼다.** 같은 순서를 다시 밟았다:
+`estop-debounce`(§64 승인 · `a1268dc`) + odom 재교정(예약 32-d)을 굽고 **구판 지문으로
+`rc=1`** 인 채로 세 회차를 태웠다 — §65 불승인(P1 4) → §66 불승인(P1 2) → **§67 승인
+(P0 0 · P1 0 · P2 2)**. 승인이 지정한 blob 은 `b9fb8e3` 의 firmware tree
+`314e4f8a55d7a99f687e79b1a78010ef1ed61f95` 이고, 보완 커밋 `f319eb1` 은 그 tree 를 한
+바이트도 안 바꿨다(Tier B 전용). 🔴 **파일이 하나 늘었다** — `estop_debounce.h` 는 §64
+묶음의 신규 헤더이고, 이관 전에는 *"기대에 없는 변경"* 으로 잡혀 `rc=1` 을 만들고 있었다.
+그것이 의도된 방어다.
+🔴 **§67 은 P2 2 건을 열어 둔 채 승인했다** — ⓐ 회귀가 봉인한 것은 `desiredPwm` 궤적과
+시행별 `appliedPwm` 최대·epoch 이지 **매 tick applied 궤적 전체가 아니다**(`PWM_RAMP_STEP`
+`2→3` 변이가 통과한다) ⓑ `.ino` 주석의 길이 상한 문구(`1157/378`)가 현행 도구 실행값
+(`1102/433`)보다 뒤에 있다. 🔴 **둘 다 다음 firmware 변경 묶음에서 닫는다** — 지금 고치면
+승인받은 blob 이 아니게 된다. 재개방·완료판정 = `MASTER_PLAN §7` 예약 32-d.
+
 ```
-47661a8f1fea198442bc2cb9ed395d36de1e7374c9bd4f819f75925bc3cde3fb
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 232,18 · 1,521줄 / 50,758 bytes · 08-12 §62 승인본 = 계수 335)
-7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978
-  firmware/teensy_integrated_base_v1_4/rearm_gate.h        (신규 · 247,0 · 247줄 / 13,693 bytes)
-f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663
-  firmware/teensy_integrated_base_v1_4/drive_wiring.h      (신규 · 101,0 · 101줄 / 5,196 bytes)
+8487d007e5b4a49b227731de1feb106342efd80e898d44fc45a79939fb6bfe3e
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 440,32 · 1,715줄 / 64,007 bytes · 08-13 §67 승인본 = odom 재교정 + 상수 분리 + appliedPwm 관측)
+ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340
+  firmware/teensy_integrated_base_v1_4/rearm_gate.h        (298,0 · 298줄 / 16,932 bytes)
+f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860
+  firmware/teensy_integrated_base_v1_4/drive_wiring.h      (114,0 · 114줄 / 5,953 bytes)
+126fc729074cbcca170c93c93514c5bddd4545e67d2044d1bbd5734f92380940
+  firmware/teensy_integrated_base_v1_4/estop_debounce.h    (신규 · 140,0 · 140줄 / 7,208 bytes · §64 E-stop 디바운스)
 ```
 
 ```bash
-sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h}
+sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h,estop_debounce.h}
 ```
+
+⚠ **구판 기록(08-12 §62 승인본)** — `.ino` `47661a8f…`(232,18 · 1,521줄 / 50,758 bytes) ·
+`rearm_gate.h` `7b3a0462…`(247,0) · `drive_wiring.h` `f4b6d65e…`(101,0). **더 이상 판정에
+쓰지 않는다.**
 
 허용된 세 건이 담고 있는 것: ① `ESTOP_ACTIVE_LOW true→false`(`.ino:111` 과 그 위 주석 —
 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이 재개방된다) ② re-arm 래치 배선 ③ 상태전이 정본

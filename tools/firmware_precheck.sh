@@ -109,9 +109,10 @@ done
 #   "결함이 없다"가 아니다. 재개방 조건은 `MASTER_PLAN §7` 예약 32-a.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=232,18,47661a8f1fea198442bc2cb9ed395d36de1e7374c9bd4f819f75925bc3cde3fb"
-        "firmware/teensy_integrated_base_v1_4/rearm_gate.h=247,0,7b3a04621f590cfe51e4f96721000c39d128dafa3dceefc8a06e5132c5de6978"
-        "firmware/teensy_integrated_base_v1_4/drive_wiring.h=101,0,f4b6d65e88fb375dfce70eec36c38b1aac0c426157338a7806f14a30f23f5663"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=440,32,8487d007e5b4a49b227731de1feb106342efd80e898d44fc45a79939fb6bfe3e"
+        "firmware/teensy_integrated_base_v1_4/rearm_gate.h=298,0,ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340"
+        "firmware/teensy_integrated_base_v1_4/drive_wiring.h=114,0,f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860"
+        "firmware/teensy_integrated_base_v1_4/estop_debounce.h=140,0,126fc729074cbcca170c93c93514c5bddd4545e67d2044d1bbd5734f92380940"
     )
 fi
 
