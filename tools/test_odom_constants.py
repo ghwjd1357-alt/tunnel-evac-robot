@@ -21,10 +21,15 @@
   ③ 회전 비 — 🔴 **각 시행의 원자료가 요구하는 `r/base`** 를 계산해 밴드를 만들고,
      `.ino` 의 비가 그 안인가. **상수를 베끼지 않는다**(검토 §68.1)
   ④ 🔴 역회귀 — 기각쌍 `(0.04603, 0.670)` 과 하중 반지름 `0.0451` 은 **직진에서**
-     반드시 잡힌다. ⚠ 기각쌍은 **회전에서는 통과하는 것이 정상**이다 — 비를 보존하도록
-     만든 값이기 때문이다(앞 판 32-e 완료판정의 *"둘 다 벗어남"* 은 불가능했다)
-  ⑤ 🔴 감도 — `base` 를 ±3% 흔들면 ③ 이 깨져야 한다. 밴드가 넓어 아무거나 통과하는
-     상태가 아님을 시험이 스스로 보인다
+     반드시 잡힌다. ⚠ 회전은 **이 둘을 못 가른다** — 두 비의 차이(`0.046%`)가 가장 좁은
+     시행 예산(`0.115%`)보다 작아 원리적으로 판별력이 없다. 그래서 판별은 거리가 한다
+     (앞 판 32-e 완료판정의 *"둘 다 벗어남"* 은 불가능했고, "회전은 보존된다" 는 단언도
+     느슨한 밴드에 기댄 것이었다)
+  ⑤ 🔴 감도 — `base` 를 ±1%·±3% 흔들면 ③ 이 깨져야 한다
+  ⑥ 🔴 **fixture 무결성** — 주근거 행의 네 원자료 필드를 ±2% 흔들면 **그 행이** 실패해야
+     한다. 앞 판은 `min×0.996~max×1.004` 라 원자료가 오염될수록 밴드가 **넓어져** 계속
+     통과했다(검토 §69.1 이 2134 의 odom 을 200° 로 바꿔 재현). 이제 시행별 독립 예산이다
+  ⑦ 보조 시행(264°)을 빼도 후보가 성립하는가 — 짧은 시행에 기대고 있지 않음을 보인다
 
 왜 상수를 `.ino` 에서 읽나
 -------------------------
@@ -66,23 +71,45 @@ GROUND = (
 #:   잘못 베껴졌는지는 원리적으로 못 잡는다. §65.3(도구가 상수를 베낌) · §66.2(시험이
 #:   로직을 베낌) 에 이은 **같은 병의 세 번째**다.
 #:
-#: 각 행 = (이름, 기록 시점 r, 기록 시점 base, odom Δyaw°, 독립 기준 Δyaw°)
+#: 각 행 = (이름, 기록 시점 r, 기록 시점 base, odom Δyaw°, 독립 기준 Δyaw°, 주근거인가)
 #:   기준은 IMU 다 — 바퀴 상수와 무관한 관측이라 이 표에서 유일하게 외부 사실이다.
+#:
+#: 🔴 `primary=False` 인 이유 (검토 §69.2 답변) — 끝점 각도 오차는 회전각과 **무관하게**
+#:   거의 일정하다. 그래서 264° 시행의 상대오차가 1305° 시행보다 **약 5 배** 크다.
+#:   짧은 시행을 긴 시행과 같은 정보량으로 취급하면 잡음을 근거로 삼는 것이다.
+#:   → 보조 교차관측으로 인쇄하되 **판정에는 안 쓴다.** 다만 완전히 버리지도 않는다 —
+#:     느슨한 상한(주근거 예산의 SPIN_AUX_SLACK 배)을 벗어나면 그건 오기다.
 SPIN = (
-    ("r2_spin2pi_0813_1640", 0.05698, 0.62,   475.39,  355.53),   # 오후 · 옛 펌웨어
-    ("r2_spin_0813_2134",    0.04603, 0.670,  263.60,  265.91),   # 밤 · 굽기 뒤
-    ("r2_spin_0813_2130",    0.04603, 0.670, 1303.60, 1305.20),   # 밤 · 3.6 바퀴
+    ("r2_spin2pi_0813_1640", 0.05698, 0.62,   475.39,  355.53, True),   # 오후 · 옛 펌웨어
+    ("r2_spin_0813_2134",    0.04603, 0.670,  263.60,  265.91, False),  # 264° · 보조
+    ("r2_spin_0813_2130",    0.04603, 0.670, 1303.60, 1305.20, True),   # 3.6 바퀴
 )
-#: 시행 간 흩어짐(0.83%)보다 조금 넓게. 밴드는 원자료가 만들고 상수가 안 만든다.
-SPIN_BAND_MARGIN = 0.004
+
+#: 🔴 끝점 각도 오차 예산 (검토 §69.1). **밴드를 표본 극값으로 만들지 않는다.**
+#:   앞 판은 `min×0.996 ~ max×1.004` 였다. 그러면 원자료 한 행이 오염될수록 밴드가
+#:   **넓어져** 후보가 계속 통과한다 — 검토가 2134 의 odom 을 263.60 -> 200.00 으로
+#:   바꾸자 상한이 0.0917 까지 벌어졌는데도 PASS 였다. 밴드가 자기 오염을 흡수한 것이다.
+#:   → 이제 **시행마다 독립 예산**으로 본다. 한 행이 틀리면 **그 행이 실패**하고, 다른
+#:     행의 허용폭에는 영향이 없다.
+#:
+#:   예산의 출처(추측이 아니라 계통 오차의 합):
+#:     IMU 헤딩 끝점       ±1.0°   BNO055 융합 모드 전형값
+#:     odom 끝점 표본      ±0.3°   50Hz · 0.19 rad/s 에서 한 표본이 0.22°
+#:     두 관측자 시각 정렬 ±0.2°   최근접 표본 매칭
+#:   합 ±1.5°. 시행 i 의 허용 상대오차 = 1.5° / (그 시행의 회전각).
+ENDPOINT_YAW_ERR_DEG = 1.5
+#: 보조 시행이 이 배수를 넘으면 예산으로도 설명이 안 된다 — 오기로 본다.
+SPIN_AUX_SLACK = 3.0
 
 #: 🔴 기각된 쌍과 하중 반지름. 이 값들이 **직진에서** 걸려야 한다 (역회귀).
 #:   ⚠ 기각쌍은 **회전에서는 통과하는 것이 정상**이다 — 비를 보존하도록 만든 값이라
 #:   같은 카운트를 옛 쌍으로 환산해도 yaw 는 거의 그대로다. 앞 판의 32-e 완료판정은
 #:   *"둘 다 벗어나야"* 라고 적었는데 그건 물리적으로 불가능하다(검토 §68.1).
 REJECTED = (
-    ("32-d 기각쌍 (0.04603 / 0.670)", 0.04603, 0.670, True),
-    ("하중 반지름을 구름 반지름으로 (축 높이 0.0451)", 0.0451, 0.6543, True),
+    ("32-d 기각쌍 (0.04603 / 0.670)", 0.04603, 0.670),
+    # 🔴 base 를 **비가 정확히 보존되게** 잡았다(0.0451 / 0.068733). 그래야 이 역회귀가
+    #   말하는 바가 분명해진다 — *비를 보존해도 거리에서 잡힌다.*
+    ("하중 반지름을 구름 반지름으로 (축 높이 0.0451)", 0.0451, 0.65616),
 )
 
 
@@ -96,10 +123,37 @@ def spin_required_ratio(record_r, record_base, odom_deg, reference_deg):
     return (record_r / record_base) * (reference_deg / odom_deg)
 
 
-def spin_band():
-    """세 시행이 요구하는 비의 밴드. 🔴 밴드를 원자료가 만든다."""
-    need = [spin_required_ratio(r, b, od, im) for _n, r, b, od, im in SPIN]
-    return min(need) * (1.0 - SPIN_BAND_MARGIN), max(need) * (1.0 + SPIN_BAND_MARGIN)
+def spin_tolerance(reference_deg):
+    """그 시행의 허용 상대오차. 🔴 회전각이 길수록 좁아진다 (검토 §69.1)."""
+    return ENDPOINT_YAW_ERR_DEG / abs(reference_deg)
+
+
+def spin_verdicts(candidate_ratio):
+    """시행별로 **독립 판정**한다. 한 행의 오염이 다른 행을 넓히지 못한다.
+
+    반환 = `[(이름, 요구비, 허용, 실제 상대오차, 주근거인가, 통과인가), ...]`
+    """
+    out = []
+    for name, rec_r, rec_b, odom_deg, ref_deg, primary in SPIN:
+        need = spin_required_ratio(rec_r, rec_b, odom_deg, ref_deg)
+        tol = spin_tolerance(ref_deg)
+        rel = abs(candidate_ratio - need) / need
+        limit = tol if primary else tol * SPIN_AUX_SLACK
+        out.append((name, need, tol, rel, primary, rel <= limit))
+    return out
+
+
+def spin_violations(candidate_ratio):
+    """판정에 쓰는 위반 목록. 보조 시행은 느슨한 상한만 본다."""
+    bad = []
+    for name, need, tol, rel, primary, ok in spin_verdicts(candidate_ratio):
+        if ok:
+            continue
+        limit = tol if primary else tol * SPIN_AUX_SLACK
+        bad.append("%s %s 요구 %.6f · 실제오차 %.2f%% > 허용 %.2f%%"
+                   % (name, "주" if primary else "보조", need,
+                      rel * 100, limit * 100))
+    return bad
 
 
 FAILURES = []
@@ -169,51 +223,98 @@ def main():
     bad = straight_violations(radius)
     check("② `GROUND` 두 시행 전부 합격선 안", not bad, " · ".join(bad))
 
-    # ── ③ 회전 비 — 🔴 원자료가 밴드를 만든다 (검토 §68.1) ──────────────────
-    print("\n[3] 회전 — 각 시행의 원자료가 요구하는 r/base 를 계산한다")
-    for name, rec_r, rec_b, odom_deg, ref_deg in SPIN:
-        print("      %-22s 기록 r/base=%.6f · odom %8.2f° / 기준 %7.2f° -> 요구 %.6f"
-              % (name, rec_r / rec_b, odom_deg, ref_deg,
-                 spin_required_ratio(rec_r, rec_b, odom_deg, ref_deg)))
-    lo, hi = spin_band()
+    # ── ③ 회전 비 — 🔴 시행별 독립 오차 예산 (검토 §69.1) ───────────────────
+    print("\n[3] 회전 — 시행마다 **독립 예산**으로 본다 (끝점 ±%.1f°)"
+          % ENDPOINT_YAW_ERR_DEG)
     ratio = radius / base
-    print("      원자료 밴드 %.6f ~ %.6f   ·   `.ino` r/base = %.6f"
-          % (lo, hi, ratio))
-    check("③ r/base 가 회전 **원자료** 밴드 안에 있다",
-          lo <= ratio <= hi,
-          "회전은 **비만** 정한다 — r 을 바꾸면 base 도 같이 옮겨야 한다")
+    for name, need, tol, rel, primary, ok in spin_verdicts(ratio):
+        limit = tol if primary else tol * SPIN_AUX_SLACK
+        print("      %-22s %s 요구 %.6f · 허용 ±%.2f%% · 실제 %.2f%%  %s"
+              % (name, "주  " if primary else "보조", need, limit * 100, rel * 100,
+                 "OK" if ok else "🔴"))
+    print("      `.ino` r/base = %.6f" % ratio)
+    bad_spin = spin_violations(ratio)
+    check("③ 주근거 회전 시행이 각자의 예산 안에서 이 비를 요구한다",
+          not bad_spin, " · ".join(bad_spin))
     # 🔴 오후 1640 은 완전히 다른 상수로 기록됐다. 그 시행이 요구하는 비가 후보와
     #    만나는 것이 이 상수쌍의 **독립 확인**이다 — 밤 시행들과 같은 근거가 아니다.
-    afternoon = spin_required_ratio(*SPIN[0][1:])
+    afternoon = spin_required_ratio(*SPIN[0][1:5])
     print("      🔴 오후 1640 은 옛 상수(r/base=%.6f)로 기록됐는데 요구비 %.6f 가"
           % (SPIN[0][1] / SPIN[0][2], afternoon))
     print("         후보 %.6f 와 %.3f%% 안에서 만난다 — 독립 확인이다"
           % (ratio, abs(afternoon - ratio) / ratio * 100))
+    aux = [v for v in spin_verdicts(ratio) if not v[4]]
+    for name, need, tol, rel, _p, _ok in aux:
+        print("      ⚠ %s 는 264° 짜리라 상대오차가 %.1f 배 크다 — 요구 %.6f 는 후보와"
+              % (name, tol / spin_tolerance(SPIN[2][4]), need))
+        print("         %.2f%% 갈리지만 **판정에 안 쓴다**(보조 교차관측 · 검토 §69.1)"
+              % (rel * 100))
 
     # ── ④ 역회귀 ───────────────────────────────────────────────────────────
     print("\n[4] 역회귀 — 틀린 값은 **직진에서** 잡혀야 한다")
     print("      ⚠ 기각쌍은 **회전에서는 통과하는 것이 정상**이다 — 비를 보존하도록")
     print("        만든 값이라 같은 카운트를 옛 쌍으로 환산해도 yaw 는 그대로다.")
-    for label, bad_r, bad_base, must_pass_spin in REJECTED:
+    for label, bad_r, bad_base in REJECTED:
         bad_straight = straight_violations(bad_r)
-        spin_ok = lo <= (bad_r / bad_base) <= hi
         check("④ %s -> **직진**이 깨진다" % label,
               bool(bad_straight),
               "이 값이 직진을 통과하면 이 시험은 상수를 검증하지 못하는 것이다")
         if bad_straight:
             print("      직진 위반: %s" % bad_straight[0])
-        if must_pass_spin:
-            check("④ %s -> 회전은 보존된다(정상)" % label.split(" (")[0],
-                  spin_ok,
-                  "비를 보존한 쌍인데 회전이 깨지면 밴드나 원자료가 틀린 것이다")
+        # 🔴 "회전이 통과한다/실패한다" 가 아니라 **"회전은 이 둘을 못 가른다"** 가 참인
+        #   문장이다. 두 비의 차이가 어느 시행의 예산보다도 작으면, 회전 관측은 원리적으로
+        #   판별력이 없다 — 옛 쌍이 회전에서 아슬아슬하게 통과하든 말든 의미가 없다.
+        #   (앞 판은 느슨한 밴드를 근거로 "회전은 보존된다" 고 단언했는데, 예산을 조이자
+        #    2130 에서 0.124% vs 0.115% 로 갈렸다. 그 0.009%p 를 판정으로 읽으면 안 된다.)
+        gap = abs(ratio - bad_r / bad_base) / ratio
+        tightest = min(spin_tolerance(r[4]) for r in SPIN if r[5])
+        check("④ %s -> 회전은 이 둘을 **못 가른다**(그래서 거리가 판별한다)"
+              % label.split(" (")[0],
+              gap < tightest,
+              "회전이 가를 수 있다면 이 역회귀의 서술을 다시 써야 한다 "
+              "(차이 %.3f%% vs 최소 예산 %.3f%%)" % (gap * 100, tightest * 100))
+        print("      두 비의 차이 %.3f%% · 가장 좁은 예산 %.3f%% -> 회전은 판별력 없음"
+              % (gap * 100, tightest * 100))
 
-    # ── ⑤ 밴드가 실제로 좁은가 — 시험 자신의 감도 ───────────────────────────
-    print("\n[5] 감도 — base 를 흔들면 ③ 이 깨져야 한다")
-    for factor, label in ((1.03, "base +3%"), (0.97, "base -3%")):
+    # ── ⑤ 감도 — 상수와 원자료 **양쪽**을 흔든다 (검토 §69.1) ────────────────
+    print("\n[5] 감도 — 상수를 흔들면 ③ 이 깨져야 한다")
+    for factor in (1.01, 0.99, 1.03, 0.97):
         shaken = radius / (base * factor)
-        check("⑤ %s -> ③ 이 깨진다" % label,
-              not (lo <= shaken <= hi),
-              "밴드가 너무 넓어 base 를 사실상 검증하지 않는다")
+        check("⑤ base ×%.2f -> ③ 이 깨진다" % factor,
+              bool(spin_violations(shaken)),
+              "예산이 너무 넓어 base 를 사실상 검증하지 않는다")
+
+    print("\n[6] 🔴 fixture 무결성 — 원자료 한 행이 오염되면 **그 행이** 실패해야 한다")
+    print("      (앞 판은 min/max 밴드라 오염될수록 넓어져 계속 통과했다 — 검토 §69.1)")
+    saved = SPIN
+    try:
+        for index, row in enumerate(saved):
+            if not row[5]:
+                continue                      # 보조 행은 판정에 안 쓴다
+            for field, name in ((1, "record_r"), (2, "record_base"),
+                                (3, "odom_deg"), (4, "reference_deg")):
+                for factor in (1.02, 0.98):
+                    mutated = list(saved)
+                    shaken = list(row)
+                    shaken[field] = row[field] * factor
+                    mutated[index] = tuple(shaken)
+                    globals()["SPIN"] = tuple(mutated)
+                    caught = bool(spin_violations(ratio))
+                    check("⑥ %s.%s ×%.2f -> 실패" % (row[0][-4:], name, factor),
+                          caught,
+                          "원자료 오염을 시험이 흡수했다 — §69.1 이 지적한 바로 그 구조다")
+    finally:
+        globals()["SPIN"] = saved
+
+    print("\n[7] 보조 시행을 빼도 후보가 성립하는가 (검토 §69.1 필수 회귀)")
+    saved = SPIN
+    try:
+        globals()["SPIN"] = tuple(r for r in saved if r[5])
+        check("⑦ 짧은 2134 를 빼도 후보가 통과한다",
+              not spin_violations(ratio),
+              "주근거 둘만으로 후보가 안 서면 보조에 기대고 있던 것이다")
+    finally:
+        globals()["SPIN"] = saved
 
     print()
     if FAILURES:

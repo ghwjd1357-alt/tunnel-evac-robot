@@ -28,6 +28,9 @@
 #   bash tools/d0_check.sh --no-estop   # 검사 8(E-stop)만 생략
 #   bash tools/d0_check.sh --no-manual  # 사람이 필요한 6·8 을 함께 생략
 #   bash tools/d0_check.sh --secs 15    # **관측 창** 길이(기본 8초, 허용 3~120)
+#   bash tools/d0_check.sh --expect-build 'Aug 14 2026 09:12:33'
+#       🔴 굽기 직후 컴파일 기록의 build 문자열. 주면 stale build 를 기계로 잡는다.
+#       안 주면 검사 7 의 build 행은 **미판정**이다 (검토 §69.2).
 #   ⚠ 무엇을 생략하든 '전량 통과'가 아니다 — 종료 2.
 #   ⚠ `--secs` 는 **관측 창만** 바꾼다. 스냅샷(`echo --once`·`topic info`) 상한은 별도
 #     상수(SNAP_ECHO_SECS·SNAP_INFO_SECS·FW_INFO_SECS)이고 이유는 그 정의부에 있다.
@@ -119,6 +122,7 @@ set -u
 # 🔴 08-13 (검토 §65.3) — 펌웨어 정체 검사가 기대값을 `.ino` 에서 읽으려면 저장소
 #   뿌리를 알아야 한다. 실행 위치와 무관하게 스크립트 자기 위치에서 잡는다.
 D0_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+D0_EXPECT_BUILD="${D0_EXPECT_BUILD:-}"
 
 ODOM_TOPIC="/odom"
 IMU_TOPIC="/imu/data"
@@ -258,6 +262,11 @@ while [ $# -gt 0 ]; do
     --secs)
       [ $# -ge 2 ] || { echo "--secs 에 값이 없다 (예: --secs 8)"; exit 3; }
       HZ_SECS="$2"; shift 2 ;;
+    # 🔴 검토 §69.2 — 굽기 직후 컴파일 기록의 build 문자열을 넘겨 **기계로 대조**한다.
+    #   없으면 검사 7 의 build 행이 `ok` 가 아니라 **미판정(warn)** 으로 나간다.
+    --expect-build)
+      [ $# -ge 2 ] || { echo "--expect-build 에 값이 없다 (예: 'Aug 14 2026 09:12:33')"; exit 3; }
+      D0_EXPECT_BUILD="$2"; shift 2 ;;
     -h|--help) sed -n '2,60p' "$0"; exit 3 ;;
     *) echo "알 수 없는 인자: $1  (사용법은 --help)"; exit 3 ;;
   esac
@@ -756,8 +765,18 @@ except Exception as exc:
     FW_BUILD=$(grep -o 'build=[A-Za-z]* *[0-9]* [0-9]* [0-9:]*' "$FWOUT" | head -1)
     if [ -z "$FW_BUILD" ]; then
       ng "/firmware/info 에 build= 가 없다 — **굽힘 판별의 정본이 없는 표본**이다"
+    elif [ -n "$D0_EXPECT_BUILD" ]; then
+      # 🔴 검토 §69.2 — 굽기 직후 컴파일 기록의 기대 문자열과 **기계로 대조**한다.
+      if [ "$FW_BUILD" = "build=$D0_EXPECT_BUILD" ]; then
+        ok "$FW_BUILD — 기대와 일치"
+      else
+        ng "$FW_BUILD 가 기대 build=$D0_EXPECT_BUILD 와 다르다 — **구판이 올라가 있다**"
+      fi
     else
-      ok "$FW_BUILD — 🔴 굽기 절차서의 컴파일 시각과 **사람이 대조한다**"
+      # 🔴 존재만 보고 `ok` 를 내면 구판 build 나 `Foo 99 99:99:99` 도 초록이 된다.
+      #   기대값이 없으면 **미판정**이다 — 자동 완료조건에서 뺀다 (검토 §69.2).
+      warn "$FW_BUILD — 🔴 **미판정**. 기대값 없이는 stale build 를 못 가른다"
+      warn "     굽기 직후라면 --expect-build '<컴파일 시각>' 으로 기계 대조한다"
     fi
   fi
 else

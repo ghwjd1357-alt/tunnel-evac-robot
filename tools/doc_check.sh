@@ -239,6 +239,43 @@ done < <(grep -rhoP '`[^`]+`' "${SRC[@]}" 2>/dev/null | tr -d '`' \
 [ -z "$SECBAD" ] && ok "§ 절 참조 전부 유효 ($SECN 건)" \
                  || bad "대상 문서에 없는 절 참조:$SECBAD"
 
+# ── 6-c. 🔴 알려진 P0/P1 수 ↔ inventory (08-13 밤 신설 · 검토 §69.4) ────────
+# 앞 판은 `TEST_GATES` 가 `114건` 이라 쓰고 실행 정본은 117 이어도 통과했다.
+# 문서의 개수 주장은 **기계가 세는 값과 같아야** 한다 — 사람이 손으로 맞추면 또 갈린다.
+KNOWN_N=$(python3 -c "import json;print(len(json.load(open('tools/ai_known_p0_p1.json'))))" 2>/dev/null)
+if [ -z "$KNOWN_N" ]; then
+    bad "ai_known_p0_p1.json 을 못 읽었다 — finding 수를 대조할 수 없다"
+else
+    KNOWN_CLAIMS=$(grep -ohP '알려진 \*\*\K[0-9]+(?=건\*\*)' "${SRC[@]}" 2>/dev/null | sort -u)
+    KNOWN_BAD=""
+    for claimed in $KNOWN_CLAIMS; do
+        [ "$claimed" = "$KNOWN_N" ] || KNOWN_BAD="$KNOWN_BAD $claimed"
+    done
+    if [ -z "$KNOWN_CLAIMS" ]; then
+        bad "문서가 알려진 P0/P1 수를 한 번도 주장하지 않는다 (자리 소실)"
+    elif [ -n "$KNOWN_BAD" ]; then
+        bad "알려진 P0/P1 수 불일치 — inventory $KNOWN_N vs 문서$KNOWN_BAD"
+    else
+        ok "알려진 P0/P1 $KNOWN_N 건 = 문서 주장 전부"
+    fi
+fi
+
+# ── 6-d. 🔴 §7-c-E 행 수 단일성 (08-13 밤 신설 · 검토 §69.4) ────────────────
+# 핸드오프 완료조건은 `배선 6행` 인데 완료판정은 `13/13` 이었다 — **같은 문서 안에서**
+# 계약이 갈렸고 `--strict` 가 놓쳤다. 굽기 직전 안전 게이트라 갈리면 안 된다.
+#   ⚠ 역사 서술(`08-12 에 닫은 것 — §7-c-E 13/13`)은 오탐이 아니다. 그래서 **현재 묶음
+#     계약을 적는 두 절**(완료조건·완료 판정)만 본다.
+HANDOFF="docs/CURRENT_HANDOFF.md"
+ROWS_ACTIVE=$(awk '/^## 완료조건/,/^## 🔴 이번 묶음의 함정/' "$HANDOFF" | grep -c '§7-c-E2\|배선 6행')
+ROWS_VERDICT=$(awk '/^## 완료 판정/,/^## 완료 후 다음 단계/' "$HANDOFF" | grep -c '§7-c-E2\|배선 6행')
+ROWS_STALE=$(awk '/^## 완료조건/,/^## 완료 후 다음 단계/' "$HANDOFF" \
+             | grep -c '§7-c-E\*\* 13/13\|`§7-c-E` 13/13\|13행 전량 수행')
+if [ "$ROWS_ACTIVE" -ge 1 ] && [ "$ROWS_VERDICT" -ge 1 ] && [ "$ROWS_STALE" -eq 0 ]; then
+    ok "§7-c-E 행 수 계약 단일 (완료조건·완료 판정 둘 다 축소판 6행)"
+else
+    bad "§7-c-E 행 수 계약이 갈렸다 — 완료조건 $ROWS_ACTIVE · 완료판정 $ROWS_VERDICT · 구판표현 $ROWS_STALE"
+fi
+
 # ── 7. Desktop 역사 문서 참조 (이름 변경·이동 감지) ──────────────────────
 MISSD=""
 # 🔴 08-13 — 검색 자리가 `개발현황/` 하나뿐이라는 전제가 틀렸다. 날짜별 현황은 거기 있지만

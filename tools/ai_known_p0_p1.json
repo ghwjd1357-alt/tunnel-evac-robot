@@ -583,5 +583,25 @@
     "id": "0813-reduction-gate-locked-only-the-headers-68",
     "path": "tools/rearm_field_wiring.py",
     "anchor": "생략한 7 행이 지나는 `.ino` 통합 배선"
+  },
+  {
+    "id": "0813-spin-band-widened-under-fixture-corruption-69",
+    "path": "tools/test_odom_constants.py",
+    "anchor": "밴드를 표본 극값으로 만들지 않는다"
+  },
+  {
+    "id": "0813-required-identity-set-demoted-behavior-constants-69",
+    "path": "tools/firmware_constants.py",
+    "anchor": "필수/선택의 경계는 기계적으로 긋는다"
+  },
+  {
+    "id": "0813-reduction-gate-missed-diagnostics-and-setup-69",
+    "path": "tools/rearm_field_wiring.py",
+    "anchor": "생략 행의 관측 계약과 결선까지 폐포에 넣어야"
+  },
+  {
+    "id": "0813-handoff-kept-pre-remediation-contract-69",
+    "path": "docs/TEST_GATES.md",
+    "anchor": "문서의 개수 주장은 기계가 세는 값과 같아야 한다"
   }
 ]

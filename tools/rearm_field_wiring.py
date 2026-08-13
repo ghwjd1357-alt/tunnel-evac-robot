@@ -79,6 +79,17 @@ GATE_SHA256 = {
 #:     checkSafety           E-stop 감시 -> 해제 경로
 #:     updateMotorOutputs    출력 허용/정지 (배선 행과 상태 행이 만나는 자리)
 #:     disarmDrive(WithReason) 해제의 정지 부작용
+#:     publishDiagnostics    🔴 부정 2·3·5 가 **판정하는 값 자체**를 만든다
+#:                           (driveDiagMessage.x=serviceCalls · y=rejectReason ·
+#:                            z=state · driveEnabledMessage.data)
+#:     setup                 🔴 콜백 결선 — 어느 콜백이 /drive/enable 에 붙는가
+#:
+#: ⚠ **08-13 밤 2차 정정 (검토 §69.3)** — 앞 판은 위 일곱만 잠갔다. 그런데 부정 2·3·5 가
+#:   보는 `y = DriveReject` 를 **만드는 곳**은 `publishDiagnostics()` 이고 목록 밖이었다.
+#:   검토가 `driveDiagMessage.y` 를 `0.0` 으로 바꾸자 관문이 **ACCEPT** 했고, `setup()` 의
+#:   서비스 binding 을 `driveEnableCallback -> resetOdomCallback` 으로 바꿔도 ACCEPT 했다.
+#:   6 행은 `y` 를 안 보므로 그 blob 은 실기 6 행까지 통과하면서 생략한 세 행의 계약을
+#:   깬다 — **생략 행의 관측 계약과 결선까지 폐포에 넣어야 fail-closed 가 성립한다.**
 #:   갱신하려면 `rearm_gate_host_test.sh` 967/0 과 `§7-c-E` **13 행 전량**을 다시 밟은 뒤
 #:   그 결과로 옮긴다. 🔴 값만 옮기면 이 관문이 자기가 승인한 것을 검사하게 된다.
 INO_WIRING_SHA256 = {
@@ -96,6 +107,11 @@ INO_WIRING_SHA256 = {
         "dd0b871a75708f727c1fc94159353292ae686d5b61981c5cd824dabfb857c74b",
     "disarmDriveWithReason":
         "07a51a11542c8f0cfc2ba65fd553c890f04dbf1fc2a5ee3564616f8a68c9b037",
+    # 🔴 검토 §69.3 — 생략 행이 **판정하는 값**과 **결선**.
+    "publishDiagnostics":
+        "61921a7a2df4c8c5b7b2b8e77d7b771560a364c4dae3fd16959b10899bd8ad5e",
+    "setup":
+        "569164aa7369f755e8f4c3596bc02dc781988a83a3a4cc10b55853d183bb6ccb",
 }
 
 STATE = {0: "DISARMED", 1: "READY", 2: "ARMED", 3: "PENDING", 4: "ARMING"}

@@ -268,8 +268,8 @@ class ContextRouterTest(unittest.TestCase):
 
     def test_01_known_inventory_is_stable_and_unique(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
-        self.assertEqual(117, len(rows))
-        self.assertEqual(117, len({row["id"] for row in rows}))
+        self.assertEqual(121, len(rows))
+        self.assertEqual(121, len({row["id"] for row in rows}))
 
     def test_02_known_p0_p1_routing_recall_is_100_percent(self):
         rows = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
@@ -303,7 +303,7 @@ class ContextRouterTest(unittest.TestCase):
         recovered = [row["id"] for row in rows if row["anchor"] in common_text]
         self.assertEqual([], recovered)
 
-    def test_02b_history_scan_independently_counts_117_primary_findings(self):
+    def test_02b_history_scan_independently_counts_121_primary_findings(self):
         review_dir = Path("/home/minwoo/Desktop/개발현황/CODEX 현황")
         files, found = review_history_findings(review_dir)
         if not files:
@@ -312,7 +312,7 @@ class ContextRouterTest(unittest.TestCase):
         for name, marker in REVIEW_HISTORY_SPECIALS:
             self.assertIn(marker, (review_dir / name).read_text())
             found.append((name, marker))
-        self.assertEqual(117, len(found))
+        self.assertEqual(121, len(found))
         history_counts = Counter(name[:4] for name, _line in found)
         inventory = json.loads((ROOT / "tools/ai_known_p0_p1.json").read_text())
         inventory_counts = Counter(row["id"].split("-", 1)[0] for row in inventory)
