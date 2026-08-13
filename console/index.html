@@ -57,11 +57,38 @@
   .sys i.ok   { color:#6fe08d; }
   .sys i.warn { color:#ffb04d; }
   .sys b { font-weight:400; color:#8fa3b8; margin-left:4px; }
+
+  /* ══ T3. 디스플레이 모드 (?display=1) ═══════════════════════════
+     로봇 몸통에 붙는 7인치 1024×600 패널용. 보는 사람 = 대피자·현장 인원.
+     → 조작 UI(제어 버튼·화재 입력·로그·시스템 상태)는 오조작 위험이라 숨긴다.
+     → 지도와 상태만 크게. 연결 뱃지는 남긴다(끊긴 걸 알아야 하므로).
+     🔴 파일을 복사하지 않고 body 클래스로 분기한다 — 두 화면이 갈라지지 않게. */
+  #bigState { display:none; }
+  body.display { padding:0; overflow:hidden; height:100vh; }
+  body.display h1 { font-size:1.05rem; padding:8px 14px; margin:0; background:#0d1116;
+                    border-bottom:1px solid #2a3340; }
+  body.display #conn { font-size:.95rem; padding:4px 12px; }
+  body.display .grid { display:block; max-width:none; gap:0; }
+  body.display .panel { background:transparent; border:0; border-radius:0; padding:0; }
+  body.display .panel h2 { display:none; }
+  body.display #panelCtrl, body.display #panelFire, body.display #panelLog,
+  body.display #panelSys,  body.display #panelVideo, body.display #fsm,
+  body.display #siren, body.display .muted { display:none; }
+
+  /* 상태 대형 배너 — 1m 거리에서 읽히는 것이 목적 */
+  body.display #bigState { display:block; text-align:center; font-weight:900;
+    font-size:2.6rem; line-height:1.15; padding:14px 10px; letter-spacing:-.01em; }
+  body.display #bigSub { display:block; font-size:1.05rem; font-weight:500;
+    color:#8fa3b8; margin-top:4px; letter-spacing:0; }
+  body.display #mapCanvas { height:calc(100vh - 200px); border-radius:0; cursor:default; }
 </style>
 </head>
 <body>
 
 <h1>🚨 지하터널 대피로봇 — 관제 콘솔 <span id="conn">연결 안 됨</span></h1>
+
+<!-- ★ T3: 디스플레이 모드 전용 상태 배너 (관제 모드에선 CSS 로 숨김) -->
+<div id="bigState">—<span id="bigSub"></span></div>
 
 <div class="grid">
 
@@ -83,7 +110,7 @@
   </div>
 
   <!-- ═══ 원격 제어 (C2) ═══ -->
-  <div class="panel">
+  <div class="panel" id="panelCtrl">
     <h2>로봇 원격 제어</h2>
     <div class="row">
       <button class="btn-reset" id="btnReset">임무 재시작 (reset)</button>
@@ -96,7 +123,7 @@
   </div>
 
   <!-- ═══ 화재 경보 입력 (C2 — 데모 트리거) ═══ -->
-  <div class="panel">
+  <div class="panel" id="panelFire">
     <h2>화재 경보 입력 (/alarm)</h2>
     <div class="row">
       X <input type="number" id="fx" value="14.0" step="0.5">
@@ -107,7 +134,7 @@
   </div>
 
   <!-- ═══ 이벤트 로그 (C2) ═══ -->
-  <div class="panel">
+  <div class="panel" id="panelLog">
     <h2>탐지·이벤트 로그</h2>
     <div id="log"></div>
   </div>
@@ -123,7 +150,7 @@
   </div>
 
   <!-- ═══ 시스템 상태 (C4) ═══ -->
-  <div class="panel wide">
+  <div class="panel wide" id="panelSys">
     <h2>시스템 상태</h2>
     <div class="sys" id="sys">
       <div><i id="h-scan">●</i> LiDAR <span class="muted">/scan</span> <b id="a-scan">—</b></div>
@@ -136,11 +163,12 @@
   </div>
 
   <!-- ═══ 자리 예약 패널 ═══ -->
-  <div class="panel wide"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
+  <div class="panel wide" id="panelVideo"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
 
 </div>
 
 <script src="roslib.min.js"></script>
+<script src="mock_map_twin.js"></script>   <!-- 실제 쌍굴 지도 픽스처 (목업 전용) -->
 <script src="mock.js"></script>   <!-- ?mock=1 일 때만 동작. 없으면 아무 일도 안 한다 -->
 <script>
 /* ════════════════════════════════════════════════════════════════
@@ -149,6 +177,32 @@
      /mission_cmd·/alarm·/cmd_vel 발행
    - 토픽 계약: 0718_관제시스템.md §4
    ════════════════════════════════════════════════════════════════ */
+
+// ── 0. 표시 모드 (?display=1) ────────────────────────────────────
+//   ?display=1 → 디스플레이 모드 (지도 크게, 조작 UI 숨김)
+//   ?          → 기존 관제 모드 그대로. 파일을 나누지 않고 클래스로만 분기한다.
+if (new URLSearchParams(location.search).has('display')) document.body.classList.add('display');
+
+/* ★ T3: 대피자에게 보이는 문구. FSM 이름(PATROL 등)은 현장에서 의미가 없다.
+   🔴 문구 최종 결정권은 손민우 — 여기 표만 고치면 된다. */
+const STATE_TEXT = {
+  PATROL:      { big: '평시 순찰 중',        sub: '이상 없음',                     color: '#7fc4ff' },
+  APPROACH:    { big: '🔥 화재 감지',        sub: '로봇이 집결지로 이동 중입니다',  color: '#ffb04d' },
+  GATHER:      { big: '🔥 집결지 대기',      sub: '로봇 주변으로 모여 주세요',      color: '#ffb04d' },
+  GUIDE:       { big: '🟢 로봇을 따라오세요', sub: '출구로 유도 중입니다',          color: '#39d353' },
+  SEARCH_BACK: { big: '⚠ 대피자 확인 중',    sub: '로봇이 되돌아가고 있습니다',     color: '#ff5c5c' },
+  ESCAPED:     { big: '✅ 대피 완료',        sub: '안전구역에 도착했습니다',        color: '#39d353' },
+  FAULT:       { big: '⛔ 로봇 정지',        sub: '관제실 지시를 따르세요',         color: '#ff5c5c' },
+};
+function paintBigState(s) {
+  const t = STATE_TEXT[s];
+  const el = document.getElementById('bigState');
+  if (!el) return;
+  el.style.color = t ? t.color : '#5d6b7a';
+  el.innerHTML = (t ? t.big : '데이터 대기중') +
+                 `<span id="bigSub">${t ? t.sub : '통신을 확인하는 중입니다'}</span>`;
+}
+paintBigState(null);
 
 // ── 1. rosbridge 연결 (끊기면 3초마다 자동 재접속) ──────────────
 const connEl = document.getElementById('conn');
@@ -187,6 +241,7 @@ function setupTopics() {
         //   전이 시점(edge)에만 지운다. 매 tick 지우면 화재 직후 마커가 즉시 사라진다.
         if (msg.data === 'PATROL' && lastState !== null) { fireXY = null; planPts = []; }
         lastState = msg.data;
+        paintBigState(msg.data);          // ★ T3: 대형 배너 갱신
         document.querySelectorAll('#fsm span').forEach(el => {
           el.classList.toggle('on', el.dataset.s === msg.data);
           el.classList.toggle('danger', el.dataset.s === 'FAULT' && msg.data === 'FAULT');
@@ -367,21 +422,37 @@ function setupMap() {
     .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
 }
 
+/* ★ T3: 지도 → 캔버스 변환을 한 곳(view)에 모은다.
+   기존에는 캔버스 높이가 380 으로 박혀 있어 넓은 화면에서 오른쪽이 크게 남았다.
+   이제 실제 캔버스 크기에 맞춰 배율을 잡고 남는 쪽을 가운데로 민다.
+   그리기(m2p)와 클릭 역변환이 같은 view 를 쓰므로 둘이 어긋날 수 없다. */
+let view = { scale: 1, ox: 0, oy: 0 };
+
 // 지도 좌표(m) → 캔버스 픽셀
-function m2p(x, y, scale) {
+function m2p(x, y) {
   const cx = (x - mapInfo.origin.position.x) / mapInfo.resolution;
   const cy = (y - mapInfo.origin.position.y) / mapInfo.resolution;
-  return [cx * scale, (mapInfo.height - cy) * scale];
+  return [view.ox + cx * view.scale, view.oy + (mapInfo.height - cy) * view.scale];
+}
+// 캔버스 픽셀 → 지도 좌표(m)
+function p2m(px, py) {
+  return [
+    mapInfo.origin.position.x + ((px - view.ox) / view.scale) * mapInfo.resolution,
+    mapInfo.origin.position.y + (mapInfo.height - (py - view.oy) / view.scale) * mapInfo.resolution,
+  ];
 }
 
 function drawMap() {
   if (!mapImage || !mapInfo) return;
-  const cw = mapCanvas.clientWidth, ch = 380;
-  mapCanvas.width = cw; mapCanvas.height = ch;
+  const cw = mapCanvas.clientWidth, ch = mapCanvas.clientHeight || 380;
+  if (mapCanvas.width !== cw || mapCanvas.height !== ch) { mapCanvas.width = cw; mapCanvas.height = ch; }
   const scale = Math.min(cw / mapInfo.width, ch / mapInfo.height);
+  view = { scale, ox: (cw - mapInfo.width * scale) / 2, oy: (ch - mapInfo.height * scale) / 2 };
+  const K = document.body.classList.contains('display') ? 1.8 : 1;   // 디스플레이는 마커를 키운다
+
   mctx.fillStyle = '#12161c'; mctx.fillRect(0, 0, cw, ch);
   mctx.imageSmoothingEnabled = false;
-  mctx.drawImage(mapImage, 0, 0, mapInfo.width * scale, mapInfo.height * scale);
+  mctx.drawImage(mapImage, view.ox, view.oy, mapInfo.width * scale, mapInfo.height * scale);
 
   // ★ T1: 발행이 끊긴 지 오래면 경로를 버린다 (Nav2 는 멈출 뿐 "지워라"를 보내지 않는다)
   if (planPts.length && Date.now() - lastPlanAt > PLAN_TIMEOUT_MS) {
@@ -393,22 +464,22 @@ function drawMap() {
   const style = PLAN_STYLE[lastState];
   const hasPlan = planPts.length > 1 && !!style;
   if (hasPlan) {
-    mctx.strokeStyle = style.color; mctx.lineWidth = style.width;
+    mctx.strokeStyle = style.color; mctx.lineWidth = style.width * K;
     mctx.lineJoin = 'round'; mctx.lineCap = 'round';
     mctx.beginPath();
-    planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y, scale); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
+    planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
     mctx.stroke();
   }
   // 화재 마커
   if (fireXY) {
-    const [px, py] = m2p(fireXY.x, fireXY.y, scale);
-    mctx.font = '20px sans-serif'; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+    const [px, py] = m2p(fireXY.x, fireXY.y);
+    mctx.font = `${Math.round(20 * K)}px sans-serif`; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
     mctx.fillText('🔥', px, py);
   }
   // 로봇 (진행방향 삼각형 — 캔버스 y 반전이라 화면각 = -yaw)
   if (robot) {
-    const [px, py] = m2p(robot.x, robot.y, scale);
-    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw);
+    const [px, py] = m2p(robot.x, robot.y);
+    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw); mctx.scale(K, K);
     mctx.fillStyle = '#7fc4ff'; mctx.beginPath();
     mctx.moveTo(10, 0); mctx.lineTo(-6, 6); mctx.lineTo(-6, -6); mctx.closePath(); mctx.fill();
     mctx.restore();
@@ -417,11 +488,12 @@ function drawMap() {
   // ★ T2: 경로 라벨 — 지도 위에 직접(멀리서 읽혀야 한다) + 지도 아래 텍스트에도 반영
   const label = hasPlan ? style.label : '경로 없음';
   const color = hasPlan ? style.color : '#5d6b7a';
-  mctx.font = 'bold 16px "Noto Sans KR", sans-serif';
+  const fs = Math.round(16 * K);
+  mctx.font = `bold ${fs}px "Noto Sans KR", sans-serif`;
   mctx.textAlign = 'left'; mctx.textBaseline = 'top';
   const tw = mctx.measureText(label).width;
-  mctx.fillStyle = 'rgba(0,0,0,.55)'; mctx.fillRect(8, 8, tw + 20, 28);
-  mctx.fillStyle = color; mctx.fillText(label, 18, 14);
+  mctx.fillStyle = 'rgba(0,0,0,.55)'; mctx.fillRect(8, 8, tw + fs + 4, fs + 12);
+  mctx.fillStyle = color; mctx.fillText(label, 8 + fs / 2 + 2, 14);
 
   const lblEl = document.getElementById('planLabel');
   if (lblEl) { lblEl.textContent = label; lblEl.style.color = color; }
@@ -432,9 +504,7 @@ setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
 mapCanvas.addEventListener('click', ev => {
   if (!mapInfo) return;
   const r = mapCanvas.getBoundingClientRect();
-  const scale = Math.min(mapCanvas.width / mapInfo.width, mapCanvas.height / mapInfo.height);
-  const x = mapInfo.origin.position.x + ((ev.clientX - r.left) / scale) * mapInfo.resolution;
-  const y = mapInfo.origin.position.y + (mapInfo.height - (ev.clientY - r.top) / scale) * mapInfo.resolution;
+  const [x, y] = p2m(ev.clientX - r.left, ev.clientY - r.top);   // ★ T3: 그리기와 같은 view 사용
   document.getElementById('fx').value = x.toFixed(1);
   document.getElementById('fy').value = y.toFixed(1);
   log('ctrl', `지도 클릭 → 화재 후보 좌표 (${x.toFixed(1)}, ${y.toFixed(1)})`);
