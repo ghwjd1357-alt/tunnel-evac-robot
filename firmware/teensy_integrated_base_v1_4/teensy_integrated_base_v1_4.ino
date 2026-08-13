@@ -139,31 +139,30 @@ static const double TOTAL_PPR = 2641.1;
 //    않는다 — 합치면 어느 하나를 고칠 때 나머지 둘이 조용히 따라 움직인다.
 //      물리 0.49  = 줄자로 잰 실제 바퀴 중심 간격. URDF 가 쓴다. 여기 없다.
 //      명령 0.62  = cmd_vel -> 바퀴 목표. 스키드 슬립 보정이 이미 먹은 값 (CMD_WHEEL_BASE)
-//      odom 0.670 = 엔코더 -> yaw. 회전 시 옆문지름까지 먹은 값 (ODOM_WHEEL_BASE)
-//    반지름도 마찬가지로 **두 개**다 (ODOM_WHEEL_RADIUS / CONTROL_WHEEL_RADIUS) — 아래.
+//      odom 0.829 = 엔코더 -> yaw. 회전 시 옆문지름까지 먹은 값 (ODOM_WHEEL_BASE)
+//
+// 🔴 타이어에는 **반지름이 셋** 있다. odom 이 쓰는 것은 마지막 하나뿐이다.
+//      자유   0.065  = 무부하 카탈로그. 여기 없다.
+//      하중   0.045  = 바닥->축 중심(축 높이). URDF 가 쓴다. 여기 없다.
+//      구름   0.05698 = 한 바퀴에 나아가는 거리 / 2PI.  ** 이 파일이 쓰는 것 **
+//    타이어가 눌려도 벨트 둘레는 안 줄어든다 — 접지면만 납작해진다. 그래서 구름 반지름은
+//    하중 반지름보다 **항상 크고**, 하중이 변해도 거의 안 변한다.
+//    ⚠ 하중 반지름의 변화율을 구름 반지름에 적용하면 틀린다. 08-13 에 실제로 그렇게 했다.
 
-// 🔴 2026-08-13 재교정 (예약 32-d). 구값 0.05698 은 **판재를 올리기 전** 로봇에서
-// 3m 를 맞춰 역산한 배율이다. 08-13 에 상판 판재·경광등·라이다 마스트를 얹어 하중이
-// 늘면서 반공압 타이어가 주저앉았고, 그 배율이 로봇과 맞지 않게 됐다.
-//   지면 실측 r2_line_0813_1516 : 줄자 3105mm vs odom 3842.6mm -> odom/줄자 = 1.238
-//   0.05698 / 1.238 = 0.04603
-// 독립 검산 = 네 바퀴 축 중심 높이 실측 평균 **45.63mm**(47.0/45.0/44.5/46.0) 로
-// 0.9% 안에서 일치한다. 밸브 없는 반공압 타이어라 공기로 되돌릴 수 없고, 누설도 없으므로
-// 하중이 고정된 지금 값은 유지된다.
+// 🔴 2026-08-13 밤 — 32-d 재교정(0.04603)을 **되돌린다** (예약 32-e).
+// 오후에 만든 0.04603 은 줄자 오독 위에 서 있었다: r2_line_0813_1516 의 줄자가 3105mm 로
+// 적혔는데, 같은 명령으로 33.7 초를 달린 로봇은 3.84m 를 간다(밤 시행이 24.9 초에 3.065m).
+// 굽고 나서 지면에서 다시 재자 odom/줄자 = 0.807 · 0.811 로 **보정의 정확한 역수**가 나왔다.
+//
+// 확정 근거 = C10 (합의서가 08-02 에 요청하고 미수령이던 항목. 08-13 밤에 처음 쟀다):
+//   r2_roll_0813_2143 : 바퀴 표시 11 회전 · 줄자 3900mm
+//     -> 구름 반지름 55.6 (좌 안쪽) / 56.4 (중심선) / 57.2 (우 바깥) mm
+//     -> 세 값이 판재 이전 56.98 을 감싼다. 46.03 은 범위 밖이다.
+//   엔코더는 정직했다 — 눈으로 센 11.00 바퀴 vs 엔코더 10.93 바퀴 (일치 0.9938).
+//   회전 거동은 오후와 밤이 동일했다 (1.337 x 0.7476 = 0.9995 vs 실측 0.991/0.999).
 // ⚠ 이름이 ODOM_ 인 것이 의도다. 이 값은 **odom 발행에만** 든다.
-// 정본 = docs/MASTER_PLAN.md §7 예약 32-d · docs/REAL_ROBOT_VALUES.md §1-b.
-static const double ODOM_WHEEL_RADIUS = 0.04603;  // corrected rolling radius [m]
-
-// 🔴 2026-08-13 보완 (검토 §65.1) — 제어 피드백 전용 반지름. 값은 **구 반지름 그대로**다.
-// 부모판은 반지름 하나로 odom 과 PI 피드백을 같이 만들었다. 그래서 반지름을 고치면
-//   DISTANCE_PER_COUNT -> filteredWheelVelocity -> measuredAlongCommand (PI 오차)
-// 경로로 **제어기가 보는 속도까지 0.808 배**가 되어, odom 만 고치려던 이 묶음이
-// 게인 조정(예약 33)을 몰래 같이 하게 된다. 검토 §65.1 이 그 자리를 짚었다.
-// 그래서 제어기에는 판재 이전 배율을 그대로 먹인다 — 같은 엔코더 입력에 대해 부모판과
-// **같은 desiredPwm/appliedPwm** 이 나온다. FF·게인은 예약 33 에서 별도로 연다.
-// ⚠ 이 값을 "맞는 반지름"으로 읽지 마라. 제어기 튜닝이 그 위에 얹혀 있는 **옛 눈금**이고,
-//   예약 33 이 FF·게인을 새 눈금으로 다시 맞출 때 함께 사라질 값이다.
-static const double CONTROL_WHEEL_RADIUS = 0.05698;  // legacy control scale [m]
+// 정본 = docs/MASTER_PLAN.md §7 예약 32-e · docs/REAL_ROBOT_VALUES.md §1-b-0 · PITFALLS §12.
+static const double ODOM_WHEEL_RADIUS = 0.05698;  // rolling radius, C10-measured [m]
 
 // 명령 경로(cmd_vel -> 바퀴 목표)가 쓰는 윤거. 스키드 슬립 보정이 들어간 값이고
 // 08-13 묶음에서 **바꾸지 않는다** — 이 묶음의 목적은 odom 정직화이지 조종 특성 변경이
@@ -172,28 +171,34 @@ static const double CONTROL_WHEEL_RADIUS = 0.05698;  // legacy control scale [m]
 //    도구·정본이 이 값을 odom 보정 계수로 베껴 갔다(REAL_ROBOT_VALUES §1-c).
 static const double CMD_WHEEL_BASE = 0.62;   // command-path track width [m]
 
-// 🔴 2026-08-13 신설 — odom yaw 전용 유효 윤거 (예약 32-d).
-// ODOM_WHEEL_RADIUS 를 고쳐도 회전 배율이 8% 남는다:
-//   r2_spin2pi_0813_1640 : IMU 355.53° (목표 대비 -1.24%) vs odom 적분 475.50°
-//   odom/IMU = 1.3375 -> 반지름 몫 1.238 을 빼면 회전 전용 잔여 = 1.080
-//   0.62 * 1.080 = 0.670
+// 🔴 2026-08-13 밤 정정 — odom yaw 전용 유효 윤거 (예약 32-e. 구값 0.670 은 기각된
+// 반지름 0.04603 위에서 유도됐다).
+// 회전 시험이 확정하는 것은 **비 하나**뿐이다 — odom yaw 는 r/base 에 비례하므로 둘이
+// 같이 틀리면 상쇄된다. 그래서 회전만으로는 base 를 못 정한다:
+//   밤 회전 2 시행이 확정한 비  = 0.04603 / 0.670 = 0.068701
+//     r2_spin_0813_2134 : odom 263.6° vs IMU 265.9°  -> 0.991
+//     r2_spin_0813_2130 : odom 1303.6° vs IMU 1305.2° -> 0.999 (3.6 바퀴)
+//   C10 이 확정한 r             = 0.05698
+//   -> base = 0.05698 / 0.068701 = 0.829
 // 스키드 스티어는 회전할 때 네 바퀴를 옆으로 문지르므로 odom 이 보는 유효 윤거가
-// 기하 윤거(URDF 0.49)보다 크다. 판재로 무거워지며 그 문지름이 더 심해졌다.
+// 기하 윤거(URDF 0.49)보다 크다.
 // ⚠ 명령용 CMD_WHEEL_BASE 와 **일부러 분리**했다. 하나로 합치면 같은 angular.z 에 대해
-//   바퀴 명령이 8% 커져 조종 특성이 같이 바뀐다 — 그건 별개 묶음이다.
-static const double ODOM_WHEEL_BASE = 0.670;
+//   바퀴 명령이 커져 조종 특성이 같이 바뀐다 — 그건 별개 묶음이다.
+// 🔴 이 값은 **제자리 회전**에 맞춘 값이다. 완만한 곡선에서는 odom 이 yaw 를 약 16%
+//    과소평가한다(제자리 0.991 vs 곡선 0.838) — ICR 이 선회 반경에 따라 옮겨간다.
+//    전제조건·재개방 = docs/REAL_ROBOT_VALUES.md §1-c.
+static const double ODOM_WHEEL_BASE = 0.829;
 
 // odom 이 쓰는 눈금. 엔코더 1 카운트가 지면에서 몇 m 인가.
 static const double DISTANCE_PER_COUNT =
     (2.0 * PI * ODOM_WHEEL_RADIUS) / TOTAL_PPR;
 
-// 🔴 검토 §65.1 — 제어 피드백은 옛 눈금으로 되돌려 먹인다.
-// filteredWheelVelocity 는 위 DISTANCE_PER_COUNT(새 눈금)로 만들어지므로, PI 에 넣기
-// 전에 이 배율을 곱해 부모판이 보던 수를 복원한다. EMA 는 선형이라 상태를 배율만큼
-// 늘리는 것과 결과가 같다 — 필터 상태를 하나 더 들 필요가 없다.
-//   0.05698 / 0.04603 = 1.23789...
-static const double CONTROL_FEEDBACK_SCALE =
-    CONTROL_WHEEL_RADIUS / ODOM_WHEEL_RADIUS;
+// 🔴 2026-08-13 밤 — CONTROL_WHEEL_RADIUS / CONTROL_FEEDBACK_SCALE 을 **제거했다**
+// (예약 32-e). 검토 §65.1 이 만든 분리는 옳았다: 반지름이 틀린 동안 제어를 부모판
+// 눈금에 묶어 둔 덕분에, 상수를 되돌리는 지금 **제어 경로가 수치적으로 불변**이다.
+//   전:  측정속도(r=0.04603) x 1.23789
+//   후:  측정속도(r=0.05698)              <- 같은 값
+// 반지름이 제자리로 오면서 배율이 1.0(항등)이 되어 분리가 스스로 불필요해졌다.
 
 // cmd_vel and wheel-speed limits.
 static const double MAX_LINEAR_CMD = 0.12;   // [m/s]
@@ -704,10 +709,11 @@ void updateWheelControllers(double dt)
     // This prevents a large overspeed correction from commanding reverse PWM.
     const double direction = (signedTarget >= 0.0) ? 1.0 : -1.0;
     const double targetMagnitude = fabs(signedTarget);
-    // 🔴 검토 §65.1 — 옛 눈금으로 되돌려 먹인다. 이 곱셈이 없으면 반지름 재교정이
-    //    PI 오차를 1.238 배로 부풀려 제어까지 같이 바꾼다 (예약 33 을 몰래 여는 것).
+    // 🔴 ODOM_WHEEL_RADIUS 가 C10 실측(0.05698)으로 돌아오면서 이 값이 곧 부모판 눈금이다
+    //    (예약 32-e). §65.1 이 넣었던 CONTROL_FEEDBACK_SCALE 곱셈은 배율 1.0 이 되어 제거됐다.
+    //    ⚠ 반지름을 다시 만지면 이 자리가 제어에 직결된다는 사실은 그대로다 — §65.1 을 읽어라.
     const double measuredAlongCommand =
-        direction * filteredWheelVelocity[motor] * CONTROL_FEEDBACK_SCALE;
+        direction * filteredWheelVelocity[motor];
     const double error = targetMagnitude - measuredAlongCommand;
 
     const double rawDerivative =
@@ -1353,7 +1359,10 @@ void publishFirmwareInfo()
   //       python3 tools/firmware_info_length_check.py
   //   그 도구는 이 파일에서 format·인자·버퍼 크기를 직접 파싱해 host gcc 로 잰다.
   //   여기 적힌 수를 믿지 말고 도구를 돌려라. 이 주석이 낡으면 도구가 이긴다.
-  //     실측(1536 버퍼) : 운용 표본 약 890자 / 타입 이론 최악 1157자 / 여유 378자
+  //     실측(1536 버퍼) : 운용 표본 약 857자 / 현재 소스 상한 1072자 / 여유 463자
+  //     🔴 검토 §67.4 — 앞 판은 이 줄을 "타입 이론 최악 1157 / 여유 378" 이라 적었다.
+  //        %f 를 -999999.999999 로 잡은 시나리오였지 타입 경계가 아니다. 지금은
+  //        tools/firmware_info_length_check.py 가 %f 를 소스 상수 실값으로 풀어 잰다.
   //
   // ⚠ 1024 였으면 이론 최악 여유가 얼마 안 남는다. version 문자열 한 번, 라이브러리
   //   이름 하나면 넘는다. 그래서 1536 으로 올렸다 — 스택 지역변수이고 RAM1 여유가
@@ -1369,7 +1378,7 @@ void publishFirmwareInfo()
       // 🔴 검토 §65.3 — 키 이름이 의미를 들고 나간다. 구판의 일반명 wheel_radius 는
       //    읽는 쪽(d0_check·encoder·watchdog)이 "그냥 반지름"으로 베껴 가서, 재교정
       //    뒤에도 판재 이전 값을 정답으로 붙들고 있었다. 이제 네 값이 각자 나온다.
-      "odom_wheel_radius=%.5f; control_wheel_radius=%.5f; "
+      "odom_wheel_radius=%.5f; "
       "cmd_wheel_base=%.3f; odom_wheel_base=%.3f; "
       "control=%s; kp=%.3f; ki=%.3f; kd=%.3f; "
       "low_speed_mode=continuous_start_boost; min_speed=%.3f; "
@@ -1395,7 +1404,6 @@ void publishFirmwareInfo()
       FW_ARDUINO_VERSION,
       FW_TEENSYDUINO_VERSION,
       ODOM_WHEEL_RADIUS,
-      CONTROL_WHEEL_RADIUS,
       CMD_WHEEL_BASE,
       ODOM_WHEEL_BASE,
       USE_PID_D_TERM ? "PID" : "PI",

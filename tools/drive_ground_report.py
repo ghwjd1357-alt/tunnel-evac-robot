@@ -35,6 +35,14 @@ import sys
 # 그런데 `test_drive_checks` 가 "펌웨어와 같은 값" 이라며 이 죽은 상수를 정답으로 고정해,
 # 펌웨어가 명령용 0.62 / odom 용 0.670 으로 갈라진 뒤에도 초록으로 남았다.
 # 이 도구는 윤거를 안 쓴다 — 줄자와 `/odom` 거리만 본다. 그래서 상수를 지웠다.
+
+# 🔴 08-13 신설 (PITFALLS §12) — 줄자가 물리적으로 가능한 값인지 먼저 본다.
+#   `줄자 / 주행시간` 이 명령 속도에서 이만큼 벗어나면 **줄자를 먼저 의심한다.**
+#   08-13 오후에 줄자가 3105mm 로 적혔는데 같은 명령으로 33.7초를 달린 로봇은 3.84m 를
+#   간다(밤 시행이 24.9초에 3.065m). 그 한 값이 odom/줄자 = 1.238 을 만들었고, 거기서
+#   반지름 상수가 나왔고, 그 위에 하루치 펌웨어·정본·검토 3회차가 쌓였다.
+#   이 검사 한 줄이 있었으면 그 자리에서 멈췄다.
+TAPE_PLAUSIBLE_BAND = (0.85, 1.30)
 # 명령이 끊긴 뒤 watchdog 이 세울 때까지를 포함해 보는 꼬리. `§7-c-0` 실측 총 정지가
 # 약 516ms 이므로 1.5s 면 정지까지 확실히 담는다.
 COAST_TAIL_S = 1.5
@@ -194,6 +202,12 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         v['tape_mm'] = tape_mm
         v['odom_over'] = path * 1000.0 / tape_mm if tape_mm > 0 else float('nan')
         v['true_mps'] = (tape_mm / 1000.0) / dur_seg if dur_seg > 0 else float('nan')
+        # 🔴 줄자 타당성 — 상수를 바꾸기 전에 반드시 통과해야 하는 관문 (PITFALLS §12).
+        cmd = abs(v.get('cmd_linear') or 0.0)
+        if cmd > 1e-9 and v['true_mps'] == v['true_mps']:
+            v['tape_vs_cmd'] = v['true_mps'] / cmd
+            v['tape_plausible'] = (TAPE_PLAUSIBLE_BAND[0] <= v['tape_vs_cmd']
+                                   <= TAPE_PLAUSIBLE_BAND[1])
         # 🔴 08-12 신설 — 평균속도와 순항속도는 **약점이 서로 반대**다.
         #   · 평균(`true_mps`) 은 줄자에 앵커돼 스케일은 믿을 수 있지만, 창에 출발
         #     가속과 관성 꼬리가 같이 들어가 **아래로 희석된다**. 짧은 주행일수록 심하다
@@ -265,6 +279,26 @@ def report(v, name=''):
             print('     🔴 odom 과 줄자가 5% 넘게 어긋난다 — 오도메트리 스케일을 의심한다')
         else:
             print('     ✅ 오도메트리 스케일 정상(5% 이내)')
+
+        # 🔴 08-13 신설 (PITFALLS §12) — 어긋남을 상수로 흡수하기 **전에** 줄자를 본다.
+        if v.get('tape_plausible') is False:
+            print()
+            print('     🔴🔴 줄자 타당성 실패 — 이 값으로 상수를 바꾸지 마라')
+            print(f'        줄자 {v["tape_mm"]:.0f} mm / {v["dur_seg"]:.2f} s '
+                  f'= {v["true_mps"]:.4f} m/s = 명령의 {v["tape_vs_cmd"]:.2f} 배')
+            print(f'        타당 범위 {TAPE_PLAUSIBLE_BAND[0]:.2f}~'
+                  f'{TAPE_PLAUSIBLE_BAND[1]:.2f} 배를 벗어났다.')
+            print('        → 로봇이 그만큼 느렸거나(고장), **줄자를 잘못 쟀거나**다.')
+            print('        🔴 08-13 에 정확히 이 자리에서 줄자가 틀렸고, 그것을 '
+                  '반지름 상수로 흡수해')
+            print('           하루치 펌웨어·정본·검토 3회차가 그 위에 쌓였다.')
+            print('        🔴 상수 재교정은 **독립 근거 두 개**를 요구한다 — '
+                  '줄자 하나로 바꾸지 않는다.')
+            print('           구름 반지름의 독립 근거 = 바퀴 회전수(C10). '
+                  'PITFALLS §12 · 예약 32-e')
+        elif v.get('tape_plausible') is True:
+            print(f'     ✅ 줄자 타당성 통과 — 명령의 {v["tape_vs_cmd"]:.2f} 배 '
+                  f'(타당 {TAPE_PLAUSIBLE_BAND[0]:.2f}~{TAPE_PLAUSIBLE_BAND[1]:.2f})')
     print()
     print('  🔴 실제 이동 거리의 정본은 줄자다 — odom·twist 는 같은 엔코더 파생이라')
     print('     서로를 검증하지 못한다. 표시하고 재는 것이 유일한 외부 관측이다.')

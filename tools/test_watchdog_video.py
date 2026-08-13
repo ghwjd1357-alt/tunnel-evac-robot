@@ -542,9 +542,14 @@ class HistoricalProfileTest(unittest.TestCase):
     낸다" 와 구별이 안 된다.
     """
 
-    def test_45_the_two_profiles_differ_by_the_radius_ratio(self):
-        ratio = wv.PRE_PLATE_WHEEL_RADIUS_M / wv.WHEEL_RADIUS_M
-        self.assertAlmostEqual(1.0 / 0.80783, ratio, places=4)
+    def test_45_the_two_profiles_currently_hold_the_same_radius(self):
+        """🔴 08-13 밤 — 판재는 **구름** 반지름을 안 바꿨다(예약 32-e · PITFALLS §12).
+
+        앞 판은 두 profile 이 `1/0.80783` 배로 갈린다고 고정했다. 그 전제가 기각됐다 —
+        판재는 하중 반지름(축 높이)만 15% 줄였고 구름 반지름은 1% 안에서 그대로다.
+        기계는 남기되 **값이 같다는 사실 자체**를 여기서 못 박는다.
+        """
+        self.assertEqual(wv.PRE_PLATE_WHEEL_RADIUS_M, wv.WHEEL_RADIUS_M)
         self.assertEqual(wv.PROFILE_RADIUS_M['pre-plate'],
                          wv.PRE_PLATE_WHEEL_RADIUS_M)
         self.assertEqual(wv.PROFILE_RADIUS_M['post-plate'], wv.WHEEL_RADIUS_M)
@@ -571,19 +576,23 @@ class HistoricalProfileTest(unittest.TestCase):
         self.assertEqual('post-plate', wv.resolve_profile({}, False))
         self.assertEqual('pre-plate', wv.resolve_profile({}, True))
 
-    def test_50_the_default_profile_does_not_reproduce_pre_plate_evidence(self):
-        """🔴 필수 부정 — 판재 이후 반지름으로 재면 기록된 drift 가 안 나온다."""
+    def test_50_a_profile_split_would_break_the_recorded_evidence(self):
+        """🔴 필수 부정 — profile 기계가 **작동한다**는 것을 보인다.
+
+        지금은 두 값이 같아 항등이라, "값이 갈리면 역사 수치가 안 맞는다" 를 직접
+        보일 수가 없다. 그래서 **가상의 분리**를 주입해 환산이 실제로 갈리는지 본다 —
+        반지름이 진짜로 바뀌는 날 이 기계가 도는지가 이 시험의 대상이다.
+        """
         deg = wv.mm_s_to_deg_per_frame(wv.RECORDED['drift_mm_s'], FPS)
-        try:
-            wv.ACTIVE_WHEEL_RADIUS_M = wv.PRE_PLATE_WHEEL_RADIUS_M
-            historical = wv.deg_per_frame_to_mm_s(deg, FPS)
-            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M
-            current = wv.deg_per_frame_to_mm_s(deg, FPS)
+        historical = wv.deg_per_frame_to_mm_s(deg, FPS)
+        self.assertAlmostEqual(wv.RECORDED['drift_mm_s'], historical, places=9)
+        try:                                    # 가상 분리: 반지름이 0.8 배가 된 미래
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M * 0.8
+            future = wv.deg_per_frame_to_mm_s(deg, FPS)
         finally:
             wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M
-        self.assertAlmostEqual(wv.RECORDED['drift_mm_s'], historical, places=9)
-        self.assertNotAlmostEqual(wv.RECORDED['drift_mm_s'], current, places=3)
-        self.assertAlmostEqual(0.80783, current / historical, places=5)
+        self.assertNotAlmostEqual(wv.RECORDED['drift_mm_s'], future, places=3)
+        self.assertAlmostEqual(0.8, future / historical, places=9)
 
     def test_51_the_active_profile_is_printed_with_its_name(self):
         """현장에서 화면만 보고 어느 시대로 쟀는지 알 수 있어야 한다."""

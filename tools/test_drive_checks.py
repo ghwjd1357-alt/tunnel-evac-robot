@@ -130,11 +130,14 @@ class EncoderCheckTest(unittest.TestCase):
         self.assertEqual(firmware_double('ODOM_WHEEL_BASE'), ec.ODOM_WHEEL_BASE_M)
         self.assertEqual(firmware_double('ODOM_WHEEL_RADIUS'), ec.ODOM_WHEEL_RADIUS_M)
 
-        # 명령 경로 상수는 **이 도구가 쓰면 안 되는 값**이다. 셋이 서로 달라야 한다.
+        # 명령 경로 상수는 **이 도구가 쓰면 안 되는 값**이다. 둘이 서로 달라야 한다.
         self.assertNotEqual(firmware_double('CMD_WHEEL_BASE'),
                             firmware_double('ODOM_WHEEL_BASE'))
-        self.assertNotEqual(firmware_double('CONTROL_WHEEL_RADIUS'),
-                            firmware_double('ODOM_WHEEL_RADIUS'))
+        # 🔴 08-13 밤 — `CONTROL_WHEEL_RADIUS` 는 예약 32-e 에서 사라졌다. 반지름이
+        #    C10 실측(0.05698)으로 돌아오면서 odom 과 제어가 같은 눈금이 됐기 때문이다.
+        #    그 이름이 되살아나면 반지름이 또 갈렸다는 뜻이므로 여기서 잡는다.
+        with self.assertRaises(KeyError):
+            firmware_double('CONTROL_WHEEL_RADIUS')
 
         # 판재 이전 profile 은 옛 값 그대로여야 옛 증거가 재현된다.
         self.assertEqual(0.62, ec.PRE_PLATE_WHEEL_BASE_M)

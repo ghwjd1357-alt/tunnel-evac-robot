@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""반지름 재교정이 **제어를 안 바꿨는지** 를 생산 코드로 증명한다 (검토 §65.1·§66.2).
+"""반지름 상수가 **제어까지 바꾸는지** 를 생산 코드로 증명한다 (검토 §65.1·§66.2 · 예약 32-e).
 
 무엇을 증명하나
 ---------------
@@ -18,15 +18,17 @@
 
   부모판 `a1268dc` — 반지름 0.05698 하나. 제어 튜닝이 측정된 눈금이다.
   결함판 `6aca792` — 반지름만 0.04603 으로. 검토 §65.1 이 짚은 그 상태.
-  현행판 HEAD      — 상수 분리 + CONTROL_FEEDBACK_SCALE 복원.
+  현행판 HEAD      — 32-e 로 반지름이 0.05698 로 복귀. 상수 하나 = 부모판과 동일.
 
 검사 (검토 §66.2 완료판정)
   ① 현행판의 `desiredPwm` 궤적이 부모판과 **정수까지 완전히 같다**.
   ② 결함판의 궤적은 부모판과 **달라야 한다** — 이 시험이 §65.1 결함을 실제로 본다는
      증거다. 이게 없으면 "아무 차이도 못 보는 시험"과 구별이 안 된다.
   ③ 직진 카운트열에서 현행판 odom 이동거리가 부모판의 0.04603/0.05698 배다.
-  ④ 🔴 **변이 주입 자가검사** — 검토 §66.2 가 뚫은 변이(`+ 0.010`)와 배율 제거를
-     현행 원문에 넣으면 ① 이 반드시 깨진다.
+  ④ 🔴 **변이 주입 자가검사** — 제어식에 `+ 0.010` 을 넣거나 `ODOM_WHEEL_RADIUS` 를
+     기각된 `0.04603` 으로 되돌리면 ① 이 반드시 깨진다.
+     🔴 뒤엣것이 §65.1 의 교훈을 코드로 못 박는다 — **반지름은 odom 전용이 아니다.**
+     32-e 로 상수가 하나로 돌아왔으므로 반지름을 만지면 제어가 같이 움직인다.
 
 왜 파이썬으로 다시 짜지 않나
 ----------------------------
@@ -274,15 +276,20 @@ def main():
     print("      부모 %.6f m -> 현행 %.6f m  (비 %.9f)"
           % (parent_straight[-1][1], head_straight[-1][1], measured))
 
-    # ④ 변이 주입 자가검사 — 검토 §66.2 가 뚫은 두 변이를 이 시험이 잡는가.
-    print("\n[2] 변이 주입 자가검사 (검토 §66.2 가 통과시킨 변이)")
-    anchor = ("        direction * filteredWheelVelocity[motor] * "
-              "CONTROL_FEEDBACK_SCALE;")
+    # ④ 변이 주입 자가검사 — 이 시험이 실제로 무엇을 잡는가.
+    print("\n[2] 변이 주입 자가검사")
+    anchor = "        direction * filteredWheelVelocity[motor];"
+    radius_anchor = "static const double ODOM_WHEEL_RADIUS = 0.05698;"
     mutations = [
-        ("제어식에 + 0.010 을 더한다", anchor,
+        ("제어식에 + 0.010 을 더한다 (검토 §66.2 가 통과시킨 변이)", anchor,
          anchor[:-1] + " + 0.010;"),
-        ("CONTROL_FEEDBACK_SCALE 곱셈을 지운다", anchor,
-         "        direction * filteredWheelVelocity[motor];"),
+        # 🔴 §65.1 의 교훈을 코드로 못 박는다. 반지름은 odom 전용이 아니다 —
+        #    DISTANCE_PER_COUNT -> filteredWheelVelocity -> PI 오차의 측정항으로 흐른다.
+        #    32-e 로 상수가 하나로 돌아왔으므로, 이제 반지름을 만지면 **제어가 같이 움직인다.**
+        #    그 사실이 살아 있다는 것을 이 변이가 매번 증명한다.
+        ("ODOM_WHEEL_RADIUS 를 기각된 0.04603 으로 되돌린다 (§65.1 결함 재현)",
+         radius_anchor,
+         "static const double ODOM_WHEEL_RADIUS = 0.04603;"),
     ]
     for label, old, new in mutations:
         try:

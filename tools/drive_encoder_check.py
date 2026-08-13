@@ -59,14 +59,15 @@ import sys
 #
 # 바꿀 일이 생기면 `.ino` 를 먼저 고치고 여기를 따라 옮긴다. 보드가 실제로 뭘 들고
 # 있는지는 `/firmware/info` 의 `odom_wheel_base=` · `odom_wheel_radius=` 로 대조한다.
-ODOM_WHEEL_BASE_M = 0.670
-ODOM_WHEEL_RADIUS_M = 0.04603
+ODOM_WHEEL_BASE_M = 0.829
+ODOM_WHEEL_RADIUS_M = 0.05698
 
 # 🔴 판재 이전(08-12 까지) 증거를 다시 환산할 때 쓰는 옛 값. **현재값이 아니다.**
 # 검토 §65.3 "역사 실측 문장을 새 값으로 일괄 덮어쓰지 않는다" 에 따른 자리다.
 # `--pre-plate` 로 고른다.
 PRE_PLATE_WHEEL_BASE_M = 0.62
-PRE_PLATE_WHEEL_RADIUS_M = 0.05698
+# 🔴 08-13 밤 — 구름 반지름은 판재 전후가 같다(예약 32-e). 윤거만 갈린다.
+PRE_PLATE_WHEEL_RADIUS_M = ODOM_WHEEL_RADIUS_M
 
 # 굴림 구간을 가르는 기준. 촬영 규격의 "3초 이상 정지"보다 넉넉히 짧게 잡아 사람이
 # 조금 빨리 움직여도 구간이 붙지 않게 한다.
