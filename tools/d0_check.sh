@@ -116,6 +116,10 @@
 # ============================================================================
 set -u
 
+# 🔴 08-13 (검토 §65.3) — 펌웨어 정체 검사가 기대값을 `.ino` 에서 읽으려면 저장소
+#   뿌리를 알아야 한다. 실행 위치와 무관하게 스크립트 자기 위치에서 잡는다.
+D0_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 ODOM_TOPIC="/odom"
 IMU_TOPIC="/imu/data"
 TEENSY_DEV="/dev/teensy_drive"     # udev 규칙 = tools/udev/99-teensy-drive.rules (S6-3)
@@ -709,15 +713,48 @@ hard_timeout "$FW_INFO_SECS" ros2 topic echo /firmware/info --field data --full-
 clock_end $? "$FW_INFO_SECS" "$FWOUT"
 if [ "$CLK_RC" = "0" ] && [ -s "$FWOUT" ]; then
   sed 's/^/       /' "$FWOUT" | head -6
-  if grep -q "wheel_radius=0.05698" "$FWOUT"; then
-    ok "wheel_radius=0.05698 — 소스 v1.4 와 일치"
+  # 🔴 08-13 (검토 §65.3) — 기대값을 여기 적지 않고 **`.ino` 에서 읽어** 대조한다.
+  #   구판은 `wheel_radius=0.05698` 을 스크립트 안에 박아 두어, 08-13 재교정 뒤
+  #   정상 펌웨어를 "다른 펌웨어" 로 거절하게 돼 있었다. 정체 검사가 소스를 거절하면
+  #   그건 검사가 아니라 장애물이다.
+  #   ⚠ 굽기 **전**에는 이 검사가 NG 로 나오는 것이 정상이다 — 보드에 아직 옛 펌웨어가
+  #     들어 있다는 사실을 정확히 말하는 것이다.
+  FW_KEYS=$(D0_INO="$D0_ROOT/firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino" \
+            python3 - <<'PYEOF'
+import os, re, sys
+try:
+    src = open(os.environ["D0_INO"], encoding="utf-8").read()
+except OSError:
+    sys.exit(1)
+c = dict(re.findall(r"static\s+const\s+double\s+(\w+)\s*=\s*([0-9][0-9.eE+-]*)\s*;", src))
+need = ("ODOM_WHEEL_RADIUS", "CONTROL_WHEEL_RADIUS", "CMD_WHEEL_BASE", "ODOM_WHEEL_BASE")
+if not all(k in c for k in need):
+    sys.exit(1)
+print("odom_wheel_radius=%.5f" % float(c["ODOM_WHEEL_RADIUS"]))
+print("control_wheel_radius=%.5f" % float(c["CONTROL_WHEEL_RADIUS"]))
+print("cmd_wheel_base=%.3f" % float(c["CMD_WHEEL_BASE"]))
+print("odom_wheel_base=%.3f" % float(c["ODOM_WHEEL_BASE"]))
+print("kp=%.3f; ki=%.3f" % (float(c["WHEEL_KP"]), float(c["WHEEL_KI"])))
+PYEOF
+)
+  if [ -z "$FW_KEYS" ]; then
+    ng '.ino 에서 기대 상수를 못 읽었다 — 정체 검사를 못 한다 (도구를 먼저 고쳐라)'
   else
-    ng "wheel_radius 가 소스(0.05698)와 다르다 — **다른 펌웨어가 구워져 있다**"
-  fi
-  if grep -q "kp=30.000; ki=5.000" "$FWOUT"; then
-    ok "제어 게인 Kp=30 · Ki=5 — 소스 v1.4 와 일치"
-  else
-    warn "제어 게인이 소스(Kp=30, Ki=5)와 다르다 — 시험 데이터의 전제가 달라진다"
+    # 🔴 잘린 표본을 정상으로 받지 않는다 (검토 §65.5 의 |TRUNCATED 표식).
+    if grep -q "|TRUNCATED" "$FWOUT"; then
+      ng "/firmware/info 가 버퍼를 넘어 **잘렸다** — 이 표본으로는 아무것도 판정 못 한다"
+    fi
+    while IFS= read -r expect; do
+      [ -z "$expect" ] && continue
+      if grep -qF "$expect" "$FWOUT"; then
+        ok "$expect — 소스와 일치"
+      else
+        case "$expect" in
+          kp=*) warn "제어 게인이 소스($expect)와 다르다 — 시험 데이터의 전제가 달라진다" ;;
+          *)    ng "$expect 가 아니다 — **다른 펌웨어가 구워져 있다**" ;;
+        esac
+      fi
+    done <<< "$FW_KEYS"
   fi
 else
   # ★ 08-05 검토 §39.2 — 구판은 `"(5초 주기 × 12초 대기했다)"` 라고 적고 실제로는 0.4초 만에

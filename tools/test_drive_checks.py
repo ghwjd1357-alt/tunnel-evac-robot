@@ -26,8 +26,8 @@ def roll_segment(t_start, sign, turns=3.0, n=40, dt=0.05):
     한 바퀴만 굴리면 Δyaw = ±0.5*d/WHEEL_BASE 이고 Δdist = 0.25*d 다.
     `sign` = 그 바퀴가 **어느 쪽으로 적분되는가**(좌 −, 우 +).
     """
-    d = turns * 2 * math.pi * ec.WHEEL_RADIUS_M
-    dyaw = sign * 0.5 * d / ec.WHEEL_BASE_M
+    d = turns * 2 * math.pi * ec.ODOM_WHEEL_RADIUS_M
+    dyaw = sign * 0.5 * d / ec.ODOM_WHEEL_BASE_M
     rows = []
     for i in range(n + 1):
         f = i / n
@@ -117,10 +117,31 @@ class EncoderCheckTest(unittest.TestCase):
             self.assertAlmostEqual(3.0, r['turns'], places=2)
 
     def test_07_constants_match_the_firmware(self):
-        """🔴 펌웨어와 같은 값이어야 한다 — 다르면 다른 물건을 재는 것이다."""
-        self.assertEqual(0.62, ec.WHEEL_BASE_M)
-        self.assertEqual(0.05698, ec.WHEEL_RADIUS_M)
-        self.assertEqual(ec.WHEEL_BASE_M, gr.WHEEL_BASE_M)
+        """🔴 펌웨어와 같은 값이어야 한다 — 다르면 다른 물건을 재는 것이다.
+
+        🔴 08-13 (검토 §65.3) — 숫자를 여기 적지 않는다. 구판은
+        `assertEqual(0.05698, ec.WHEEL_RADIUS_M)` 처럼 도구가 베낀 값을 시험도
+        베껴 적어, 펌웨어가 바뀌어도 둘이 서로에게 초록을 주는 자기확인이었다.
+        이제 `.ino` 에서 읽어 대조한다 — 펌웨어가 바뀌면 이 시험이 **깨진다**.
+        """
+        from tools.firmware_constants import firmware_double
+
+        # 이 도구는 `/odom` 을 되짚는 도구다 → odom 계열 상수를 써야 한다.
+        self.assertEqual(firmware_double('ODOM_WHEEL_BASE'), ec.ODOM_WHEEL_BASE_M)
+        self.assertEqual(firmware_double('ODOM_WHEEL_RADIUS'), ec.ODOM_WHEEL_RADIUS_M)
+
+        # 명령 경로 상수는 **이 도구가 쓰면 안 되는 값**이다. 셋이 서로 달라야 한다.
+        self.assertNotEqual(firmware_double('CMD_WHEEL_BASE'),
+                            firmware_double('ODOM_WHEEL_BASE'))
+        self.assertNotEqual(firmware_double('CONTROL_WHEEL_RADIUS'),
+                            firmware_double('ODOM_WHEEL_RADIUS'))
+
+        # 판재 이전 profile 은 옛 값 그대로여야 옛 증거가 재현된다.
+        self.assertEqual(0.62, ec.PRE_PLATE_WHEEL_BASE_M)
+        self.assertEqual(0.05698, ec.PRE_PLATE_WHEEL_RADIUS_M)
+
+        # 🔴 지면 리포터에는 윤거 상수가 없어야 한다 — 안 쓰는데 들고 있던 잔재였다.
+        self.assertFalse(hasattr(gr, 'WHEEL_BASE_M'))
 
 
 # ── 지면 주행 리포터 ────────────────────────────────────────────────────
@@ -282,6 +303,34 @@ class GroundReportTest(unittest.TestCase):
         v = gr.analyze(cmds, odoms, tape_mm=v_path(odoms))
         self.assertAlmostEqual(0.12, v['cruise_true_mps'], places=3)
         self.assertLess(v['true_mps'], v['cruise_true_mps'])
+
+    def test_25b_tape_anchor_divides_when_odom_is_inflated(self):
+        """🔴 08-13 버그 회귀 — 앵커 방향이 뒤집혀 있었다.
+
+        `cruise_true = 순항 × odom_over` 였는데 `odom_over = odom/줄자` 다.
+        곱하면 odom 이 부풀어 있을수록 보정값이 **더** 부푼다 — 상쇄가 아니라 증폭이다.
+
+        구판 시험(위 test_25)은 `tape_mm = odom 경로` 로 줘서 `odom_over == 1.0` 이었고,
+        1 을 곱하나 나누나 같아 **버그를 통과시켰다**. 그래서 여기서는 odom 을 일부러
+        부풀린다 — 08-13 실측과 같은 1.238 배다.
+
+        실해: 이 자리가 실제 0.0976 m/s 를 0.1495 m/s 로 보고했다. 그 수는 🔴 예약 32-c
+        위험 수용의 `0.12 m/s` 상한을 판정하는 데 쓰인다.
+        """
+        inflation = 1.238                        # 08-13 r2_line_0813_1516 실측
+        cmds, odoms = run_with_coast(0.12, 20.0, 1.3, drop_lead_s=0.0)
+        true_mm = v_path(odoms) / inflation      # 줄자 = odom 보다 짧다
+
+        v = gr.analyze(cmds, odoms, tape_mm=true_mm)
+
+        self.assertAlmostEqual(inflation, v['odom_over'], places=2)
+        # 앵커된 순항은 odom 순항보다 **작아야** 한다. 곱셈 버그면 커진다.
+        self.assertLess(v['cruise_true_mps'], v['cruise_mps'])
+        self.assertAlmostEqual(v['cruise_mps'] / inflation,
+                               v['cruise_true_mps'], places=4)
+        # 그리고 줄자에 앵커된 평균속도와 같은 자리에 있어야 한다 (희석 몫만큼만 위).
+        self.assertLess(v['true_mps'], v['cruise_true_mps'])
+        self.assertLess(v['cruise_true_mps'], v['true_mps'] * 1.2)
 
 
 def run_with_coast(v_true, cmd_s, coast_s, drop_lead_s=0.0, t0=10 * NS, dt=0.02):

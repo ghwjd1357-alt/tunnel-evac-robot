@@ -31,8 +31,10 @@
 import math
 import sys
 
-# 🔴 펌웨어 `.ino` 와 같은 값. 다르면 펌웨어와 다른 물건을 재게 된다.
-WHEEL_BASE_M = 0.62
+# 🔴 08-13 삭제 (검토 §65.3). 여기 있던 `WHEEL_BASE_M = 0.62` 는 **아무 데서도 안 쓰였다**.
+# 그런데 `test_drive_checks` 가 "펌웨어와 같은 값" 이라며 이 죽은 상수를 정답으로 고정해,
+# 펌웨어가 명령용 0.62 / odom 용 0.670 으로 갈라진 뒤에도 초록으로 남았다.
+# 이 도구는 윤거를 안 쓴다 — 줄자와 `/odom` 거리만 본다. 그래서 상수를 지웠다.
 # 명령이 끊긴 뒤 watchdog 이 세울 때까지를 포함해 보는 꼬리. `§7-c-0` 실측 총 정지가
 # 약 516ms 이므로 1.5s 면 정지까지 확실히 담는다.
 COAST_TAIL_S = 1.5
@@ -200,9 +202,18 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         #     스케일을 스스로 검증하지 못한다.
         # 두 약점은 곱하면 상쇄된다: 순항 × (줄자/odom) = 외부에 앵커된 순항속도.
         # ⚠ 그래도 `cruise_mps` 는 EMA(α=0.10) 파생이라, 순항이 짧으면 이 값도 덜 앉는다.
+        #
+        # 🔴 08-13 버그 수정. 이 줄은 `odom_over` 를 **곱하고** 있었는데
+        #    `odom_over = odom/줄자` 이므로 곱하면 `순항 × (odom/줄자)` — 위 주석이
+        #    말하는 것의 정확히 역수다. odom 이 부풀어 있을수록 보정값이 더 부풀었다.
+        #    실해: 08-13 직진에서 실제 0.0976 m/s 를 **0.1495 m/s** 로 보고했다.
+        #    (= 같은 시행의 평균속도보다 1.62배 빠른 값. 물리적으로 불가능한 수였는데도
+        #      부호가 그럴듯해 보여 한 번 지나갔다.)
+        #    0.12 상한 판정에 쓰는 수라 방향이 **위험한 쪽**이다 — 실제로는 안 넘었는데
+        #    넘었다고 읽거나, 보정 계수가 반대면 넘었는데 안 넘었다고 읽는다.
         if v.get('cruise_mps') is not None and v['odom_over'] == v['odom_over'] \
                 and v['odom_over'] > 0:
-            v['cruise_true_mps'] = v['cruise_mps'] * v['odom_over']
+            v['cruise_true_mps'] = v['cruise_mps'] / v['odom_over']
         else:
             v['cruise_true_mps'] = None
     return v

@@ -538,5 +538,25 @@
     "id": "0812-pi-authority-is-not-in-window-convergence-61",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "권한 안에 있다는 것과 시행 창 안에 도달한다는 것은"
+  },
+  {
+    "id": "0813-radius-recal-also-scaled-the-pi-feedback-65",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "odom 만 고치려던 묶음이 게인 조정"
+  },
+  {
+    "id": "0813-applied-pwm-max-is-not-per-trial-65",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "영원히 구분되지 않는다"
+  },
+  {
+    "id": "0813-new-odom-constants-not-propagated-to-tools-65",
+    "path": "tools/d0_check.sh",
+    "anchor": "도구가 이 값을 쓸 때는 **어느 계열인지 먼저 말한다**"
+  },
+  {
+    "id": "0813-handoff-directed-two-bundles-65",
+    "path": "docs/CURRENT_HANDOFF.md",
+    "anchor": "전부 **같은 하나의 묶음**을 가리켜야 한다"
   }
 ]

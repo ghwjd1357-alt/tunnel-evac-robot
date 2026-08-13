@@ -72,8 +72,17 @@ import os
 import sys
 
 # ── 정본 상수 ────────────────────────────────────────────────────────────
-# 펌웨어 `.ino:128` 의 롤링 반경. 회전각을 bag 과 같은 mm/s 로 환산할 때 쓴다.
-WHEEL_RADIUS_M = 0.05698
+# 바퀴 회전각(°/프레임)을 바퀴 **표면 속도**(mm/s)로 바꿀 때 쓰는 롤링 반경.
+# 🔴 08-13 재교정 (검토 §65.3). 구값 0.05698 은 상판 판재를 얹기 전 로봇의 값이다.
+# 판재·경광등·라이다 마스트로 반공압 타이어가 눌려 유효 반지름이 0.04603 이 됐고,
+# 이 도구는 그 사이 판재 이전 값으로 선속도를 약 1.238배 크게 환산하고 있었다.
+# 정본 = `.ino` 의 ODOM_WHEEL_RADIUS · docs/MASTER_PLAN.md §7 예약 32-d.
+WHEEL_RADIUS_M = 0.04603
+
+# 🔴 판재 이전(08-12 까지) 영상을 다시 재는 profile. **현재값이 아니다.**
+# 08-11·08-12 의 watchdog 증거는 이 값으로 봐야 그때의 수가 재현된다 —
+# 검토 §65.3 "역사 실측 문장을 새 값으로 일괄 덮어쓰지 않는다". `--pre-plate` 로 고른다.
+PRE_PLATE_WHEEL_RADIUS_M = 0.05698
 # 🔴 `watchdog_report.py` 와 **같은 판정선**을 쓴다. 두 도구가 다른 선을 쓰면 서로를
 # 교차 검증할 수 없다. 관측 주행속도 약 0.1 m/s 의 5%.
 MOTION_RATE_MM_S = 5.0
@@ -96,6 +105,9 @@ MIN_VALID_POINTS = 30
 PROPOSED_TOTAL_MS = 600
 
 # ── 기록된 실측 (2026-08-11 · `PRESETS['0807-1522']`) ────────────────────────
+# 🔴 이 수치들은 **판재 이전** 로봇에서 반지름 0.05698 로 잰 것이다 (검토 §65.3).
+#    새 반지름으로 덮어쓰지 않는다 — 그러면 그때 본 수가 아니게 된다.
+#    이 영상을 다시 재려면 `--pre-plate` 를 준다. 그래야 아래 수가 재현된다.
 # 🔴 **설명·출력·회귀가 전부 이 한 곳에서 나온다.** 여기 숫자 하나를 바꾸면 docstring 과
 # 회귀가 **같이** 깨진다 — 도구 설명만 옛 수치로 남는 사고(검토 §57.3 P2)를 구조로 막는다.
 RECORDED = dict(
@@ -110,13 +122,18 @@ if __doc__:                      # `python -OO` 로 돌리면 docstring 이 없�
                              min_points=MIN_VALID_POINTS, **RECORDED)
 
 
+# 🔴 이 모듈이 실제로 쓰는 반지름. `--pre-plate` 가 여기를 갈아 끼운다 (검토 §65.3).
+#    함수 안에서 모듈 전역을 읽으므로, 옵션 처리에서 이 이름만 바꾸면 전부 따라온다.
+ACTIVE_WHEEL_RADIUS_M = WHEEL_RADIUS_M
+
+
 def deg_per_frame_to_mm_s(deg, fps):
     """회전각(°/프레임) → 바퀴 표면 속도(mm/s). bag 판정선과 같은 단위로 만든다."""
-    return math.radians(abs(deg)) * fps * WHEEL_RADIUS_M * 1000.0
+    return math.radians(abs(deg)) * fps * ACTIVE_WHEEL_RADIUS_M * 1000.0
 
 
 def mm_s_to_deg_per_frame(mm_s, fps):
-    return math.degrees(mm_s / 1000.0 / WHEEL_RADIUS_M / fps)
+    return math.degrees(mm_s / 1000.0 / ACTIVE_WHEEL_RADIUS_M / fps)
 
 
 def rotation_series(path, center, axes, frame_range, progress=None):
@@ -529,7 +546,17 @@ def main(argv, series_fn=None):
     ap.add_argument('--range', help='분석 프레임 "lo,hi" (0 ≤ lo < hi)')
     ap.add_argument('--fps', help='생략하면 영상에서 읽는다')
     ap.add_argument('--bag-ms', help='같은 시행의 bag 값 — 관측계 차이를 적어 둔다')
+    # 🔴 검토 §65.3 — 판재 이전 영상은 그때의 반지름으로 재야 그때의 수가 재현된다.
+    ap.add_argument('--pre-plate', action='store_true',
+                    help='08-13 상판 판재 이전 영상 — 반지름 %.5f 로 환산한다'
+                         % PRE_PLATE_WHEEL_RADIUS_M)
     a = ap.parse_args(argv[1:])
+
+    # 🔴 검토 §65.3 — 반지름 profile 을 여기서 한 번만 고른다. 환산 함수들이 이 전역을
+    #    읽으므로 아래 모든 수치(mm/s 판정선·drift)가 같은 profile 로 통일된다.
+    global ACTIVE_WHEEL_RADIUS_M                              # noqa: PLW0603
+    ACTIVE_WHEEL_RADIUS_M = (
+        PRE_PLATE_WHEEL_RADIUS_M if a.pre_plate else WHEEL_RADIUS_M)
 
     def probe():
         """영상에서 fps 를 읽는다. 실패는 값이 아니라 `UsageError` 로 돌려준다."""
@@ -550,6 +577,9 @@ def main(argv, series_fn=None):
 
     print('=' * 78)
     print('VIDEO:', os.path.basename(a.video))
+    print('  바퀴 반지름 profile = %.5f m%s'
+          % (ACTIVE_WHEEL_RADIUS_M,
+             '  🔴 판재 이전(--pre-plate)' if a.pre_plate else '  (08-13 재교정)'))
     try:
         series = (series_fn or rotation_series)(
             a.video, cfg['center'], cfg['axes'], cfg['frame_range'],

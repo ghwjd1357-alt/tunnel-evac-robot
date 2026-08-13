@@ -218,8 +218,10 @@ while IFS= read -r ref; do
     raw=$(printf '%s' "$ref" | grep -oP '§ *\K\S+')
     [ -z "$raw" ] && continue
     raw="${raw%%~*}"                       # 범위 표기(§18.3~18.4)는 앞부분으로 검사
-    # 지원 형식: N / N.N / N-X (X = 숫자 또는 영문). 그 외는 조용히 넘기지 않고 FAIL.
-    if ! printf '%s' "$raw" | grep -qP '^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z]+)?$'; then
+    # 지원 형식: N / N.N / N-X / N-X-Y (X,Y = 숫자 또는 영문). 그 외는 FAIL.
+    # 🔴 08-13 확장 — 하위 절이 두 단 깊어졌다(`§1-b-1`, `§4-f-4`). 구판 규칙은 대시
+    #   **한 번**만 허용해 정상 참조를 "지원하지 않는 절 형식" 으로 떨궜다.
+    if ! printf '%s' "$raw" | grep -qP '^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z]+)*$'; then
         SECBAD="$SECBAD [$ref ← 지원하지 않는 절 형식]"; continue
     fi
     # §2-B 처럼 하이픈까지가 실제 제목인 경우와, §2-2(=§2 의 2번 항목)처럼

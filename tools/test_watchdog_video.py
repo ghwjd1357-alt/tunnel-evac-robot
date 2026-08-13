@@ -358,7 +358,12 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(wr.MOTION_RATE_MM_S, wv.MOTION_RATE_MM_S)
         self.assertEqual(wr.MOTION_WINDOW_MS, wv.MOTION_WINDOW_MS)
         self.assertEqual(wr.REQUIRED_TAIL_MS, wv.REQUIRED_TAIL_MS)
-        self.assertEqual(0.05698, wv.WHEEL_RADIUS_M)      # `.ino:128`
+        # 🔴 08-13 (검토 §65.3) — `.ino` 에서 읽어 대조한다. 숫자를 여기 적으면
+        #    펌웨어가 바뀌어도 이 시험이 초록으로 남는 자기확인이 된다.
+        from tools.firmware_constants import firmware_double
+        self.assertEqual(firmware_double('ODOM_WHEEL_RADIUS'), wv.WHEEL_RADIUS_M)
+        # 판재 이전 profile 은 옛 값 그대로 — 08-11·08-12 증거의 재현에 쓴다.
+        self.assertEqual(0.05698, wv.PRE_PLATE_WHEEL_RADIUS_M)
         self.assertEqual(600, wv.PROPOSED_TOTAL_MS)       # 결정 1-ⓐ 초안
         self.assertEqual(0.5, wv.LEGACY_TOTAL_RATIO)      # 구 §7-c-0 조건 1
 
