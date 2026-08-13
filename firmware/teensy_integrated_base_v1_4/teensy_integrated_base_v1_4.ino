@@ -41,7 +41,9 @@
 // 🔴 2026-08-12 — 정체 문자열 정정 (docs/FIRMWARE_REBUILD.md §4 항목 1 의 부채).
 // 08-06 실물 관측에서 version·source·git_sha 셋 다 실제와 달랐고, 그래서 정체 판별에
 // 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
-static const char FW_VERSION[] = "rearm-latch-pi-continuous-low-speed-1.4.0";
+// 🔴 1.5.0 (2026-08-13) = ① E-stop 디바운스 ② odom 재교정(WHEEL_RADIUS·ODOM_WHEEL_BASE)
+//    ③ appliedPwm 관측. 버전을 올려야 bag 만 보고 어느 보드인지 가른다.
+static const char FW_VERSION[] = "rearm-latch-pi-odomcal-appliedpwm-1.5.0";
 // ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
 // 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
 // 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
@@ -132,8 +134,36 @@ static const bool ESTOP_ACTIVE_LOW = false;
 // ============================================================================
 
 static const double TOTAL_PPR = 2641.1;
-static const double WHEEL_RADIUS = 0.05698;  // corrected rolling radius [m]
+
+// 🔴 2026-08-13 재교정 (예약 32-d). 구값 0.05698 은 **판재를 올리기 전** 로봇에서
+// 3m 를 맞춰 역산한 배율이다. 08-13 에 상판 판재·경광등·라이다 마스트를 얹어 하중이
+// 늘면서 반공압 타이어가 주저앉았고, 그 배율이 로봇과 맞지 않게 됐다.
+//   지면 실측 r2_line_0813_1516 : 줄자 3105mm vs odom 3842.6mm -> odom/줄자 = 1.238
+//   0.05698 / 1.238 = 0.04603
+// 독립 검산 = 네 바퀴 축 중심 높이 실측 평균 **45.63mm**(47.0/45.0/44.5/46.0) 로
+// 0.9% 안에서 일치한다. 밸브 없는 반공압 타이어라 공기로 되돌릴 수 없고, 누설도 없으므로
+// 하중이 고정된 지금 값은 유지된다.
+// ⚠ 이 상수는 **측정 경로에만** 든다(DISTANCE_PER_COUNT). 명령 경로는 안 건드린다.
+//   다만 측정이 정직해지면 PI 오차가 커져 적분항이 감긴다 — INTEGRAL_PWM_LIMIT 20 PWM
+//   까지다. 굽고 나서 지면 3m 로 실제 속도가 0.12 를 넘지 않는지 반드시 확인한다.
+// 정본 = docs/MASTER_PLAN.md §7 예약 32-d · docs/REAL_ROBOT_VALUES.md §1-b.
+static const double WHEEL_RADIUS = 0.04603;  // corrected rolling radius [m]
+
+// 명령 경로(cmd_vel -> 바퀴 목표)가 쓰는 윤거. 스키드 슬립 보정이 들어간 값이고
+// 08-13 묶음에서 **바꾸지 않는다** — 이 묶음의 목적은 odom 정직화이지 조종 특성 변경이
+// 아니다. 명령 경로를 같이 옮기면 원인 분리가 깨진다.
 static const double WHEEL_BASE = 0.62;       // left-right wheel-center distance [m]
+
+// 🔴 2026-08-13 신설 — odom yaw 전용 유효 윤거 (예약 32-d).
+// WHEEL_RADIUS 를 고쳐도 회전 배율이 8% 남는다:
+//   r2_spin2pi_0813_1640 : IMU 355.53° (목표 대비 -1.24%) vs odom 적분 475.50°
+//   odom/IMU = 1.3375 -> 반지름 몫 1.238 을 빼면 회전 전용 잔여 = 1.080
+//   0.62 * 1.080 = 0.670
+// 스키드 스티어는 회전할 때 네 바퀴를 옆으로 문지르므로 odom 이 보는 유효 윤거가
+// 기하 윤거(URDF 0.49)보다 크다. 판재로 무거워지며 그 문지름이 더 심해졌다.
+// ⚠ 명령용 WHEEL_BASE 와 **일부러 분리**했다. 하나로 합치면 같은 angular.z 에 대해
+//   바퀴 명령이 8% 커져 조종 특성이 같이 바뀐다 — 그건 별개 묶음이다.
+static const double ODOM_WHEEL_BASE = 0.670;
 
 static const double DISTANCE_PER_COUNT =
     (2.0 * PI * WHEEL_RADIUS) / TOTAL_PPR;
@@ -326,6 +356,16 @@ geometry_msgs__msg__Vector3 driveDiagMessage;
 
 int desiredPwm[4] = {0, 0, 0, 0};
 int appliedPwm[4] = {0, 0, 0, 0};
+
+// 🔴 2026-08-13 신설 — 관측 전용 (예약 33 의 선행 조건).
+// 게인·FF 를 조정하려면 "제어기가 실제로 몇 PWM 을 냈는가"를 밖에서 봐야 한다. 지금은
+// 그 값이 보드 안에만 있어 회귀에 **명령에서 계산한 명목 FF 값**을 쓰다가 검토 §60.1·
+// §61.1 이 두 번 불승인한 전례가 있다.
+// ⚠ 제어에 쓰이지 않는다. 읽기만 하고 /firmware/info 로 나간다.
+// ⚠ /firmware/info 는 5초 주기라 이건 **스냅샷**이다. 그래서 부팅 이후 최대 크기를
+//    따로 들고 간다 — 포화(FEEDFORWARD_MAX_PWM 145 · MAX_CONTROL_PWM 160) 도달 여부는
+//    스냅샷으로 못 보고 최대값으로만 보인다.
+int appliedPwmMaxMagnitude = 0;
 
 double targetWheelVelocity[4] = {0.0, 0.0, 0.0, 0.0};
 double measuredWheelVelocity[4] = {0.0, 0.0, 0.0, 0.0};
@@ -768,6 +808,12 @@ void updateMotorOutputs()
           appliedPwm[motor], desiredPwm[motor]);
     }
 
+    // 관측 전용 — 제어에 쓰이지 않는다 (예약 33).
+    const int magnitude = abs(appliedPwm[motor]);
+    if (magnitude > appliedPwmMaxMagnitude) {
+      appliedPwmMaxMagnitude = magnitude;
+    }
+
     writeMotorPwm(motor, appliedPwm[motor]);
   }
 }
@@ -910,7 +956,8 @@ void updateOdometry()
   const double deltaLeft = 0.5 * (deltaFL + deltaRL);
   const double deltaRight = 0.5 * (deltaFR + deltaRR);
   const double deltaDistance = 0.5 * (deltaLeft + deltaRight);
-  const double deltaYaw = (deltaRight - deltaLeft) / WHEEL_BASE;
+  // 🔴 odom 은 ODOM_WHEEL_BASE 를 쓴다 (명령용 WHEEL_BASE 와 분리 — §7 예약 32-d).
+  const double deltaYaw = (deltaRight - deltaLeft) / ODOM_WHEEL_BASE;
 
   const double midpointYaw = odomYaw + 0.5 * deltaYaw;
   odomX += deltaDistance * cos(midpointYaw);
@@ -927,7 +974,7 @@ void updateOdometry()
   odomLinearVelocity =
       0.5 * (filteredLeftVelocity + filteredRightVelocity);
   odomAngularVelocity =
-      (filteredRightVelocity - filteredLeftVelocity) / WHEEL_BASE;
+      (filteredRightVelocity - filteredLeftVelocity) / ODOM_WHEEL_BASE;
 
   // PI/PID control uses the same measured micros() dt as odometry.
   updateWheelControllers(dt);
@@ -1259,6 +1306,11 @@ void publishFirmwareInfo()
       //    아래 rejected 쌍만이 "필터가 먹은 글리치"다 = 30ms 판정의 근거 (§63.1).
       "estop_rejected=%lu; estop_rejected_max_ms=%lu; "
       "disarm_estop=%lu; disarm_nonfinite=%lu; disarm_nonzero=%lu; "
+      // 🔴 2026-08-13 신설 (예약 33 선행). applied_pwm 은 **5초 주기 스냅샷**이라
+      //    시행 중 파형을 못 본다. 포화 판정은 applied_pwm_max(부팅 이후 최대 크기)로
+      //    한다 — 145(FF 상한)·160(MAX_CONTROL_PWM) 에 닿았는지가 그 한 숫자에 있다.
+      //    ⚠ 절대값이 아니라 **시행 시작·끝의 차이**로 읽는다.
+      "odom_wheel_base=%.3f; applied_pwm=%d,%d,%d,%d; applied_pwm_max=%d; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1291,6 +1343,12 @@ void publishFirmwareInfo()
       static_cast<unsigned long>(driveGate.disarmEstopCount),
       static_cast<unsigned long>(driveGate.disarmNonfiniteCount),
       static_cast<unsigned long>(driveGate.disarmNonzeroCount),
+      ODOM_WHEEL_BASE,
+      appliedPwm[FL],
+      appliedPwm[RL],
+      appliedPwm[FR],
+      appliedPwm[RR],
+      appliedPwmMaxMagnitude,
       FW_LIBRARY_LIST);
 
   rosidl_runtime_c__String__assign(&firmwareInfoMessage.data, infoBuffer);
