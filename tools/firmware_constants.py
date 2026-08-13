@@ -84,21 +84,28 @@ if __name__ == "__main__":
         print("%-34s = %s" % (key, val))
 
 
-def firmware_identity_keys():
-    """`/firmware/info` 가 발행하는 **실수 필드**를 `키=값` 문자열 목록으로 돌려준다.
+#: 🔴 `/firmware/info` 가 **반드시** 실어야 하는 의미 키 (검토 §68.2).
+#:   왜 목록을 여기서 소유하나: 앞 판은 format 에 **있는 것**을 긁어 기대 목록으로 삼았다.
+#:   그러면 필수 필드가 펌웨어와 format 에서 **함께** 사라질 때 검사기가 줄어든 계약을
+#:   그대로 새 정답으로 받아들인다 — 값 사본을 없앤 것과 **스키마를 안 드는 것**은 다른
+#:   문제였다. 값은 계속 `.ino` 에서 읽고, **어떤 키가 있어야 하는가**만 여기서 든다.
+#:   🔴 이 집합을 줄이는 것은 **스키마 개정**이다 — 정본(`REAL_ROBOT_VALUES §1-b`)을
+#:   같이 고치고, 왜 필요 없어졌는지를 적는다. 자동으로 줄어들지 않는다.
+#:   ⚠ 여기 없는 필드가 새로 생기는 것은 **진단 필드 추가**로 보고 통과시킨다 —
+#:     계약을 넓히는 방향이라 위험하지 않다. 필수로 올리려면 이 집합에 명시로 넣는다.
+REQUIRED_IDENTITY_KEYS = (
+    "odom_wheel_radius",   # odom 거리·yaw 눈금 (예약 32-e)
+    "cmd_wheel_base",      # 명령 경로 윤거 — odom 과 섞이면 안 된다
+    "odom_wheel_base",     # odom yaw 전용 유효 윤거
+    "kp", "ki", "kd",      # 제어 게인 — 시험 데이터의 전제
+)
 
-    왜 이렇게 뽑나 (08-13 밤)
-    ------------------------
-    `d0_check.sh` 검사 7 은 기대 키 목록을 **손으로 들고** 있었다. 08-13 밤에
-    `CONTROL_WHEEL_RADIUS` 를 지우자(예약 32-e) 그 목록이 `.ino` 와 어긋나 검사가
-    `sys.exit(1)` 로 빠졌다 — 🔴 **현장에서 정체 검사가 통째로 멈추는 상태**였다.
-    구판이 `wheel_radius=0.05698` 을 박아 두었다가 겪은 것(§65.3)과 **같은 병**이고,
-    그때는 값을 베꼈고 이번엔 **키 목록**을 베꼈다.
 
-    → 그래서 목록도 안 든다. `/firmware/info` 의 **format 문자열과 인자 목록**에서
-    `이름=%.Nf` 짝을 직접 읽는다. 펌웨어가 필드를 더하거나 빼면 이 함수가 **따라온다.**
+def firmware_identity_fields():
+    """`/firmware/info` format 이 싣는 **실수 필드 전량**을 `{키: 값문자열}` 로 돌려준다.
 
-    반환 예: `['odom_wheel_radius=0.05698', 'cmd_wheel_base=0.620', ...]`
+    format 과 인자 목록에서 `이름=%.Nf` 짝을 직접 읽는다. 값은 `.ino` 상수에서 온다.
+    🔴 이것은 **발견 목록**이지 계약이 아니다 — 계약은 `REQUIRED_IDENTITY_KEYS` 다.
     """
     import firmware_info_length_check as fil          # noqa: PLC0415
 
@@ -106,12 +113,11 @@ def firmware_identity_keys():
     _buffer, fmt, args = fil.extract(source)
     table = _load()
 
-    out = []
+    found = {}
     specs = fil.SPEC.findall(fmt)
     if len(specs) != len(args):
         raise ValueError("변환지시자 %d 개 vs 인자 %d 개 — 짝이 안 맞는다"
                          % (len(specs), len(args)))
-    # `이름=%.Nf` 의 '이름' 은 그 지시자 **직전**의 format 조각 꼬리에 있다.
     cursor = 0
     for spec, arg in zip(specs, args):
         at = fmt.index(spec, cursor)
@@ -125,7 +131,28 @@ def firmware_identity_keys():
         value = table.get(arg.strip())
         if name and value is not None:
             digits = int(re.search(r"\.(\d+)", spec).group(1))
-            out.append("%s=%.*f" % (name, digits, value))
-    if not out:
-        raise ValueError("`/firmware/info` format 에서 실수 필드를 하나도 못 뽑았다")
-    return out
+            found[name] = "%.*f" % (digits, value)
+    return found
+
+
+def firmware_identity_keys():
+    """`d0_check` 검사 7 이 보드 출력에서 찾을 `키=값` 목록 (검토 §68.2).
+
+    🔴 **필수 키가 하나라도 format 에 없으면 예외**다. 검사기가 축소된 계약을 조용히
+    받아들이는 길을 막는다 — 08-13 밤에 `CONTROL_WHEEL_RADIUS` 를 지우자 앞 판이
+    그것을 새 정답으로 삼았고(그때는 의도된 삭제였지만), 같은 경로로 `odom_wheel_base`
+    가 사라져도 검사가 통과했을 것이다.
+
+    ⚠ `build` 는 여기서 안 낸다 — 문자열이라 `.ino` 상수에 없다. `d0_check` 가
+      별도로 관측한다(정본은 `build` 가 굽힘 판별의 유일한 기준이라고 말한다).
+    """
+    found = firmware_identity_fields()
+    missing = [k for k in REQUIRED_IDENTITY_KEYS if k not in found]
+    if missing:
+        raise KeyError(
+            "`/firmware/info` format 에 필수 정체 키가 없다: %s\n"
+            "  🔴 필드를 지웠다면 그것은 **스키마 개정**이다 — "
+            "REQUIRED_IDENTITY_KEYS 와 정본을 같이 고쳐라.\n"
+            "  지금 있는 키: %s"
+            % (", ".join(missing), ", ".join(sorted(found))))
+    return ["%s=%s" % (k, found[k]) for k in sorted(found)]
