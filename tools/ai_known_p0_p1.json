@@ -603,5 +603,20 @@
     "id": "0813-handoff-kept-pre-remediation-contract-69",
     "path": "docs/TEST_GATES.md",
     "anchor": "문서의 개수 주장은 기계가 세는 값과 같아야 한다"
+  },
+  {
+    "id": "0813-rotation-budget-cited-a-fusion-spec-70",
+    "path": "tools/test_odom_constants.py",
+    "anchor": "적용할 수 없는 사양을 오차 예산의 근거로 쓰지 않는다"
+  },
+  {
+    "id": "0813-identity-boundary-claimed-more-than-it-checks-70",
+    "path": "tools/firmware_constants.py",
+    "anchor": "안전·동작 핵심 shortlist"
+  },
+  {
+    "id": "0813-undecided-build-still-exited-zero-70",
+    "path": "tools/d0_check.sh",
+    "anchor": "기대값이 없으면 그 검사는 `생략(SKIPPED)`"
   }
 ]

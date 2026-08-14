@@ -44,6 +44,7 @@ INO_PATH = os.path.join(
 )
 
 _CACHE = {}
+_LITERALS = {}
 
 
 #: 🔴 08-13 밤 2차 (검토 §69.2) — `double` 만 읽던 것을 정수·bool·배열까지 넓혔다.
@@ -136,18 +137,22 @@ if __name__ == "__main__":
         print("%-34s = %s" % (key, val))
 
 
-#: 🔴 `/firmware/info` 가 **반드시** 실어야 하는 **정적 동작·안전 설정** (검토 §69.2).
+#: 🔴 `/firmware/info` 가 **반드시** 실어야 하는 **안전·동작 핵심 shortlist**.
 #:
-#:   앞 판은 여섯 개(반지름·윤거 둘·게인 셋)뿐이었다. 검토가 `min_speed`,
-#:   `estop_debounce_ms`, `hold_pwm` 을 format+인자에서 함께 지우자 **전부 수용**됐다.
-#:   🔴 그 셋은 런타임 진단이 아니다 — `MIN_EFFECTIVE_WHEEL_CMD` 는 R2 회전의 물리
-#:   하한을, `ESTOP_DEBOUNCE_MS` 는 안전 입력 판정 문턱을, `LOW_SPEED_HOLD_PWM` 은
-#:   실제 구동 출력을 정한다. **런타임 카운터와 같은 칸에 둘 수 없다.**
+#:   ⚠ **08-14 정정 (검토 §70.2)** — 앞 판은 이 목록을 *"정적 동작·안전 설정 **전량**"*
+#:   이라고 불렀다. **거짓이다.** `_load()` 가 읽는 부팅 고정값에는 `MAX_LINEAR_CMD`,
+#:   `MAX_ANGULAR_CMD`, `WATCHDOG_TIMEOUT_MS`, `FEEDFORWARD_*`, `MAX_CONTROL_PWM`,
+#:   `START_BOOST_PWM`, `MIN_RUNNING_PWM`, `PWM_RAMP_*`, `COMMAND_DEADBAND`,
+#:   `TOTAL_PPR`, `ESTOP_ACTIVE_LOW`, `REARM_*` 등이 더 있고 **그 대부분은 애초에
+#:   `/firmware/info` 로 나가지도 않는다.** 그래서 "전량" 이라는 경계는 이 검사가
+#:   지킬 수 있는 것이 아니다 — 주장을 **shortlist** 로 낮춘다.
 #:
-#:   경계는 기계적으로 긋는다 — *보드가 켜질 때 정해져 있고 주행이 바꾸지 않는 값* 은
-#:   필수, *주행이 쌓는 값(카운터·최댓값·epoch)* 은 선택.
+#:   선정 기준(주장할 수 있는 만큼만): *보드가 켜질 때 정해지고 주행이 안 바꾸며,
+#:   **틀리면 지금까지의 실차 실측을 통째로 무효로 만드는** 값.*
 #:   ⚠ 줄이는 것은 **스키마 개정**이다: 이 표와 `REAL_ROBOT_VALUES §1-b-4` 를 같이
 #:     고친다. 늘어나는 것(진단 필드 추가)은 자동 통과 — 계약을 넓히는 방향이다.
+#:   🔴 **재개방** — `/firmware/info` 에 새 정적 설정을 실으면 여기 넣을지 그때 판단한다.
+#:     자동으로 필수가 되지 않는다(§69.2 정책 그대로).
 REQUIRED_IDENTITY_KEYS = (
     # 구동 기하 — odom 과 명령 경로
     "odom_wheel_radius", "cmd_wheel_base", "odom_wheel_base",
@@ -159,6 +164,9 @@ REQUIRED_IDENTITY_KEYS = (
     "encoder_polarity",
     # 안전 입력 판정 문턱
     "estop_debounce_ms",
+    # 🔴 검토 §70.2 — format 에 **리터럴로 박힌** 계약. 상수가 아니라 문자열이라
+    #   앞 판 파서가 아예 못 봤고, 지워도 수용됐다. 전송 계약이 바뀌면 agent 가 안 붙는다.
+    "transport", "baud", "low_speed_mode",
 )
 
 #: 주행이 쌓는 값. 사라져도 정체 검사를 막지 않는다(계약이 아니다).
@@ -238,6 +246,14 @@ def firmware_identity_fields():
         raise ValueError("변환지시자 %d 개 vs 인자 %d 개 — 짝이 안 맞는다"
                          % (len(specs), len(args)))
 
+    # 🔴 검토 §70.2 — `transport=serial;` 처럼 **변환지시자 없이 리터럴로 박힌** 필드.
+    #   앞 판은 지시자만 훑어서 이런 계약을 처음부터 못 봤다.
+    for name, literal in re.findall(r"(\w+)=([^%;\"]+);", fmt):
+        if name not in _BUILD_META_KEYS:
+            found_literal = literal.strip()
+            if found_literal:
+                _LITERALS[name] = found_literal
+
     found, cursor, index = {}, 0, 0
     while index < len(specs):
         spec = specs[index]
@@ -286,6 +302,8 @@ def firmware_identity_fields():
         for _ in range(consumed):
             cursor = fmt.index(specs[index], cursor) + len(specs[index])
         index += consumed
+    found.update(_LITERALS)
+    _LITERALS.clear()
     return found
 
 

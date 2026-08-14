@@ -773,10 +773,13 @@ except Exception as exc:
         ng "$FW_BUILD 가 기대 build=$D0_EXPECT_BUILD 와 다르다 — **구판이 올라가 있다**"
       fi
     else
-      # 🔴 존재만 보고 `ok` 를 내면 구판 build 나 `Foo 99 99:99:99` 도 초록이 된다.
-      #   기대값이 없으면 **미판정**이다 — 자동 완료조건에서 뺀다 (검토 §69.2).
-      warn "$FW_BUILD — 🔴 **미판정**. 기대값 없이는 stale build 를 못 가른다"
+      # 🔴 검토 §70.2 — 앞 판은 `warn` 만 불렀다. `warn` 은 FAIL 도 SKIPPED 도 안 올려서
+      #   화면엔 "미판정" 이라 쓰면서 종합부는 rc=0 "D+0 판정 통과" 를 냈다 — **미판정을
+      #   자동 완료조건에 그대로 넣은 것**이다. `skip` 은 SKIPPED 를 올려 rc=2 로 끝난다.
+      #   ⚠ 빈 문자열(`--expect-build ''`)도 같은 경로로 온다.
+      skip "build 기계 대조 — 기대값이 없어 stale build 를 못 가른다 ($FW_BUILD)"
       warn "     굽기 직후라면 --expect-build '<컴파일 시각>' 으로 기계 대조한다"
+      warn "     🔴 이 검사가 생략된 채로는 'D+0 통과' 라고 기록하지 않는다"
     fi
   fi
 else

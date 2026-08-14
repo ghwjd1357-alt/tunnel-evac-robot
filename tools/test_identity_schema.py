@@ -63,6 +63,13 @@ ARRAY_REMOVALS = (
      ("      ENCODER_POLARITY[FL],\n", "      ENCODER_POLARITY[RL],\n",
       "      ENCODER_POLARITY[FR],\n", "      ENCODER_POLARITY[RR],\n")),
 )
+#: 🔴 검토 §70.2 — format 에 리터럴로 박힌 계약. 지시자가 없어 앞 판이 못 봤다.
+LITERAL_REMOVALS = (
+    ("transport", "transport=serial; "),
+    ("baud", "baud=115200; "),
+    ("low_speed_mode", "low_speed_mode=continuous_start_boost; "),
+)
+
 #: 계약이 아닌 런타임 카운터. 사라져도 검사가 막으면 안 된다(과잉 방어).
 OPTIONAL_REMOVALS = (
     ("estop_raw_edges", "estop_raw_edges=%lu; ",
@@ -148,6 +155,12 @@ def main():
         got, err = with_source(drop)
         check("② %s 소실 -> 거부" % name, got is None and err is not None,
               "정수·배열 상수를 필수로 못 올리면 동작 설정이 조용히 빠진다")
+
+    print("\n[2c] 리터럴 필드도 필수다 — 지시자가 없어 앞 판이 못 봤다 (검토 §70.2)")
+    for name, fmt_bit in LITERAL_REMOVALS:
+        got, err = with_source(lambda s, f=fmt_bit: s.replace(f, "", 1))
+        check("② %s 소실 -> 거부" % name, got is None and err is not None,
+              "전송 계약이 조용히 빠지면 agent 가 안 붙는 이유를 못 찾는다")
 
     print("\n[3] 런타임 카운터는 통과해야 한다 (과잉 방어 금지)")
     for name, fmt_bit, arg_bit in OPTIONAL_REMOVALS:

@@ -246,7 +246,15 @@ KNOWN_N=$(python3 -c "import json;print(len(json.load(open('tools/ai_known_p0_p1
 if [ -z "$KNOWN_N" ]; then
     bad "ai_known_p0_p1.json 을 못 읽었다 — finding 수를 대조할 수 없다"
 else
-    KNOWN_CLAIMS=$(grep -ohP '알려진 \*\*\K[0-9]+(?=건\*\*)' "${SRC[@]}" 2>/dev/null | sort -u)
+    # 🔴 검토 §70.3 — 앞 판은 `알려진 **N건**` 한 형태만 봤다. 활성 `AI_CONTEXT.md` 는
+    #   `**105개**` · `독립적으로 105개인지` 처럼 다른 표기를 써서 **전부 빠져나갔다**.
+    #   개수 주장은 표기가 아니라 **의미**로 잡아야 한다 — P0/P1 문맥의 수를 전부 모은다.
+    KNOWN_CLAIMS=$(grep -ohP '(알려진|P0/P1)[^\n]{0,80}?\*\*\K[0-9]+(?=(건|개)\*\*)' \
+                       "${SRC[@]}" 2>/dev/null | sort -u
+                   grep -ohP 'P0/P1[^\n]{0,120}?독립적으로 \K[0-9]+(?=개)' \
+                       "${SRC[@]}" 2>/dev/null | sort -u
+                   grep -ohP '결함 코퍼스 \K[0-9]+(?=/)' "${SRC[@]}" 2>/dev/null | sort -u)
+    KNOWN_CLAIMS=$(printf '%s\n' $KNOWN_CLAIMS | sort -u)
     KNOWN_BAD=""
     for claimed in $KNOWN_CLAIMS; do
         [ "$claimed" = "$KNOWN_N" ] || KNOWN_BAD="$KNOWN_BAD $claimed"
