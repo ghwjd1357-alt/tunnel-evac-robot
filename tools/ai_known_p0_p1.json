@@ -592,7 +592,7 @@
   {
     "id": "0813-required-identity-set-demoted-behavior-constants-69",
     "path": "tools/firmware_constants.py",
-    "anchor": "필수/선택의 경계는 기계적으로 긋는다"
+    "anchor": "주장은 검사가 지킬 수 있는 만큼만 한다"
   },
   {
     "id": "0813-reduction-gate-missed-diagnostics-and-setup-69",
@@ -618,5 +618,25 @@
     "id": "0813-undecided-build-still-exited-zero-70",
     "path": "tools/d0_check.sh",
     "anchor": "기대값이 없으면 그 검사는 `생략(SKIPPED)`"
+  },
+  {
+    "id": "0813-spread-read-as-accuracy-bound-71",
+    "path": "tools/test_odom_constants.py",
+    "anchor": "스프레드는 반복 일관성이지 정확도 상한이 아니다"
+  },
+  {
+    "id": "0813-build-prefix-matched-without-the-boundary-71",
+    "path": "tools/d0_check.sh",
+    "anchor": "`build` 는 세미콜론 경계까지 통째로 본다"
+  },
+  {
+    "id": "0813-identity-boundary-still-claimed-all-71",
+    "path": "tools/firmware_constants.py",
+    "anchor": "주장은 검사가 지킬 수 있는 만큼만 한다"
+  },
+  {
+    "id": "0813-reopen-condition-had-no-observer-71",
+    "path": "docs/TEST_GATES.md",
+    "anchor": "재개방 조건에는 관측자와 시점을 함께 적는다"
   }
 ]

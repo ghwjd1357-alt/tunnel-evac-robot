@@ -18,6 +18,8 @@
      (검토 §68.2 가 재현한 바로 그 경로다. format 만 지우면 짝이 안 맞아 따로 막힌다)
   ③ 비필수(진단) 필드 제거는 **통과**한다 — 계약을 넓히는 방향은 위험하지 않다
   ④ 스키마 축소는 정본 개정이므로, 이 목록이 줄면 정본도 같이 줄어야 한다
+  ⑤ 🔴 `build` 필드를 **세미콜론 경계까지** 본다 — missing·empty·stale·문법오류·
+     **정상 prefix 뒤 garbage**·중복이 전부 `ng` 다 (검토 §71.2)
 
 사용
 ----
@@ -124,8 +126,35 @@ def with_source(mutate):
         fc._SOURCE_OVERRIDE = None                   # noqa: SLF001
 
 
+#: 🔴 `d0_check` 의 build 필드 판정 반례 (검토 §71.2).
+#:   앞 판은 정상 prefix 만 `grep -o` 해서 `...09:12:33garbage;` 가 정상 기대값과 같아졌다.
+#:   필드를 **세미콜론 경계까지** 통째로 집어야 닫힌다. 여기서 그 규칙을 회귀로 못 박는다.
+#:   (스크립트 자체는 실기 토픽이 있어야 돌므로, 판정 규칙만 같은 정규식으로 재현한다.)
+BUILD_FIELD_RE = r"build=[^;]*;"
+BUILD_CASES = (
+    ("정상", "v; build=Aug 14 2026 09:12:33; x;", "Aug 14 2026 09:12:33", "ok"),
+    ("정상 prefix 뒤 garbage", "v; build=Aug 14 2026 09:12:33garbage; x;",
+     "Aug 14 2026 09:12:33", "ng"),
+    ("stale (구판 build)", "v; build=Aug 12 2026 15:24:31; x;",
+     "Aug 14 2026 09:12:33", "ng"),
+    ("문법 오류", "v; build=Foo 99 99:99:99; x;", "Aug 14 2026 09:12:33", "ng"),
+    ("build 중복", "v; build=A; z; build=B; x;", "A", "ng"),
+    ("build 없음", "v; version=1; x;", "Aug 14 2026 09:12:33", "ng"),
+)
+
+
+def build_verdict(sample, expected):
+    """`d0_check` 검사 7 의 build 분기와 **같은 규칙**으로 판정한다."""
+    fields = re.findall(BUILD_FIELD_RE, sample)
+    if not fields:
+        return "ng"                       # build 없음
+    if len(fields) != 1:
+        return "ng"                       # 표본이 섞였거나 잘렸다
+    return "ok" if fields[0].rstrip(";") == "build=" + expected else "ng"
+
+
 def main():
-    print("정체 스키마 회귀 (검토 §68.2)")
+    print("정체 스키마 회귀 (검토 §68.2 · §71.2)")
     print("  필수 키: %s" % ", ".join(fc.REQUIRED_IDENTITY_KEYS))
 
     keys, error = with_source(lambda s: s)
@@ -204,6 +233,12 @@ def main():
     extra = documented - set(fc.REQUIRED_IDENTITY_KEYS)
     check("④ 정본 표에 코드가 모르는 필수 키가 없다", not extra,
           "정본만 늘고 코드가 안 따라오면 검사는 여전히 통과한다: %s" % sorted(extra))
+
+    print("\n[5] 🔴 build 필드는 세미콜론 경계까지 통째로 본다 (검토 §71.2)")
+    for label, sample, expected, want in BUILD_CASES:
+        got = build_verdict(sample, expected)
+        check("⑤ %-22s -> %s" % (label, want), got == want,
+              "정상 prefix 만 보면 뒤에 뭐가 붙어도 통과한다 (실제 판정: %s)" % got)
 
     print()
     if FAILURES:

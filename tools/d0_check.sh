@@ -762,9 +762,16 @@ except Exception as exc:
     #   절차와 자동 검사를 같은 "정체 검사" 로 부르면 안 된다.
     #   ⚠ 여기서 "오늘 굽었나" 는 판정하지 않는다 — 이 스크립트는 언제 구웠는지 모른다.
     #     관측한 사실(`build` 값)을 **출력에 남겨** 사람이 절차서와 대조하게 한다.
-    FW_BUILD=$(grep -o 'build=[A-Za-z]* *[0-9]* [0-9]* [0-9:]*' "$FWOUT" | head -1)
+    # 🔴 검토 §71.2 — 앞 판은 정상 prefix 만 `grep -o` 했다. `build=Aug 14 2026 09:12:33garbage;`
+    #   에서 추출값이 정상 기대값과 **같아져** 통과했다. 필드는 **세미콜론 경계까지** 통째로
+    #   집는다. 중복 build 도 개수로 잡는다.
+    FW_BUILD_N=$(grep -o 'build=[^;]*;' "$FWOUT" | wc -l)
+    FW_BUILD=$(grep -o 'build=[^;]*;' "$FWOUT" | head -1)
+    FW_BUILD="${FW_BUILD%;}"
     if [ -z "$FW_BUILD" ]; then
       ng "/firmware/info 에 build= 가 없다 — **굽힘 판별의 정본이 없는 표본**이다"
+    elif [ "$FW_BUILD_N" != "1" ]; then
+      ng "build 필드가 $FW_BUILD_N 개다 — 표본이 섞였거나 잘렸다. 정체 판정 불가"
     elif [ -n "$D0_EXPECT_BUILD" ]; then
       # 🔴 검토 §69.2 — 굽기 직후 컴파일 기록의 기대 문자열과 **기계로 대조**한다.
       if [ "$FW_BUILD" = "build=$D0_EXPECT_BUILD" ]; then
