@@ -238,10 +238,19 @@ paintBigState(null);
 // ── 1. rosbridge 연결 (끊기면 3초마다 자동 재접속) ──────────────
 const connEl = document.getElementById('conn');
 let ros;
+/* ★ T4: 재접속 타이머 중복 방지.
+   roslibjs 는 상황에 따라 error → close 를 잇달아 올릴 수 있는데, 그때마다
+   setTimeout(connect) 이 하나씩 더 걸리면 재접속이 2배, 4배로 늘어난다.
+   장시간 무인 운전에서만 드러나는 종류의 누수라 미리 막는다. */
+let reconnectTimer = null;
 function connect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   ros = new ROSLIB.Ros({ url: 'ws://' + location.hostname + ':9090' });
   ros.on('connection', () => { connEl.textContent = 'CONNECTED';  connEl.classList.add('ok');  setupTopics(); });
-  ros.on('close',      () => { connEl.textContent = 'DISCONNECTED'; connEl.classList.remove('ok'); setTimeout(connect, 3000); });
+  ros.on('close',      () => {
+    connEl.textContent = 'DISCONNECTED'; connEl.classList.remove('ok');
+    if (!reconnectTimer) reconnectTimer = setTimeout(connect, 3000);
+  });
   ros.on('error',      () => {});   // close 가 뒤따르므로 별도 처리 불필요
 }
 connect();
@@ -605,11 +614,27 @@ function drawMap() {
     log('state', `계획 경로 소거 (/plan ${(PLAN_TIMEOUT_MS / 1000).toFixed(1)}초 이상 미수신)`);
   }
 
+  // ★ 지나온 경로 잘라내기.
+  //   Nav2 는 /plan 을 1Hz 로만 재발행 → 그 사이 로봇이 전진한 만큼 꼬리가 남는다.
+  //   매 프레임 로봇에 가장 가까운 경로점을 찾아 그 앞을 버리고, 선을 로봇에서 시작시킨다.
+  //   🔴 경로가 로봇 근처를 두 번 지나갈 때 잘못 잘리지 않도록 1.5m 안쪽일 때만 적용한다.
+  function prunePlan() {
+    if (!robot || planPts.length < 2) return planPts;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < planPts.length; i++) {
+      const dx = planPts[i].x - robot.x, dy = planPts[i].y - robot.y;
+      const d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; bi = i; }
+    }
+    if (Math.sqrt(bd) > 1.5) return planPts;          // 경로에서 멀면 손대지 않는다
+    return [{ x: robot.x, y: robot.y }, ...planPts.slice(bi + 1)];
+  }
+
   // ★ T2: 계획 경로 — 상태에 따라 색·굵기·라벨이 달라진다
   const style = PLAN_STYLE[lastState];
   const hasPlan = planPts.length > 1 && !!style;
   if (hasPlan) {
-    const pp = planPts.map(p => m2p(p.x, p.y));
+    const pp = prunePlan().map(p => m2p(p.x, p.y));
     mctx.lineJoin = 'round'; mctx.lineCap = 'round';
     mctx.strokeStyle = 'rgba(0,0,0,.55)';                 // 지도 위에서 뭉개지지 않게 밑선
     mctx.lineWidth = (style.width + 2.5) * K;
