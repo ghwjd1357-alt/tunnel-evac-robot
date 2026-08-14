@@ -149,13 +149,20 @@ class EncoderCheckTest(unittest.TestCase):
 
 # ── 지면 주행 리포터 ────────────────────────────────────────────────────
 def straight_run(v_true, seconds, n=200, yaw_rate=0.0, t0=10 * NS):
-    """등속 직진(또는 일정 회전)의 `/cmd_vel`·`/odom` 열."""
+    """등속 직진(또는 일정 회전)의 `/cmd_vel`·`/odom` 열.
+
+    🔴 2026-08-14 — yaw 를 **(−180°, 180°] 로 접어서** 넣는다. 실제 `/odom` 의 yaw 는
+    쿼터니언에서 뽑은 `atan2` 라 언제나 접혀 있는데, 구판 헬퍼는 접히지 않는 누적값을
+    넣었다. 그래서 `analyze()` 가 양끝점 차이만 보던 결함이 **회귀를 통과했다** —
+    합성 데이터에 실물의 접힘이 없으니 뺄셈이 늘 맞았던 것이다. 실물이 안 하는 일을
+    해 주는 합성 데이터는 검사를 통과시키는 일만 한다.
+    """
     dt = seconds / n
     cmds = [(int(t0 + i * 0.1 * NS), 0.05, 0.0) for i in range(int(seconds / 0.1))]
     odoms, x, y, yaw = [], 0.0, 0.0, 0.0
     for i in range(n + 1):
         t = int(t0 + i * dt * NS)
-        odoms.append((t, x, y, yaw, v_true))
+        odoms.append((t, x, y, (yaw + math.pi) % (2 * math.pi) - math.pi, v_true))
         x += v_true * dt * math.cos(yaw)
         y += v_true * dt * math.sin(yaw)
         yaw += yaw_rate * dt
@@ -178,6 +185,87 @@ class GroundReportTest(unittest.TestCase):
         v = gr.analyze(cmds, odoms)
         self.assertGreater(abs(v['dyaw_deg']), 60.0)
         self.assertGreater(v['lat_pct'], 20.0)
+
+    def test_12b_a_turn_past_one_lap_is_reported_in_full(self):
+        """🔴 2026-08-14 R2 회전 — 실제 436°(눈)·IMU 433.6° 인데 도구가 73° 를 냈다.
+
+        `/odom` yaw 가 쿼터니언 파생이라 (−180°, 180°] 로 접혀 있는데 구판은
+        **양끝점 차이**만 봤다. 접힘은 각을 **작게** 만들므로 회전 시행에서
+        '거짓 실패' 쪽으로 틀린다 — 전제 ⓔ(324~396° 밖이면 즉시 중단)에 걸려
+        현장 일정을 세울 뻔했다.
+        """
+        # 33초에 427° ≈ 0.2257 rad/s
+        turn_deg = 427.0
+        secs = 33.0
+        rate = math.radians(turn_deg) / secs
+        cmds, odoms = straight_run(0.001, secs, n=1650, yaw_rate=rate)
+        v = gr.analyze(cmds, odoms)
+        self.assertAlmostEqual(turn_deg, v['dyaw_deg'], delta=1.0)
+
+        # 🔴 부정 회귀 — 구판(양끝점만)이 냈을 값이 진짜와 다름을 **명시**한다.
+        #   이 단언이 없으면 언랩을 지워도 위 단언만으로는 안 깨질 수 있다.
+        folded = math.degrees(
+            (odoms[-1][3] - odoms[0][3] + math.pi) % (2 * math.pi) - math.pi)
+        self.assertLess(abs(folded), 180.0)
+        self.assertGreater(abs(v['dyaw_deg'] - folded), 300.0)
+
+    def test_12c_a_turn_past_one_lap_the_other_way_too(self):
+        """경계는 양쪽을 잠근다 (AGENTS §3-10 ⑤) — 반대 방향도 접히면 안 된다."""
+        turn_deg = -427.0
+        secs = 33.0
+        rate = math.radians(turn_deg) / secs
+        cmds, odoms = straight_run(0.001, secs, n=1650, yaw_rate=rate)
+        v = gr.analyze(cmds, odoms)
+        self.assertAlmostEqual(turn_deg, v['dyaw_deg'], delta=1.0)
+
+    def test_12d_a_small_turn_is_left_alone(self):
+        """역회귀 앵커 — 한 바퀴 안쪽에서는 언랩이 결과를 바꾸지 않는다.
+
+        2026-08-14 직진 시행 실측이 그 대조군이었다: 언랩 4.56° vs 접힘 4.53°.
+        """
+        cmds, odoms = straight_run(0.12, 5.0, yaw_rate=math.radians(4.5) / 5.0)
+        v = gr.analyze(cmds, odoms)
+        folded = math.degrees(
+            (odoms[-1][3] - odoms[0][3] + math.pi) % (2 * math.pi) - math.pi)
+        self.assertAlmostEqual(folded, v['dyaw_deg'], delta=0.1)
+
+    def test_12e_sparse_sampling_declares_its_own_weakness(self):
+        """누적 언랩의 전제(표본 간격 < 반 바퀴)를 숫자로 내보낸다.
+
+        전제를 주석에만 두면 깨져도 아무도 모른다. 실측 `/odom` 은 50Hz 라
+        위험도가 0.01 수준인데, 성기게 표본하면 1.0 으로 올라가야 한다.
+        """
+        _, dense = straight_run(0.001, 33.0, n=1650, yaw_rate=math.radians(427) / 33.0)
+        cmds, _ = straight_run(0.001, 33.0, n=1650, yaw_rate=math.radians(427) / 33.0)
+        self.assertLess(gr.analyze(cmds, dense)['dyaw_alias_risk'], 0.05)
+
+        # 같은 427° 를 표본 4 칸으로만 보면 한 칸이 106.8° — 반 바퀴의 59% 다.
+        # 여기서부터는 "어느 쪽으로 돌았는지" 를 표본이 더는 증언하지 못한다.
+        _, sparse = straight_run(0.001, 33.0, n=4, yaw_rate=math.radians(427) / 33.0)
+        self.assertGreater(gr.analyze(cmds, sparse)['dyaw_alias_risk'], 0.5)
+
+    def test_12f_imu_agreement_threshold_scales_with_the_angle(self):
+        """🔴 고정 1.0° 문턱은 큰 회전에서 항상 '어긋난다' 를 찍었다.
+
+        2026-08-14 R2 회전: 433.6° 에 차이 6.4° = **1.5%** 인데 불일치로 나왔다.
+        두 독립 센서에 0.23% 일치를 요구한 셈이다. 반대로 상대만 쓰면 작은
+        회전에서 발산하므로 **절대·상대 둘 다** 둔다.
+        """
+        secs = 33.0
+        rate = math.radians(427.0) / secs
+        cmds, odoms = straight_run(0.001, secs, n=1650, yaw_rate=rate)
+        t0, t1 = cmds[0][0], cmds[-1][0]
+
+        # 큰 회전 + 1.5% 차이 → 일치로 본다
+        big = gr.analyze(cmds, odoms, imu=[(t0 - NS, 0.0), (t1 + NS, 433.6)])
+        self.assertAlmostEqual(6.6, big['imu_gap_deg'], delta=1.0)
+        self.assertTrue(big['imu_agrees'])
+
+        # 같은 6.6° 라도 작은 회전에서는 불일치다 (상대 문턱이 커진다)
+        cmds_s, odoms_s = straight_run(0.12, 5.0, yaw_rate=math.radians(4.5) / 5.0)
+        s0, s1 = cmds_s[0][0], cmds_s[-1][0]
+        small = gr.analyze(cmds_s, odoms_s, imu=[(s0 - NS, 0.0), (s1 + NS, 11.1)])
+        self.assertFalse(small['imu_agrees'])
 
     def test_13_tape_is_the_judge_of_scale(self):
         """odom 이 줄자와 맞으면 스케일 정상, 어긋나면 잡는다."""

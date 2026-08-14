@@ -171,7 +171,21 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
     path = sum(math.hypot(seg[i][1] - seg[i - 1][1], seg[i][2] - seg[i - 1][2])
                for i in range(1, len(seg)))
     dur_seg = (seg[-1][0] - seg[0][0]) / 1e9
-    dyaw = math.degrees((seg[-1][3] - yaw0 + math.pi) % (2 * math.pi) - math.pi)
+    # 🔴 표본 사이 증분을 각각 ±180° 로 접어 **누적**한다. 양끝점 차이만 접으면
+    #   360° 의 배수가 통째로 사라진다 — `/odom` 의 yaw 는 쿼터니언에서 나온
+    #   atan2 라 언제나 (−180°, 180°] 안이기 때문이다.
+    #   실증 2026-08-14 R2 회전: 실제 436°(눈) · IMU 433.6° 인데 이 자리가 73° 를
+    #   냈다. 그대로 읽었으면 "324~396° 밖 = 즉시 실패·중단"(전제 ⓔ)에 걸려 남은
+    #   현장 일정을 통째로 세웠을 것이다. 접힘은 **작게** 나오므로 회전 시행에서
+    #   항상 안전한 쪽이 아니라 **거짓 실패** 쪽으로 틀린다.
+    #   ⚠ 이 누적이 옳으려면 표본 간격이 반 바퀴보다 짧아야 한다. `/odom` 은 50Hz
+    #     (ODOM_PERIOD_US=20000) 이므로 180° 를 넘으려면 25 rad/s 가 필요한데
+    #     MAX_ANGULAR_CMD=0.5 라 물리적으로 불가능하다. 그래도 가정이므로 아래
+    #     `dyaw_alias_risk` 로 관측해 내보낸다 — 숨은 전제를 숫자로 만든다.
+    steps = [(seg[i][3] - seg[i - 1][3] + math.pi) % (2 * math.pi) - math.pi
+             for i in range(1, len(seg))]
+    dyaw = math.degrees(sum(steps))
+    max_step = max((abs(s) for s in steps), default=0.0)
 
     # 정상구간도 같은 시작점에서 센다. 🔴 끝은 **명령 종료**다 — 관성 꼬리를 평균에
     # 넣으면 순항속도가 실제보다 낮게 나온다(08-12 에 그 실수를 한 번 했다).
@@ -193,6 +207,9 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         'lat_mm': lat * 1000.0,
         'lat_pct': abs(lat) / max(abs(fwd), 1e-9) * 100.0,
         'dyaw_deg': dyaw,
+        # 표본 한 칸의 최대 회전량 ÷ 반 바퀴. 1.0 에 가까우면 누적 언랩의 전제가
+        # 흔들린다(표본이 너무 성기거나 회전이 너무 빠르다). 실측은 0.01 수준이다.
+        'dyaw_alias_risk': max_step / math.pi,
         'avg_mps': path / dur_seg if dur_seg > 0 else float('nan'),
         'cruise_mps': (sum(cruise) / len(cruise)) if cruise else None,
     }
@@ -202,6 +219,11 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         post = [d for t, d in imu if t >= t1]
         if pre and post:
             v['imu_dyaw_deg'] = post[-1] - pre[-1]
+            # 판정을 print 안에 두면 회귀가 못 잡는다 — 여기서 값으로 낸다.
+            gap = abs(v['imu_dyaw_deg'] - v['dyaw_deg'])
+            v['imu_gap_deg'] = gap
+            v['imu_gap_rel'] = gap / max(abs(v['imu_dyaw_deg']), 1e-9)
+            v['imu_agrees'] = gap < 1.0 or v['imu_gap_rel'] < 0.02
 
     # 🔴 줄자가 있으면 그것이 정본이다 — odom 은 여기서 **검증받는 쪽**이다.
     if tape_mm is not None:
@@ -258,11 +280,21 @@ def report(v, name=''):
     print(f'  전진 성분           = {v["fwd_mm"]:9.1f} mm')
     print(f'  🔴 횡편차           = {v["lat_mm"]:9.1f} mm   ({v["lat_pct"]:.2f}% of 전진)')
     print(f'  yaw 변화(엔코더)    = {v["dyaw_deg"]:9.2f} °')
+    if v['dyaw_alias_risk'] > 0.5:
+        print(f'     🔴 표본 한 칸이 반 바퀴의 {v["dyaw_alias_risk"]:.0%} 까지 돈다 — '
+              f'누적 언랩의 전제가 깨진다. 이 yaw 는 판정에 쓰지 않는다')
     if 'imu_dyaw_deg' in v:
         d = v['imu_dyaw_deg']
         gap = abs(d - v['dyaw_deg'])
-        flag = '✅ 교차 일치' if gap < 1.0 else '🔴 두 관측자가 어긋난다'
-        print(f'  yaw 변화(IMU 독립)  = {d:9.2f} °   차이 {gap:.2f}° {flag}')
+        # 🔴 문턱은 절대·상대 둘 다여야 한다. 구판은 고정 1.0° 뿐이라 큰 회전에서
+        #   항상 "어긋난다"를 찍었다 — 2026-08-14 R2 회전은 433° 에 차이 6.4°,
+        #   즉 **1.5%** 인데 불일치로 나왔다. 두 독립 센서에 0.23% 일치를 요구한
+        #   셈이다. 반대로 상대만 쓰면 작은 회전에서 무한대가 되어 못 쓴다.
+        #   ⚠ 절대 차이는 그대로 찍는다 — 예약 35(엔코더 Δyaw − IMU Δyaw)가
+        #     이 수치를 절대값으로 추적한다.
+        rel = v['imu_gap_rel']
+        flag = '✅ 교차 일치' if v['imu_agrees'] else '🔴 두 관측자가 어긋난다'
+        print(f'  yaw 변화(IMU 독립)  = {d:9.2f} °   차이 {gap:.2f}° ({rel:.2%}) {flag}')
     print()
     print(f'  평균속도(경로장)    = {v["avg_mps"]:9.4f} m/s'
           f'   ⚠ 가감속 포함 — 정상속도가 아니다')
