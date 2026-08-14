@@ -90,7 +90,20 @@ ekf_filter_node:
     # vy 도 true 인 이유: 차동구동은 옆으로 못 가므로 "vy=0" 자체가 유용한 제약이다.
     # ⚠ 4륜 스키드 스티어는 회전 시 슬립이 커서 vyaw 가 시뮬보다 나쁠 것으로 예상된다
     #   (마스터플랜 R2: "회전은 틀어질 것 — 예상된 실패"). 아래 IMU 가 그걸 교정한다.
-    odom0: /odom
+    # 🔴 2026-08-14 — `/odom` 이 아니라 `/odom_guarded` 를 읽는다 (동결 예외 6회차).
+    #   `/odom` 이 가끔 **부분만 쓰인 메시지**를 낸다. twist 공분산 대각이
+    #   `[0.02, 4.89e-295, ..., 0.0]` 처럼 첫 칸만 맞고 나머지가 초기화 안 된 메모리다.
+    #   robot_localization 은 그걸 그대로 먹고 **필터 전체가 NaN 이 되며 회복하지 않는다.**
+    #     08-14 1회차: +130.275s 깨진 메시지 → 21ms 뒤 NaN → 21분의 89.5% 가 NaN
+    #     08-14 2회차: +299.527s            →  4ms 뒤 NaN → 세션의 46.9% 가 NaN
+    #   같은 bag 에서 그 메시지들만 빼면 NaN 이 안 난다(오프라인 재현으로 증명).
+    #   → `tools/odom_guard.py` 가 정상 범위의 메시지만 통과시킨다.
+    #   ⚠ **원인 제거가 아니라 방어다.** 뿌리는 펌웨어/전송의 torn write 이고 재굽기가
+    #     필요해 별도 묶음이다. 전제조건·재개방 조건 = `MASTER_PLAN §7` 예약 41.
+    #   ⚠ 가드가 안 떠 있으면 이 토픽은 **조용히 비어 있다** — EKF 가 odom 없이 돈다.
+    #     런치가 가드를 같이 띄운다(`real_bringup`·`real_mapping`). 수동 기동 때는
+    #     `python3 tools/odom_guard.py` 를 함께 띄운다.
+    odom0: /odom_guarded
     odom0_config: [false, false, false,    # x, y, z
                    false, false, false,    # roll, pitch, yaw
                    true,  true,  false,    # vx, vy, vz   ← 앞뒤 거리 정보의 원천
