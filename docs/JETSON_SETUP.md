@@ -269,6 +269,37 @@ grep -A3 -B1 "'serial_baud':" "$D0_SHOW_ARGS"
 필요한 절만 읽는다(`head` 로 파이프를 먼저 닫으면 정상 `ros2` 가 `BrokenPipeError` 를 낸다). 여기서
 `serial_baud` 기본값이 **115200** 으로 보이면 08-02 확정값이 제대로 들어간 것이다.
 
+### 4-d. 노트북에서 고친 것을 Jetson 에 반영하고 **확인**하는 법 (2026-08-14 신설)
+
+노트북 빌드물은 aarch64 에서 못 쓴다(`§3-a`). 반영은 **항상 소스를 받아 다시 빌드**다.
+🔴 그리고 **파일을 고친 것과 시스템이 그 값을 읽는 것은 다르다** — 세 자리를 순서대로 본다.
+(08-14 라이다 오프셋 반영에서 실제로 이 순서로 잡았다.)
+
+```bash
+# ① 받아서 다시 빌드 — 바뀐 패키지만
+cd ~/ros2_ws && git pull
+colcon build --symlink-install --packages-select tunnel_bringup
+source install/setup.bash
+
+# ② 설치본이 새 값인가 — 노드 없이 즉시 확인
+grep -A2 'lidar_joint' install/tunnel_bringup/share/tunnel_bringup/urdf/robot_real.urdf
+
+# ③ 시스템이 그 값을 쓰는가 — TF 가 판정한다
+#    T1) TF 를 쏘는 노드. 이 URDF 는 조인트가 전부 fixed 라 /joint_states 없이 뜬다
+ros2 run robot_state_publisher robot_state_publisher \
+  install/tunnel_bringup/share/tunnel_bringup/urdf/robot_real.urdf
+#    T2)
+ros2 run tf2_ros tf2_echo base_link lidar_link
+```
+
+- ⚠ `tf2_echo` 가 `Invalid frame ID "base_link"` 를 반복하면 **값이 틀린 게 아니라 TF 를
+  쏘는 노드가 없는 것**이다. `tf2_echo` 는 듣기만 한다(08-14 에 여기서 한 번 멈췄다).
+- ⚠ 확인이 끝나면 `robot_state_publisher` 를 **내린다.** `real_bringup`·`real_mapping` 런치가
+  자기 것을 띄우므로, 둘이 같은 TF 를 쏘면 충돌한다.
+- ⚠ `--symlink-install` 이라 ②는 소스로 가는 링크여야 한다. 여기서 **옛 값이 보이면**
+  빌드가 사본을 복사한 것이고, 노드를 띄워도 옛 값이 나온다.
+- 🔴 `src/**` 를 고치는 것 자체가 **동결 예외**다 — 절차·기록 자리 = `FREEZE_MANIFEST.md §10`.
+
 ## 5. `micro_ros_agent` 확보 — 2안 (S6-2)
 
 ### 5-a. 왜 이 절이 따로 있나
@@ -528,7 +559,9 @@ ros2 topic list | grep -E "odom|imu"
 
 에 `/odom`·`/imu/data` 가 보이면 성공이다. 안 보이면 **위 ③ LED 를 먼저 본 뒤** §8.
 
-## 6. udev 규칙 — `/dev/teensy_drive`
+## 6. udev 규칙 — `/dev/teensy_drive` · `/dev/rplidar`
+
+### 6-a. `/dev/teensy_drive`
 
 장치 번호(`/dev/ttyACM0`)는 꽂는 순서에 따라 바뀐다. 고정 이름을 붙인다.
 규칙 파일과 **실측 방법**은 `tools/udev/99-teensy-drive.rules` 안에 다 적어 뒀다.
@@ -552,6 +585,36 @@ ls -l /dev/teensy_drive
 TODO(D+0): 확인 완료 (2026-08-03) — `/dev/ttyACM0`, `idVendor=16c0`,
 `idProduct=0483`, `ID_SERIAL_SHORT=20379630`. 위 ①의 실제 Jetson 출력으로 확정했고,
 재삽입 뒤 `/dev/teensy_drive -> ttyACM0` 및 `DEVLINKS` 반영을 확인했다.
+
+### 6-b. `/dev/rplidar` (2026-08-14 신설)
+
+RPLIDAR C1 도 같은 이유로 고정 이름을 붙인다. 절차는 `§6-a` 와 같고 규칙 파일이
+**`tools/udev/99-rplidar.rules`** 다 — 기대 실측값·주의는 **그 파일 주석이 정본**이다.
+🔴 `10c4:ea60` 은 CP210x 를 쓰는 **모든** 장치가 공유하므로 **시리얼까지 함께 잠근다.**
+
+✅ **2026-08-14 설치 확인** — `ID_VENDOR_ID=10c4` · `ID_MODEL_ID=ea60` ·
+`ID_SERIAL_SHORT=78824f27dc6ff011a04a8c301045c30f` 실측 일치 → `/dev/rplidar -> ttyUSB0`.
+
+⚠ **`udevadm trigger` 만으로는 이미 꽂혀 있는 tty 에 안 걸리는 경우가 있다**(08-14 실측 —
+링크가 안 생겨 한 번 막혔다). 그때 규칙이 틀렸다고 단정하지 말고 **매칭 여부부터 판정한다**:
+
+```bash
+# ① 규칙이 매칭되는가 — 이것이 판정이다
+sudo udevadm test $(udevadm info -q path -n /dev/ttyUSB0) 2>&1 | grep -iE 'rplidar|SYMLINK'
+#    LINK 'rplidar' 가 보이면 규칙은 맞다. 적용만 안 된 것이다
+
+# ② 그 장치에만 다시 적용 (USB 를 안 뽑고)
+sudo udevadm trigger --action=add /sys$(udevadm info -q path -n /dev/ttyUSB0)
+ls -l /dev/rplidar
+#    그래도 안 되면 USB 를 뽑았다 다시 꽂는다 — 이게 가장 확실하다
+
+# ③ ①에서 아무것도 안 보이면 값이 다른 것이다. sysfs 실측과 대조한다
+udevadm info -a -n /dev/ttyUSB0 | grep -E 'ATTRS\{serial\}|ATTRS\{idVendor\}|ATTRS\{idProduct\}' | head -3
+```
+
+⚠ 런치는 포트를 **인자로** 받는다 — `lidar_port:=/dev/rplidar`. 소스에 박으면 동결 예외가
+필요해서 **일부러 안 박았다**(규칙 파일 주석). 그래서 `real_bringup.launch.py:329` ·
+`real_mapping.launch.py:65` 의 `TODO: udev 고정 링크로 교체` 는 **닫지 않고 남겨 둔 것**이다.
 
 ## 7. 연결 판정 — `tools/d0_check.sh`
 
