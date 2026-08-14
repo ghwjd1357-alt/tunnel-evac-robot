@@ -8,8 +8,8 @@
    🔴 지도는 합성이 아니다 — maps/twin_map_loc.pgm (실제 SLAM 저장본) 을
       mock_map_twin.js 픽스처로 변환해 그대로 쓴다. 원점·해상도도 yaml 원본값.
 
-   🔴 주행 waypoint 는 목업 전용 임시값이다 (아래 §3 주석).
-      쌍굴용 waypoints.yaml 정본이 오면 그 숫자로 교체할 것.
+   ✅ 주행 waypoint 는 src/mission_manager/config/waypoints_twin.yaml 정본을 그대로 옮겼다
+      (임시값 시절 좌표는 폐기 — 아래 §3 참조).
 
    사용 : console/ 에서  python3 -m http.server 8000
           http://localhost:8000/?mock=1
@@ -37,7 +37,12 @@ function emit(topic, msg) {
   (subs[topic] || []).forEach(cb => { try { cb(msg); } catch (e) { console.error(e); } });
 }
 
+let lastRos = null;
 function MockRos() {
+  // 실제 rosbridge 는 소켓이 끊기면 그 위의 구독도 같이 죽는다.
+  // 목업도 똑같이 비워야 재접속 시험(T4)에서 '콜백 중복'이 가짜로 보이지 않는다.
+  for (const k in subs) delete subs[k];
+  lastRos = this;
   this._h = {};
   // 접속 성공을 흉내 → index.html 의 setupTopics() 가 불려 구독이 등록된다.
   // ★ 엔진은 그 "다음"에 시작해야 한다. 먼저 발행하면 /map 첫 장을 아무도 못 받는다.
@@ -93,40 +98,40 @@ function buildMap() {
         북측 터널 자유폭 y  7.17 ~ 12.88  (중심 ≈ 10.0)
         연결통로 3개    x = 7 / 17 / 27, 폭 2.2m
         x 범위          -2.8 ~ 36.9
-      ⚠ y=0 선에는 미탐사(205) 점선이 깔려 있어 주행선은 y=0.6 으로 잡았다.
-
-   🔴 아래 waypoint 는 목업 전용 임시값이다. 쌍굴용 정본이 없어서
-      다음 근거로 직접 세웠다:
-        · 화재 데모 좌표 (30,0)          — 0718_관제시스템.md §4
-        · 집결지 = 화재에서 8m           — waypoints.yaml gather_dist: 8.0
-        · 역행 지점 ≥ 화재에서 5m        — waypoints.yaml search_back.min_fire_dist
-        · 탈출구 = 서쪽 입구             — waypoints.yaml escape
-      정본이 오면 N/GOAL_NODE/PATROL_LOOP 숫자만 갈아끼우면 된다.
+      ⚠ y=0(1번 굴 중심선)에는 미탐사(205) 점선이 깔려 있다. 지도 저장 시의 자국이며
+        장애물이 아니다. 정본 중심선이 y=0 이라 주행 샘플의 약 6%가 이 자국 위에 찍힌다.
    ─────────────────────────────────────────────────────────────── */
-const SY = 0.6, NY = 10.0;
+const SY = 0.0, NY = 10.0;      // 1번 굴 / 2번 굴 중심선 (정본)
 
+/* ✅ waypoints_twin.yaml 정본 반영 (2026-08-14).
+   출처: src/mission_manager/config/waypoints_twin.yaml (07-07 작성)
+     · corridor_graph.nodes 를 그대로 옮김 (b1_* = 1번 굴, b2_* = 2번 굴)
+     · patrol 5개 지점, gather (22,0), escape (0,0), gather_wait_sec 8.0
+     · normal_speed 0.26 / guide_speed 0.12, search_back.min_fire_dist 5.0
+   ⚠ 이전 버전의 임시 좌표(y=0.6 주행선 등)는 폐기했다. */
 const N = {
-  SW: { x: -1.5, y: SY }, S7:  { x: 7,    y: SY }, S17: { x: 17, y: SY },
-  S22:{ x: 22,   y: SY }, S24: { x: 24,   y: SY }, S27: { x: 27, y: SY },
-  SE: { x: 35.5, y: SY },
-  NW: { x: -1.5, y: NY }, N7:  { x: 7,    y: NY }, N17: { x: 17, y: NY },
-  N27:{ x: 27,   y: NY }, NE:  { x: 35.5, y: NY },
+  SW: { x: 0,  y: SY }, S5:  { x: 5,  y: SY }, S7:  { x: 7,  y: SY },
+  S17:{ x: 17, y: SY }, S22: { x: 22, y: SY }, S24: { x: 24, y: SY },
+  S27:{ x: 27, y: SY }, SE:  { x: 35, y: SY },
+  NW: { x: 0,  y: NY }, N7:  { x: 7,  y: NY }, N17: { x: 17, y: NY },
+  N27:{ x: 27, y: NY }, NE:  { x: 35, y: NY },
 };
-const EDGES = [
-  ['SW','S7'], ['S7','S17'], ['S17','S22'], ['S22','S24'], ['S24','S27'], ['S27','SE'],
+const EDGES = [                                   // corridor_graph.edges 그대로
+  ['SW','S5'], ['S5','S7'], ['S7','S17'], ['S17','S22'], ['S22','S24'], ['S24','S27'], ['S27','SE'],
   ['NW','N7'], ['N7','N17'], ['N17','N27'], ['N27','NE'],
-  ['S7','N7'], ['S17','N17'], ['S27','N27'],          // 연결통로
+  ['S7','N7'], ['S17','N17'], ['S27','N27'],      // 피난연결통로 x=7 / 17 / 27
 ];
 const ADJ = {};
 for (const [a, b] of EDGES) { (ADJ[a] = ADJ[a] || []).push(b); (ADJ[b] = ADJ[b] || []).push(a); }
 
-const FIRE_DEMO = { x: 30, y: 0 };
+const FIRE_DEMO = { x: 30, y: 0 };                // 표준 테스트 화재
 const GOAL_NODE = {
-  APPROACH:    'S22',    // 집결지 = 화재(x30)에서 탈출구 방향 8m
-  GUIDE:       'SW',     // 탈출구 = 서쪽 입구
-  SEARCH_BACK: 'S24',    // 역행 지점 = 화재에서 6m (min_fire_dist 5.0 준수)
+  APPROACH:    'S22',    // gather (22,0) — 화재 30 에서 gather_dist 8.0
+  GUIDE:       'SW',     // escape (0,0) = 스폰 지점
+  SEARCH_BACK: 'S24',    // 화재에서 6m (min_fire_dist 5.0 준수)
 };
-const PATROL_LOOP = ['SE', 'NE', 'NW', 'SW'];   // 쌍굴 양쪽 보어를 도는 순찰
+// patrol: 1번 굴 동진 → 동쪽 통로(x=27) → 2번 굴 서진 → 서쪽 통로(x=7) 복귀
+const PATROL_LOOP = ['S5', 'S27', 'N27', 'N7', 'S7'];
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const nearestNode = p => Object.keys(N).reduce((m, k) => (dist(N[k], p) < dist(N[m], p) ? k : m), 'SW');
@@ -159,11 +164,21 @@ function pathTo(goalKey) {
 /* ───────────────────────────────────────────────────────────────
    4. 시나리오 엔진
    ─────────────────────────────────────────────────────────────── */
-const SPEED = parseFloat(params.get('speed')) || 2.0;   // 기본은 시험 편의상 빠르게
-                                                        // 실제값: normal 0.26 / guide 0.12 (waypoints.yaml)
+/* 🔴 주행 속도 = waypoints.yaml 정본값 (2026-08-14 수정).
+   이전 목업 기본값 2.0 m/s 는 시험을 빨리 돌리려고 임의로 잡은 값이었고 실제보다 약 8배 빨랐다.
+   빨리 확인하고 싶을 때만 ?speed=2 처럼 덮어쓴다. */
+const SPEED       = parseFloat(params.get('speed')) || 0.26;   // normal
+const SPEED_GUIDE = SPEED === 0.26 ? 0.12 : SPEED * 0.46;      // guide (저속 선행 유도)
+
+/* ★ 목업 배속 — 실제 속도는 그대로 두고 '재생 속도'만 올린다.
+   시나리오를 빨리 돌려보려는 용도. 화면에 ×N 이 항상 표시되므로
+   실제 로봇이 그 속도로 달리는 것으로 오해할 여지가 없다.
+   빨리 보려면 조작판 버튼 또는 주소에 ?x=10 */
+let speedMult = parseFloat(params.get('x')) || 1;      // 기본 ×1 = 정본 속도 그대로
+const MULTS = [1, 3, 6, 10];                          // 버튼으로 순환. T4 2시간 시험은 반드시 ×1
 const S = {
   state: 'PATROL',
-  robot: { x: 2.0, y: SY, yaw: 0 },
+  robot: { x: 1.0, y: SY, yaw: 0 },   // 스폰 = map 원점 부근
   path: [], goalKey: null,
   patrolIdx: 0,
   tGather: 0,
@@ -192,18 +207,22 @@ function setState(s) {
 const DT = 0.1;                                     // 10Hz
 function stepRobot() {
   if (!S.path.length || !S.moving) return;
-  const speed = (S.state === 'GUIDE') ? SPEED * 0.45 : SPEED;   // GUIDE = 저속 선행 유도
+  // 배속은 '시간을 빨리 돌리는 것' → 직진뿐 아니라 회전·도착판정도 같이 배속해야
+  // 궤적 모양이 ×1 일 때와 똑같이 유지된다. (안 그러면 코너를 잘라 돌아 벽을 스친다)
+  const speed = ((S.state === 'GUIDE') ? SPEED_GUIDE : SPEED) * speedMult;
   const tgt = S.path[0];
   const dx = tgt.x - S.robot.x, dy = tgt.y - S.robot.y;
   let e = Math.atan2(dy, dx) - S.robot.yaw;
   while (e >  Math.PI) e -= 2 * Math.PI;
   while (e < -Math.PI) e += 2 * Math.PI;
-  S.robot.yaw += Math.max(-2.0 * DT, Math.min(2.0 * DT, e));    // 각속도 제한
+  const wmax = 2.0 * DT * speedMult;                            // 각속도도 같은 배속
+  S.robot.yaw += Math.max(-wmax, Math.min(wmax, e));
   const step = Math.min(speed * DT, Math.hypot(dx, dy));
   S.robot.x += Math.cos(S.robot.yaw) * step;
   S.robot.y += Math.sin(S.robot.yaw) * step;
 
-  if (Math.hypot(tgt.x - S.robot.x, tgt.y - S.robot.y) < 0.3) {
+  const reach = Math.max(0.3, speed * DT * 1.6);                // 한 틱 이동량보다 커야 지나치지 않는다
+  if (Math.hypot(tgt.x - S.robot.x, tgt.y - S.robot.y) < reach) {
     S.path.shift();
     if (!S.path.length) onArrive();
   }
@@ -313,40 +332,44 @@ function togglePanel(show) {
 
 function buildPanel() {
   tab = document.createElement('button');
-  tab.textContent = '🧪';
+  tab.textContent = 'M';
   tab.title = '목업 조작판 열기';
   tab.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:9999;display:none;' +
-    'width:40px;height:40px;border:0;border-radius:20px;background:#2f4a63cc;color:#fff;' +
-    'font-size:18px;cursor:pointer';
+    'width:34px;height:34px;border:1px solid #2f363c;background:#15181b;color:#8b939b;' +
+    'font:600 12px ui-monospace,Menlo,monospace;cursor:pointer';
   document.body.appendChild(tab);
 
   panel = document.createElement('div');
   panel.id = 'mockPanel';
   panel.innerHTML = `
     <style>
-      #mockPanel{position:fixed;right:12px;bottom:12px;z-index:9999;width:262px;
-        background:#101820;border:1px solid #3a4a5c;border-radius:10px;padding:12px;
-        font:12px/1.5 'Noto Sans KR',sans-serif;color:#cfe0f0;box-shadow:0 6px 24px #0009}
-      #mockPanel h3{font-size:12px;color:#ffb04d;margin-bottom:6px;letter-spacing:.05em}
-      #mockPanel button{width:100%;margin-top:6px;padding:7px;border:0;border-radius:6px;
-        background:#2f4a63;color:#fff;font-size:12px;font-weight:700;cursor:pointer}
-      #mockPanel button.warn{background:#8a3b2f}
-      #mockPanel select{width:100%;margin-top:6px;padding:6px;background:#12161c;
-        color:#cfe0f0;border:1px solid #2a3340;border-radius:6px}
-      #mockPanel .kv{color:#7fc4ff;font-weight:700}
-      #mockPanel .hint{color:#6b7c8d;font-size:11px;margin-top:8px}
+      #mockPanel{position:fixed;right:12px;bottom:12px;z-index:9999;width:250px;
+        background:#15181b;border:1px solid #2f363c;padding:11px;
+        font:12px/1.5 'Noto Sans KR',sans-serif;color:#d7dbdf}
+      #mockPanel h3{font-family:ui-monospace,Menlo,monospace;font-size:10px;font-weight:500;
+        letter-spacing:.14em;color:#d0a215;margin-bottom:8px;text-transform:uppercase}
+      #mockPanel button{width:100%;margin-top:5px;padding:7px;border:1px solid #2f363c;
+        background:#1b1f23;color:#d7dbdf;font-size:12px;font-weight:600;cursor:pointer}
+      #mockPanel button:hover{background:#22272c}
+      #mockPanel button.warn{border-color:#7a3428;color:#e4523c}
+      #mockPanel select{width:100%;margin-top:5px;padding:6px;background:#0e1113;color:#d7dbdf;
+        border:1px solid #2f363c;font-family:ui-monospace,Menlo,monospace;font-size:11px}
+      #mockPanel .kv{font-family:ui-monospace,Menlo,monospace;color:#4f9ee8;font-weight:600}
+      #mockPanel .hint{color:#5b636a;font-size:10.5px;line-height:1.5;margin-top:8px}
     </style>
-    <h3>🧪 목업 조작판 (?mock=1)</h3>
+    <h3>MOCK CONTROL · ?mock=1</h3>
     <div class="hint" style="margin:0 0 6px">지도: 실제 <b>${MAPDEF.name}</b> ·
       ${MAPDEF.width}×${MAPDEF.height} @${MAPDEF.resolution}m · origin (${MAPDEF.origin.x}, ${MAPDEF.origin.y})</div>
     <div>상태: <span class="kv" id="mkState"></span></div>
     <select id="mkSel">${STATES.map(s => `<option>${s}</option>`).join('')}</select>
-    <button id="mkFire">🔥 화재 발생 (${FIRE_DEMO.x}, ${FIRE_DEMO.y})</button>
-    <button id="mkMove">⏸ 로봇 이동 정지</button>
-    <button id="mkPlan" class="warn">🛑 /plan 발행 중단 (T1 시험)</button>
-    <button id="mkHide" style="background:#26313d">✕ 조작판 접기</button>
-    <div class="hint">주행선 y=${SY}(남측)·${NY}(북측), 연결통로 x=7·17·27 = 지도 실측값.
-      waypoint 는 목업 임시값 — 쌍굴 정본 오면 교체.</div>`;
+    <button id="mkFire">화재 발생 (${FIRE_DEMO.x}, ${FIRE_DEMO.y})</button>
+    <button id="mkMove">로봇 이동 정지</button>
+    <button id="mkPlan" class="warn">/plan 발행 중단 (T1 시험)</button>
+    <button id="mkDrop" class="warn">연결 끊김 시뮬 (T4 시험)</button>
+    <button id="mkSpeed">재생 배속</button>
+    <button id="mkHide" style="color:#8b939b">조작판 접기</button>
+    <div class="hint">waypoints_twin.yaml 정본 반영 (중심선 y=0·10, 통로 x=7·17·27,
+      집결 22, 탈출 0, 0.26/0.12 m/s). 배속은 재생 속도일 뿐 설계값이 아님.</div>`;
   document.body.appendChild(panel);
 
   panel.querySelector('#mkSel').onchange = e => setState(e.target.value);
@@ -354,17 +377,30 @@ function buildPanel() {
     emit('/alarm', { header: { frame_id: 'map' }, pose: { position: { x: FIRE_DEMO.x, y: FIRE_DEMO.y, z: 0 } } });
     if (S.state !== 'FAULT') setState('APPROACH');
   };
+  const spBtn = panel.querySelector('#mkSpeed');
+  const paintSpeed = () => {
+    spBtn.textContent = `재생 배속 \u00d7${speedMult}`;
+    spBtn.style.color = speedMult > 1 ? '#d0a215' : '';
+  };
+  spBtn.onclick = () => {
+    speedMult = MULTS[(MULTS.indexOf(speedMult) + 1) % MULTS.length] || 1;
+    paintSpeed();
+  };
+  paintSpeed();
+  panel.querySelector('#mkDrop').onclick = () => {
+    if (lastRos) lastRos.close();          // index.html 이 3초 뒤 자동 재접속한다
+  };
   panel.querySelector('#mkHide').onclick = () => togglePanel(false);
   tab.onclick = () => togglePanel(true);
   // 디스플레이 모드(?display=1)에서는 1024×600 을 가리므로 접어 둔다
   togglePanel(!params.has('display'));
   panel.querySelector('#mkMove').onclick = e => {
     S.moving = !S.moving;
-    e.target.textContent = S.moving ? '⏸ 로봇 이동 정지' : '▶ 로봇 이동 재개';
+    e.target.textContent = S.moving ? '로봇 이동 정지' : '로봇 이동 재개';
   };
   panel.querySelector('#mkPlan').onclick = e => {
     S.planOn = !S.planOn;
-    e.target.textContent = S.planOn ? '🛑 /plan 발행 중단 (T1 시험)' : '▶ /plan 발행 재개';
+    e.target.textContent = S.planOn ? '/plan 발행 중단 (T1 시험)' : '/plan 발행 재개';
   };
   syncPanel();
 }
