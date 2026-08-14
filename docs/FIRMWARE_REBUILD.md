@@ -157,8 +157,8 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 승인받은 blob 이 아니게 된다. 재개방·완료판정 = `MASTER_PLAN §7` 예약 32-d.
 
 ```
-8487d007e5b4a49b227731de1feb106342efd80e898d44fc45a79939fb6bfe3e
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 440,32 · 1,715줄 / 64,007 bytes · 08-13 §67 승인본 = odom 재교정 + 상수 분리 + appliedPwm 관측)
+d40d6967b83f54b2bb9ac0d483c0dfb7ba3b70ce7beb22620ec2b82bd68b556d
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 447,31 · 1,723줄 / 64,779 bytes · 08-14 §71 승인본 = 구름 반지름 0.05698 + base 0.829 + CONTROL_* 삭제)
 ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340
   firmware/teensy_integrated_base_v1_4/rearm_gate.h        (298,0 · 298줄 / 16,932 bytes)
 f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860
@@ -170,6 +170,18 @@ f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860
 ```bash
 sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h,estop_debounce.h}
 ```
+
+✅ **2026-08-14 — `.ino` 지문을 §71 승인본으로 옮겼다.** 08-13 밤 지면이 `0.04603` 을
+부정했다(줄자 오측 `3105 mm` 한 값이 하루치를 떠받치고 있었다 — `PITFALLS §12`). C10 실측
+(11회전 / 3900 mm)이 구름 반지름을 `55.6~57.2 mm` 로 확정해 `ODOM_WHEEL_RADIUS` 를
+`0.05698`, `ODOM_WHEEL_BASE` 를 `0.829` 로 되돌리고 `CONTROL_WHEEL_RADIUS` ·
+`CONTROL_FEEDBACK_SCALE` 을 삭제했다. 순서는 이번에도 그대로였다: 굽기 → **구판 지문으로
+`rc=1`** → §68 → §69 → §70 → **§71(P0 0)** → **이 지문 전용 별도 커밋**.
+🔴 **§71 은 P1 을 조건부 수용으로 열어 둔 채 승인했다** — 전제조건·재개방 = `MASTER_PLAN §7`
+예약 32-e ⓖ-2. 특히 회전 회귀의 시행 간 스프레드(`0.83%`)는 **반복성이지 정확도 상한이
+아니다**(세 시행이 같은 AMG 적분 경로를 지난다). 🔴 **회전의 최종 권위는 지면 2π 다.**
+⚠ 구판 `.ino` 지문 `8487d007…`(440,32 · 1,715줄 / 64,007 bytes · 08-13 §67 승인본)은
+**더 이상 판정에 쓰지 않는다.**
 
 ⚠ **구판 기록(08-12 §62 승인본)** — `.ino` `47661a8f…`(232,18 · 1,521줄 / 50,758 bytes) ·
 `rearm_gate.h` `7b3a0462…`(247,0) · `drive_wiring.h` `f4b6d65e…`(101,0). **더 이상 판정에

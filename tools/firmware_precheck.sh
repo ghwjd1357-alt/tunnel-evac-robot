@@ -101,7 +101,12 @@ done
 #   유일한 자동 굽기 차단이 미승인 구동 상수를 "굽어도 된다"로 통과시킨 것이다 — 되돌렸다.
 #   → 순서는 `코드 수정 → 빌드 → 구판 지문으로 rc=1 → 독립 검토 → **지문 전용 별도 커밋**`.
 #   → 지문은 오염 검출기이지 **의미 승인자가 아니다.**
-#   ✅ **2026-08-12 — 그 순서대로 옮긴 값이 지금의 `.ino` 기본값이다.** 예약 32 계수
+#   ✅ **2026-08-14 — 그 순서대로 다시 옮겼다.** 예약 32-e(구름 반지름 `0.05698` · base
+#   `0.829` · CONTROL_* 삭제)를 08-13 밤에 굽고 **구판 지문으로 `rc=1`** 인 채 검토 네 회차를
+#   태웠다 — §68 → §69 → §70 → **§71(P0 0)**. 승인 뒤 이 커밋에서만 두 자리를 옮겼다.
+#   🔴 §71 은 P1 을 **조건부 수용으로 열어 둔 채** 승인했다(`MASTER_PLAN §7` 32-e ⓖ-2).
+#   ⚠ 아래 구판 서술(2026-08-12)은 같은 순서를 처음 밟은 기록으로 남긴다.
+#   ✅ **2026-08-12 — 그 순서대로 옮긴 값이 당시의 `.ino` 기본값이었다.** 예약 32 계수
 #   `FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN 375→335` 이 3회차 독립 검토
 #   (`~/Desktop/개발현황/CODEX 현황/0812검토현황.md §62`)에서
 #   **P0 0 · 조건부 수용**을 받은 뒤, 그 판정이 지정한 blob(`47661a8f…`)을 이 커밋에서만 옮겼다.
@@ -109,7 +114,7 @@ done
 #   "결함이 없다"가 아니다. 재개방 조건은 `MASTER_PLAN §7` 예약 32-a.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=440,32,8487d007e5b4a49b227731de1feb106342efd80e898d44fc45a79939fb6bfe3e"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=447,31,d40d6967b83f54b2bb9ac0d483c0dfb7ba3b70ce7beb22620ec2b82bd68b556d"
         "firmware/teensy_integrated_base_v1_4/rearm_gate.h=298,0,ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340"
         "firmware/teensy_integrated_base_v1_4/drive_wiring.h=114,0,f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860"
         "firmware/teensy_integrated_base_v1_4/estop_debounce.h=140,0,126fc729074cbcca170c93c93514c5bddd4545e67d2044d1bbd5734f92380940"
