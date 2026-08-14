@@ -99,6 +99,28 @@
 - **EKF 만으론 안 끝남** — SLAM 이 odom 을 덮어쓰므로 slam_params 튜닝까지 한 세트. 실차 시작값 = `slam_params_realodom.yaml` (penalty 0.02 는 실 odom 에 과신).
 - **라이다 평면은 몸통 최상면보다 위** (자기타격 = 유령 상자 행렬 — 실물 동일, 하드웨어팀 전달). 낮은 장애물(콘 ~0.3m)은 라이다 사각 → Orbbec depth 필수의 실증 근거.
 - 이동 중 gz vs tf2_echo 나이브 비교 = 샘플링 시차가 가짜 드리프트 — **정지 스냅샷만 신뢰.** → 0719_현황 §16
+- 🔴 **지도를 저장하는 방법은 둘이고 쓰는 곳이 다르다** (08-14 신설 — 현장에서 하나를 놓쳤다):
+
+  | 저장물 | 만드는 법 | 읽는 곳 |
+  |---|---|---|
+  | `.pgm` + `.yaml` | `ros2 run nav2_map_server map_saver_cli -f <경로>` | **Nav2 costmap** (경로계획) |
+  | `.posegraph` + `.data` | `/slam_toolbox/serialize_map` 서비스 | **slam_toolbox localization 모드** (R6 운영) |
+
+  🔴 **서비스 타입은 `slam_toolbox/srv/SerializePoseGraph`** 다 (필드 = `string filename` 하나).
+  `SerializeMap` 이라는 타입은 **존재하지 않는다** — `real_mapping.launch.py` 머리말이
+  08-14 까지 그렇게 적고 있었고, 그대로 친 명령이 *"The passed service type is invalid"* 로
+  거부됐다. 실제 목록 = `/opt/ros/humble/share/slam_toolbox/srv/`.
+  확인법: `ros2 service list -t | grep slam_toolbox`
+  ⚠ 경로는 **절대경로**여야 하고(`~` 안 먹는다) **확장자는 붙이지 않는다.**
+- 🔴 **런치를 내리면 posegraph 는 다시 못 만든다** — 그래프가 노드 메모리에 있다.
+  ⓐ 저장 → ⓑ **파일 4개를 눈으로 확인** → ⓒ 그 다음에 종료. 08-14 에 ⓐ가 조용히
+  실패했는데 ⓑ 를 건너뛰고 ⓒ 로 갔다. **저장 명령의 성공을 파일 목록으로 확인하기 전에는
+  노드를 내리지 않는다.**
+  ⚠ 놓쳐도 **`ros2 bag record -a` 가 있으면 살릴 수 있다** — bag 을 재생해 같은
+  slam_toolbox 를 다시 돌리면 그래프가 재구성된다(`/scan`·`/tf`·`/tf_static` 필요).
+  복도를 다시 돌 필요가 없다. **그래서 지도 세션의 bag 은 버리지 않는다.**
+  ⚠ bag 을 `-a -x "/map|/map_updates"` 로 받으면 크기가 크게 준다 — `/map` 은 2초마다
+  지도 전체가 통째로 나가고, 어차피 마지막에 따로 저장한다.
 
 ## 8. 미션노드 프로그래밍 (비동기 안전)
 
