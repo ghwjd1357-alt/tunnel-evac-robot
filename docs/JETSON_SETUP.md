@@ -525,8 +525,11 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `runtime_overruns=0`, `disarm_runtime=0`, `disarm_spin=0`, 전체 loop max 47.165ms다.
 수 초 감시-loop 정지는 재발하지 않았다. 그러나 `publish_failures=13→83`과 함께
 `/odom` header stamp 결측 7회(210~297ms), 수신 최대 공백 346.35ms가 남았다.
-이는 runtime guard 실패가 아니라 **RELIABLE odom 단기 전송 실패**이며 R3는 아직 FAIL이다.
-시험 구간 dmesg의 USB reset·disconnect·`ttyACM` 오류는 0건이다. 상세 판정은
+이는 runtime guard 실패가 아니라 **상류 링크 정지(약 300ms 7회)를 RELIABLE 20ms 상한이
+`/odom` 유실로 바꾼 것**이며 R3는 아직 FAIL이다 (검토 §76.3 — 같은 정지에서
+BEST_EFFORT `/imu/data`는 유실 약 2건뿐이다).
+🔴 이 시행의 dmesg는 soak 시작 **43초 전** 스냅샷이라 사건 구간을 못 덮는다 (§76.2).
+"오류 0건"으로 읽지 않는다. 상세 판정은
 `MASTER_PLAN §7` 41-f와 `REAL_ROBOT_VALUES §1-g`가 소유한다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**

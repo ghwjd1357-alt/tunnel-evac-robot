@@ -2636,12 +2636,23 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     | 전체 loop 작업시간 | **47.165ms** | 400ms 임시 guard보다 약 8.5배 낮음 |
     | `/odom`·`/imu/data` 수신 최대 공백 | **346.35 / 349.41ms** | 🔴 R3 33.33ms 계약 미통과 |
     | `publish_failures` | **13→83(+70)** | 🔴 RELIABLE odom 단기 전송 실패 7묶음 |
-    | kernel | 시험 시간대 USB reset/disconnect/`ttyACM` 오류 **0건** | 이번 시행의 공백은 USB 재열거가 아님 |
+    | kernel | 🔴 **사건 시각 미관측** — 로그 끝 22:44:41 vs soak 23:18:43~23:31:08 (시작 기준 **34.0분** · 종료 기준 **46.5분** 공백) | 검토 §76.2. 덮는 구간엔 Teensy 재열거 **6회**(22:15:06→22:17:11 = 2분 5초). USB 재열거를 **기각하지 않는다** |
 
     7묶음에서 `/odom` header stamp가 210~297ms 건너뛰고 직후 `publish_failures`가
     증가했다. 반면 전체 loop max는 47.165ms이고 runtime 해제는 0이다. 따라서
     **기존 수 초 단일-loop 정지는 재발하지 않았지만, EKF가 받을 표본의 단기 결측은
-    남았다.** 둘을 같은 “통신 정상”으로 합치지 않는다. `/scan`은 라이다가 연결되지 않아
+    남았다.** 둘을 같은 “통신 정상”으로 합치지 않는다.
+
+    🔴 **원인 귀속 정정 (검토 §76.3).** 7사건은 `/odom`만의 것이 아니다 —
+    `/imu/data`(BEST_EFFORT·MTU 미만)가 **같은 7회를 시각차 2.2~18.9ms 안에서 같이**
+    비웠다. 한 publisher의 RELIABLE 대기가 원인이면 다른 publisher가 같이 설 수 없다.
+    header stamp로 가르면 `/odom`은 유실 **약 72건**(`publish_failures +70`과 일치),
+    `/imu/data`는 **약 2건**뿐이고 나머지는 버스트로 회수됐다(사건 직후 수신Δ
+    `0.04 / 0.31 / 6.52 ms`). 즉 **상류 링크·전송이 약 300ms 서고, RELIABLE 20ms 상한이
+    그 정지를 `/odom` 유실로 번역했다.** odom QoS만 조정해서는 300ms가 사라지지 않는다.
+    ⚠ 그리고 그 300ms를 볼 계기가 지금 없다 — `recordRuntimePhase(RUNTIME_PHASE_LOOP)`가
+    `delay(1)` **앞**이라 `delay`·USB serviceEvent·agent 왕복이 전부 계측 밖이다(§74.6).
+    `loop_gap_max_us` 신설 전까지 *"수 초 정지 재발 0"* 은 계측이 아니라 **미검출**이다. `/scan`은 라이다가 연결되지 않아
     0건이므로 이번 soak에서 독립 비교축은 없다.
 
     같은 soak에서 E-stop `raw_edges=39→67`, `rejected=5→19`, rejected max
@@ -2653,6 +2664,51 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     범위에서 닫았다고 주장한다. 그러나 1.6.2는 새 Tier A diff이며 구현자가 자기 승인하지
     않는다. 승인 지문도 1.6.1에 머문다. 독립검토는 20ms timeout 폐포와 위 field evidence를
     재산출해야 한다. 08-14 torn odom·R3 주기 결함은 예약 43으로 계속 열린다.
+
+    #### 🔴 41-g — 약 300ms 링크 정지가 12분에 7회 (2026-08-18 검토 §76.3 신설)
+
+    **등록 사유** — `fw162_ground_soak_0817_2320`(744.697초)에서 `/odom`과 `/imu/data`가
+    **7회 같이** 멈췄다. 시각차는 **2.2~18.9ms**뿐이다.
+
+    ```
+        t(s)    /odom 수신공백    /imu/data 수신공백    시각차
+      131.88      335.11 ms          349.41 ms        14.4 ms
+      196.78      276.25 ms          257.51 ms        18.9 ms
+      217.79      260.47 ms          262.69 ms         2.2 ms
+      223.72      346.35 ms          347.98 ms         2.3 ms
+      430.76      295.13 ms          297.64 ms         2.5 ms
+      472.79      271.81 ms          273.98 ms         2.3 ms
+      565.80      263.60 ms          265.44 ms         2.4 ms
+    ```
+
+    두 토픽은 QoS도 크기도 다르다 — `/odom`은 RELIABLE·약 700B(>MTU 512B),
+    `/imu/data`는 BEST_EFFORT·MTU 미만이다. **한 publisher의 RELIABLE 대기가 원인이면
+    다른 publisher가 같이 설 수 없다.** header stamp로 유실을 가르면 `/odom`은
+    **약 72건**(`publish_failures +70`과 일치), `/imu/data`는 **약 2건**이고 나머지는
+    버스트로 회수됐다. 즉 **상류에서 약 300ms가 서고, RELIABLE 20ms 상한이 그것을
+    `/odom` 유실로 번역한다.**
+
+    **후보** — ① USB 재열거(🔴 **1순위**. 같은 dmesg의 덮는 구간에 Teensy 포트
+    `1-2.1` 재열거 **6회**, `22:15:06→22:17:11`은 2분 5초 단절) ② USB CDC 송신 버퍼
+    ③ agent 스케줄·Jetson 부하 ④ Jetson USB 전원관리(autosuspend).
+    ⚠ **커널 로그로 ①을 기각할 수 없다** — 이 시행의 dmesg는 soak를 34분 못 미친다(§76.2).
+
+    🔴 **지금은 이 정지를 볼 계기가 없다.** `recordRuntimePhase(RUNTIME_PHASE_LOOP, …)`가
+    `delay(1)` **앞**이라 `delay`·USB serviceEvent·agent 왕복이 전부 계측 밖이다(§74.6).
+    `phase_max_us` loop 최대 47.165ms와 `runtime_overruns=0`은 *"loop는 안 섰다"*
+    가 아니라 *"loop 안에서는 안 섰다"* 까지만 말한다.
+
+    **완료판정** — *"`loop_gap_max_us`(= 이번 `loop()` 시작 − 지난 `loop()` 종료)를
+    `/firmware/info`에 넣고 같은 soak를 재현했을 때, 7사건에서 그 값이 수백 ms면
+    원인이 loop 밖으로 확정되고 47ms대면 loop 안으로 확정된다."* 둘 중 하나가 나오기
+    전에는 원인을 적지 않는다.
+
+    **부정 회귀** — ⓐ 정상 bench에서 `loop_gap_max_us` 약 1~2ms(`delay(1)` 근처)
+    ⓑ 계수 필드 삭제 변이가 `test_firmware_runtime_guard` 존재 회귀에서 FAIL
+    ⓒ `phase_max_us` 7·`publish_max_us` 8 배열 개수·순서 불변(역회귀).
+
+    ⚠ **이 예약을 D0-FW 완료로 흡수하지 않는다.** 08-17 6.85초 사건이 링크 쪽이었다면
+    1.6.2의 계기는 그 재발도 똑같이 못 본다. R3·R4·R6 진입은 이 자리가 닫히기 전 금지다.
 
 - **🔴 예약 40 — 주행 중 각속도가 명령의 25% 만 나온다 (2026-08-14 A-10 실측)**
 
@@ -2926,7 +2982,9 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 
 | 결정 | 날짜 | 근거 |
 |---|---|---|
-| 🔴 **D0-FW 1.6.2는 수 초 감시-loop 정지를 현장 범위에서 막았지만 R3 주기까지 통과시킨 것은 아니다** — 744.697초·비영 341.7초·22.256m에서 runtime overrun/해제 0, loop max 47.165ms, 사건 시각 kernel USB 오류 0건. 동시에 RELIABLE odom publish 실패 +70과 210~297ms stamp 결측 7회가 남았다. 구현자 주장이고 1.6.2 독립검토는 대기한다 | 08-17 | `MASTER_PLAN §7` 41-f · `fw162_ground_soak_0817_2320` |
+| 🔴 **전체 배선 추적표는 저장소 밖 개인 문서로 둔다 — 그 결정 자체를 정본에 적는다** — `01e653d`(08-17 14:05)가 **docs/ELECTRICAL_WIRING.md** 413줄을 넣었고 `62450aa`(14:10)가 **사유 한 줄 없이** 통째로 되돌렸다. 내용은 `~/Desktop/전기배선도_전체.md` 로 갔고 `docs/` 에는 참조 0건·사유 0건만 남아, 나중에 보면 *"413줄짜리 전기 문서가 있었다가 사라졌다"* 가 된다(`58c48bb` 가 닫은 클래스의 재발). → 위치·사유·**재편입 조건 3종**을 `ELECTRICAL_BASELINE §17` 에 적었다. ⚠ 안전 판정 정본은 옮겨가지 않았다 — 저장소 밖으로 나간 것은 단자 추적 정보뿐이고, 그래서 **그 문서를 근거로 안전 판정을 내리지 않는다** | 08-17 (기록 08-18) | `ELECTRICAL_BASELINE §17` · `git show 01e653d` |
+| 🔴 **커널 로그가 사건 구간을 덮었는지 사람이 아니라 기계가 검사한다** — §73.2 가 *"부재는 관측이 아니다"* 로 P1 을 걸고 런북에 *"주행 종료 후 `dmesg -T` 까지 저장"* 을 넣었는데, **같은 날 밤 같은 실수가 재발**했다(§76.2 — soak 시작 43초 전 스냅샷). 문장은 이미 있었고 지켜지지 않았다. 진짜 클래스는 *"절차가 없다"* 가 아니라 **"절차를 지켰는지 아무도 검사하지 않는다"** 다. → `tools/dmesg_coverage_check.py` 가 bag 구간을 못 덮으면 rc=1 로 거부한다. ⚠ 판정(덮었는가)과 관측(무엇이 보이는가)을 한 출구로 합치지 않는다 — 구간 안 `disconnect` 는 FAIL 이 아니라 경고다 | 08-18 | 검토 §76.2 · `tools/dmesg_coverage_check.py` · `tools/test_dmesg_coverage.py` |
+| 🔴 **D0-FW 1.6.2는 수 초 감시-loop 정지를 현장 범위에서 막았지만 R3 주기까지 통과시킨 것은 아니다** — 744.697초·비영 341.7초·22.256m에서 runtime overrun/해제 0, loop max 47.165ms. 동시에 약 300ms 링크 정지 7회가 남아 `/odom` 유실 약 72건·stamp 결측 210~297ms를 만들었다. 🔴 **검토 §76 정정** — 사건 시각 kernel 로그는 **미관측**(34분 공백)이고, 같은 7회를 BEST_EFFORT `/imu/data`도 같이 겪었으므로 원인은 odom QoS가 아니라 **상류 링크**다. "수 초 정지 재발 0"은 그것을 볼 계기(`loop_gap_max_us`)가 없는 상태의 미검출이다 | 08-17 (§76 정정 08-18) | `MASTER_PLAN §7` 41-f·41-g · 검토 §76 |
 | ✅ **외장 판재 뒤 상수를 바꾸지 않는다** — R2 직진 odom/줄자 1.006, 회전 odom/IMU 0.995, C10 평균 57.64mm(구판 대비 +0.6%), 라이다 831mm/TF 832mm라 `ODOM_WHEEL_RADIUS`·`ODOM_WHEEL_BASE`·URDF·FF/게인 모두 유지한다. 차고 19mm와 물리 좌향 10.0%는 각각 지면 제약·예약 39로 남긴다 | 08-17 | 예약 42 · `REAL_ROBOT_VALUES §1-b·§3-a-1` |
 | ★ **watchdog 발동 상수 500ms와 운용 총정지 수용선 600ms를 판정기에서도 분리한다** — `watchdog_report.py`가 구 500ms를 “계약”으로 인쇄해 판재 후 578.5ms 정상 시행을 거짓 초과처럼 보였다. 생산 firmware 상수는 건드리지 않고 출력·회귀의 수용선만 정본 600ms로 맞춘다 | 08-17 | `JETSON_SETUP §7-c-0` · `tools/watchdog_report.py` |
 | 🔴 **EKF가 사용하는 세 값과 3×3 공분산 9칸을 함께 검사한다 — 재개방 발동** — `drive_0817_1325` 복귀 직후 t=306.02에 `/odom wz=-5.552rad/s`(MAX 0.50의 11배), `|wz|>1.0` 27건 중 **26건이 `/odom_guarded`**로 통과했다. §72.2 재개방 조건“미검사 `vy/wz` 이상”이 실제 발동했다. D0-FW와 섞지 않고 별도 묶음으로 보완하며 그전 R4/R6 진입 금지 | 08-17 | 검토 §72.2·§73.7-④ · `drive_0817_1325` |

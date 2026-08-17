@@ -708,5 +708,25 @@
     "id": "0813-d0-fw-final-review-zero-new-p0-75",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§75 판정은 P0 0이며 현재 Tier A diff는 최종 승인·커밋 가능하다"
+  },
+  {
+    "id": "0813-dmesg-window-claimed-but-not-covered-76",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "사건 구간을 덮은 커널 로그로만 USB를 판정한다"
+  },
+  {
+    "id": "0813-coincident-link-stall-misattributed-to-odom-qos-76",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "7회 약 300ms 정지는 `/odom`만의 것이 아니다"
+  },
+  {
+    "id": "0813-large-publish-timeout-unmeasured-76",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "`LARGE_PUBLISH_TIMEOUT_MS=20`은 실측 전 임시값"
+  },
+  {
+    "id": "0813-d0-fw-162-review-zero-new-p0-76",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§76 판정은 P0 0이며 커밋 유지·현 보드 운용만 승인하고 승인 지문 이관은 보류한다"
   }
 ]

@@ -968,14 +968,26 @@ compile 뒤 모터 전력 0V·바퀴 공중·물리 E-stop 담당자의 bench까
 loop 작업시간 최대도 47.165ms였다. 다만 RELIABLE `/odom` 전송 실패가 7묶음 생겨
 header stamp가 210~297ms 건너뛰었고, rosbag 수신 간격도 최대 346.35ms(`/imu/data`
 349.41ms)였다. `publish_failures +70`과 같은 시각에 맞으며, 400ms runtime guard를
-발동할 정지는 아니지만 **R3의 33.33ms 입력 주기 계약은 미통과**다. 시험 전 구간을 덮은
-dmesg에는 USB reset·disconnect·`ttyACM` 오류가 새로 생기지 않았다. `/scan`은 라이다가
+발동할 정지는 아니지만 **R3의 33.33ms 입력 주기 계약은 미통과**다.
+🔴 **커널 층은 미관측이다** (검토 §76.2). 이 시행의 dmesg는 soak 시작 43초 전에 뜬
+스냅샷이라 사건 구간을 **34.0분** 못 미친다. 앞 판의 "전 구간을 덮었다"는 취소한다.
+로그가 덮는 구간에는 오히려 Teensy 포트 재열거가 6회 있다. `/scan`은 라이다가
 연결되지 않아 0건이므로 Teensy와 라이다의 동시 비교에는 쓰지 않는다.
 
 같은 시행에서 E-stop 계수는 `raw_edges=39→67`, `rejected=5→19`,
 `rejected_max=12ms`, `disarm_estop=3→3`이었다. 30ms 미만 HIGH 펌스 14건은
 디바운스가 전부 걸러 추가 false stop은 없었지만, 짧은 전기 잡음 자체는
 남아 있다. 원인·재개방 규약은 `ELECTRICAL_BASELINE §4-f-5` 정본을 따른다.
+
+🔴 `LARGE_PUBLISH_TIMEOUT_MS=20`도 **실측 전 임시값**이다 (검토 §76.4). 근거는
+"기본 1000ms보다 작아야 한다"뿐이고 왜 20인지는 어디에도 없다. 첫 soak에서 이 상한이
+약 300ms 링크 정지를 `/odom` 유실 **약 72건**으로 바꿨고, 상한이 없는 BEST_EFFORT
+`/imu/data`는 같은 정지에서 **약 2건**만 잃었다 — **이 사건에 한해 RELIABLE+20ms가
+BEST_EFFORT보다 나쁜 결과를 냈다.** 큰 표본은 MTU 512B 때문에 BEST_EFFORT를 쓸 수
+없으므로 되돌리는 것이 답은 아니다. 순서는 ① `loop_gap_max_us`로 정지 길이를 확정하고
+② 40/60ms 대조 시행으로 `유실 건수 ↔ phase_max_us[1]` 곡선을 받은 뒤 ③ 정한다.
+그 전에 20을 검증된 값으로 인용하지 않는다. 재개방 = `phase_max_us[1]`이 상한에 근접 ·
+`publish_failures` 증가율 변화 · R3 재시험에서 유실 잔존.
 
 🔴 `RUNTIME_STALL_LIMIT_US=400000`은 **첫 bench 계측용 임시값**이다. 기존
 320ms 산술은 USB CDC write 120ms를 loop당 1회로만 세었지만, 생산 코드에서는
@@ -994,6 +1006,17 @@ odom 1 + IMU 2 + diagnostics 4 + firmware info 1 = **한 판 최대 8회 publish
 - **runtime 계수 해독표가 현장 계약**이며 이 절 없이 숫자만 판정하지 않는다.
 - **§73 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다.**
 - **§74 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다.**
+
+§76(1.6.2) 판정 정본 앵커:
+
+- **사건 구간을 덮은 커널 로그로만 USB를 판정한다** — 08-17 밤 soak의 dmesg도 시작
+  43초 전 스냅샷이었다. `tools/dmesg_coverage_check.py` 가 이제 그 조합을 거부한다.
+- **7회 약 300ms 정지는 `/odom`만의 것이 아니다** — BEST_EFFORT `/imu/data`가 같은 7회를
+  시각차 2.2~18.9ms 안에서 같이 겪었고 유실은 약 2건뿐이다. 원인은 odom QoS가 아니라
+  **상류 링크**이며 예약 41-g가 소유한다.
+- **`LARGE_PUBLISH_TIMEOUT_MS=20`은 실측 전 임시값**이며 첫 soak가 그 값에서 `/odom`
+  약 72건을 잃었다. 40/60ms 대조 전에 최종값으로 인용하지 않는다.
+- **§76 판정은 P0 0이며 커밋 유지·현 보드 운용만 승인하고 승인 지문 이관은 보류한다.**
 
 ## 2. 실차 반영 지점 (★ 개정 — 시뮬 파일 수정 아님, `tunnel_bringup` 신규 작성)
 
