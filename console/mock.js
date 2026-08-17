@@ -21,6 +21,26 @@
 const params = new URLSearchParams(location.search);
 if (!params.has('mock')) return;          // 실서비스 경로는 절대 건드리지 않는다
 
+/* 🔴 ?mock 과 ?display 동시 사용 차단 (2026-08-17 역할 A PR 2차 검토 §3)
+   문제: ?mock=1&display=1 로 열면 7인치 패널에 가짜 지도·경로·상태가 전체화면으로 뜨는데,
+        가짜라는 표시가 우하단 34px 회색 'M' 버튼뿐이라 2m 밖에서는 안 보인다.
+        디스플레이는 자동 실행이 요건이라, URL 을 한 번 잘못 적으면 그날부터 조용히 가짜가 뜬다.
+        (state_marker.py 를 뺀 이유와 같은 실패 유형 — 조용히 틀린 표시는 표시가 없는 것보다 나쁘다)
+
+   조치: 기본 차단. 여기서 return 하면 목업이 안 붙고 진짜 rosbridge 를 찾다 DISCONNECTED 가
+        크게 뜬다 → 조용한 실패가 아니라 눈에 보이는 실패가 된다.
+
+   예외: 실패널 판정(가독성·표식 크기·절전·자동 실행)은 시뮬 없이 화면만 켜서 해야 하고,
+        그때 띄울 수 있는 것은 목업뿐이다. 그래서 ?labdemo=1 을 함께 명시한 경우에만 허용하고,
+        그 경우 화면 상단에 지워지지 않는 경고 배너를 강제한다.
+        → 자동 실행 URL 에 플래그 3개가 동시에 잘못 적힐 확률은 사실상 없고,
+          설령 그렇게 되어도 배너 때문에 '조용히'가 성립하지 않는다. */
+if (params.has('display') && !params.has('labdemo')) {
+  console.error('[MOCK] ?display 와 ?mock 은 같이 쓸 수 없다 — 실물 패널에 가짜가 뜬다. ' +
+                '패널에서 목업을 봐야 하면 ?labdemo=1 을 함께 붙일 것 (경고 배너 강제).');
+  return;
+}
+
 const MAPDEF = window.MOCK_MAP_TWIN;
 if (!MAPDEF) {
   console.error('[MOCK] mock_map_twin.js 가 없다. index.html 에서 mock.js 보다 먼저 불러야 한다.');
@@ -28,6 +48,29 @@ if (!MAPDEF) {
 }
 console.log('[MOCK] 목업 모드 —', MAPDEF.name,
             `${MAPDEF.width}×${MAPDEF.height} @${MAPDEF.resolution}m`, 'origin', MAPDEF.origin);
+
+/* 지워지지 않는 목업 경고 배너 — 패널에서 목업을 볼 때(?labdemo=1) 강제.
+   화면 상단 전체 폭, 접기 불가. 1초마다 존재를 확인해 없어지면 다시 만든다. */
+function mountMockBanner() {
+  const ID = 'mockBanner';
+  const make = () => {
+    if (document.getElementById(ID) || !document.body) return;
+    const b = document.createElement('div');
+    b.id = ID;
+    b.textContent = '목업 — 실제 상황 아님 · MOCK DATA';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+      'background:#b3261e;color:#fff;text-align:center;letter-spacing:.1em;' +
+      'font:800 19px/1.7 "Noto Sans KR",sans-serif;pointer-events:none;' +
+      'box-shadow:0 2px 10px #000a';
+    document.body.appendChild(b);
+  };
+  make();
+  setInterval(make, 1000);
+}
+if (params.has('labdemo')) {
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', mountMockBanner);
+  else mountMockBanner();
+}
 
 /* ───────────────────────────────────────────────────────────────
    1. 가짜 ROSLIB — 구독자 명단을 들고 있다가 엔진이 부르면 콜백을 때린다
