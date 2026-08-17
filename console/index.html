@@ -4,143 +4,204 @@
 <meta charset="utf-8">
 <title>터널 대피로봇 관제</title>
 <style>
-  /* ── 기본 레이아웃: 다크 관제 테마 ─────────────────────────── */
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background:#12161c; color:#dfe6ee; font-family:'Noto Sans KR',sans-serif; padding:16px; }
-  h1 { font-size:1.15rem; letter-spacing:.05em; margin-bottom:12px; }
-  .grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; max-width:1100px; }
-  .panel { background:#1b2129; border:1px solid #2a3340; border-radius:8px; padding:14px; }
-  .panel h2 { font-size:.85rem; color:#8fa3b8; margin-bottom:10px; letter-spacing:.08em; }
-  .muted { color:#5d6b7a; font-size:.8rem; }
+/* ══════════════════════════════════════════════════════════════════
+   산업용 관제 스킨 (2026-08-13)
+   원칙 4가지 — 고칠 때도 이 원칙을 깨지 말 것:
+     ① 색은 '상태'에만 쓴다. 장식용 색 금지 (버튼도 무채색, 위험한 것 하나만 적색)
+     ② 모서리는 각지게. 카드 대신 구획선으로 나눈다
+     ③ 숫자·좌표·토픽명은 고정폭 글꼴 + tabular-nums (자릿수가 흔들리지 않게)
+     ④ 글자 크기는 3단계뿐 — 라벨 11px / 본문 13px / 강조 20px
+   ══════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#0e1113; --surface:#15181b; --line:#272c31; --line-soft:#1e2226;
+  --fg:#d7dbdf; --fg-dim:#8b939b; --fg-faint:#5b636a;
+  --ok:#3fb950; --warn:#d0a215; --danger:#e4523c; --info:#4f9ee8;
+  --mono:ui-monospace,"SFMono-Regular","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:'Noto Sans KR',system-ui,sans-serif;
+     font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+b,strong{font-weight:600}
 
-  /* 연결 상태 뱃지 */
-  #conn { float:right; font-size:.8rem; padding:2px 10px; border-radius:10px; background:#3a2020; color:#ff7b7b; }
-  #conn.ok { background:#16351f; color:#6fe08d; }
+/* ── 상단 바 ────────────────────────────────────────────────── */
+h1{display:flex;align-items:center;gap:10px;height:44px;padding:0 16px;
+   font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+   background:var(--surface);border-bottom:1px solid var(--line)}
+h1::before{content:"";width:3px;height:15px;background:var(--danger)}
+#conn{margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+      padding:3px 9px;border:1px solid var(--line);color:var(--danger);background:var(--bg)}
+#conn::before{content:"● ";color:currentColor}
+#conn.ok{color:var(--ok)}
 
-  /* ── FSM 상태 표시등 ─────────────────────────────────────── */
-  .fsm { display:flex; flex-wrap:wrap; gap:6px; }
-  .fsm span { padding:6px 10px; border-radius:6px; background:#232b35; color:#5d6b7a;
-              font-size:.8rem; border:1px solid transparent; }
-  .fsm span.on  { background:#173a5e; color:#7fc4ff; border-color:#2f77b6; font-weight:700; }
-  .fsm span.on.danger { background:#5e1717; color:#ff9b9b; border-color:#b62f2f; }
-  #siren { margin-top:10px; font-size:.85rem; color:#5d6b7a; }
-  #siren.on { color:#ffb04d; font-weight:700; }
+/* ── 격자 ───────────────────────────────────────────────────── */
+.grid{display:grid;grid-template-columns:1.35fr 1fr;gap:1px;background:var(--line-soft);
+      border-bottom:1px solid var(--line-soft);max-width:1180px}
+.panel{background:var(--bg);padding:14px 16px 16px}
+.panel h2{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.12em;
+          text-transform:uppercase;color:var(--fg-faint);margin-bottom:12px}
+.muted{color:var(--fg-dim);font-size:12px}
+.wide{grid-column:1/-1}
 
-  /* ── 버튼 ────────────────────────────────────────────────── */
-  button { cursor:pointer; border:0; border-radius:6px; padding:10px 14px; font-size:.9rem;
-           font-weight:700; color:#fff; }
-  button:disabled { opacity:.35; cursor:not-allowed; }
-  .btn-reset { background:#2f77b6; }
-  .btn-abort { background:#8a6d1a; }
-  .btn-estop { background:#b62f2f; width:100%; margin-top:10px; padding:14px; font-size:1rem; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  input[type=number] { width:80px; background:#12161c; border:1px solid #2a3340; color:#dfe6ee;
-                       border-radius:6px; padding:8px; }
+/* ── FSM 표시등 ─────────────────────────────────────────────── */
+.fsm{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line-soft);
+     border:1px solid var(--line-soft)}
+.fsm span{display:block;padding:7px 10px;background:var(--surface);color:var(--fg-faint);
+          font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+          border-left:2px solid transparent}
+.fsm span.on{background:#1b2126;color:var(--fg);border-left-color:var(--info);font-weight:600}
+.fsm span.on.danger{border-left-color:var(--danger);color:var(--danger)}
+#siren{margin-top:10px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+       color:var(--fg-faint)}
+#siren.on{color:var(--warn)}
+#lastseen{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
-  /* ── 이벤트 로그 ─────────────────────────────────────────── */
-  #log { height:220px; overflow-y:auto; font-size:.8rem; line-height:1.6; font-family:monospace; }
-  #log .fire   { color:#ff9b6a; }
-  #log .state  { color:#7fc4ff; }
-  #log .ctrl   { color:#e5d07a; }
+/* ── 버튼 : 색은 위험한 것에만 ──────────────────────────────── */
+button{font-family:inherit;font-size:12px;font-weight:600;color:var(--fg);cursor:pointer;
+       background:var(--surface);border:1px solid var(--line);border-radius:0;padding:9px 14px}
+button:hover{background:#1d2226;border-color:#39414a}
+button:active{background:#12161a}
+button:disabled{opacity:.35;cursor:not-allowed}
+.btn-estop{width:100%;margin-top:10px;padding:13px;font-size:14px;letter-spacing:.06em;
+           color:#fff;background:#8c2f22;border-color:#a83a2a}
+.btn-estop:hover{background:#a3392a;border-color:#c2452f}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row label{font-family:var(--mono);font-size:11px;color:var(--fg-faint)}
+input[type=number]{width:84px;background:var(--surface);border:1px solid var(--line);
+  color:var(--fg);border-radius:0;padding:8px;font-family:var(--mono);font-size:12px;
+  font-variant-numeric:tabular-nums}
+input[type=number]:focus{outline:0;border-color:var(--info)}
 
-  /* 자리만 있는 패널 (영상 — C5) */
-  .placeholder { display:flex; align-items:center; justify-content:center;
-                 height:120px; color:#3d4956; border:1px dashed #2a3340; border-radius:6px; }
+/* ── 이벤트 로그 ────────────────────────────────────────────── */
+#log{height:212px;overflow-y:auto;font-family:var(--mono);font-size:11.5px;line-height:1.75;
+     font-variant-numeric:tabular-nums;border-top:1px solid var(--line-soft);padding-top:8px}
+#log div{color:var(--fg-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#log .fire{color:var(--danger)}
+#log .state{color:var(--info)}
+#log .ctrl{color:var(--warn)}
 
-  /* ── 지도 뷰 (C3) ─────────────────────────────────────────── */
-  .wide { grid-column: 1 / -1; }
-  #mapCanvas { width:100%; height:380px; background:#12161c; border-radius:6px; cursor:crosshair; }
+/* ── 지도 ───────────────────────────────────────────────────── */
+#mapCanvas{display:block;width:100%;height:400px;background:#0b0e10;
+           border:1px solid var(--line-soft);cursor:crosshair}
+#planLabel{font-family:var(--mono);font-size:11px;letter-spacing:.06em}
 
-  /* ── 시스템 상태 (C4) ─────────────────────────────────────── */
-  .sys { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; font-size:.85rem; }
-  .sys i { font-style:normal; color:#e05a5a; }        /* 기본 = 빨강(미수신) */
-  .sys i.ok   { color:#6fe08d; }
-  .sys i.warn { color:#ffb04d; }
-  .sys b { font-weight:400; color:#8fa3b8; margin-left:4px; }
+/* ── 시스템 상태 ────────────────────────────────────────────── */
+.sys{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line-soft);
+     border:1px solid var(--line-soft)}
+.sys>div{background:var(--surface);padding:9px 12px;display:flex;align-items:baseline;gap:7px;
+         font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--fg-dim)}
+.sys i{font-style:normal;color:var(--danger);font-size:9px}   /* 기본 = 적색(미수신) */
+.sys i.ok{color:var(--ok)} .sys i.warn{color:var(--warn)}
+.sys b{margin-left:auto;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
+.placeholder{display:flex;align-items:center;justify-content:center;height:96px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--fg-faint);
+  background:var(--surface);border:1px solid var(--line-soft)}
+
+/* ══ T3. 디스플레이 모드 (?display=1) ══════════════════════════
+   로봇 몸통 7인치 1024×600 패널용. 보는 사람 = 대피자·현장 인원.
+   조작 UI 는 오조작 위험이라 숨긴다. 연결 뱃지는 남긴다. */
+#bigState{display:none}
+body.display{overflow:hidden;height:100vh}
+body.display h1{height:38px;font-size:11px}
+body.display .grid{display:block;max-width:none;gap:0;border:0;background:transparent}
+body.display .panel{background:transparent;padding:0}
+body.display .panel h2{display:none}
+body.display #panelCtrl,body.display #panelFire,body.display #panelLog,
+body.display #panelSys,body.display #panelVideo,body.display #fsm,
+body.display #siren,body.display .muted{display:none}
+body.display #bigState{display:flex;flex-direction:column;align-items:center;
+  justify-content:center;height:112px;text-align:center;
+  font-size:40px;font-weight:800;line-height:1.1;letter-spacing:-.01em;
+  border-bottom:1px solid var(--line)}
+body.display #bigSub{display:block;margin-top:8px;font-size:15px;font-weight:400;
+  letter-spacing:.02em;color:var(--fg-dim)}
+body.display #mapCanvas{height:calc(100vh - 152px);max-height:calc(100vw / 2.49);
+  display:block;margin:0 auto;border:0;border-top:1px solid var(--line-soft);cursor:default}
 </style>
 </head>
 <body>
 
-<h1>🚨 지하터널 대피로봇 — 관제 콘솔 <span id="conn">연결 안 됨</span></h1>
+<h1>지하터널 대피로봇 · 관제 콘솔 <span id="conn">DISCONNECTED</span></h1>
+
+<!-- ★ T3: 디스플레이 모드 전용 상태 배너 (관제 모드에선 CSS 로 숨김) -->
+<div id="bigState">—<span id="bigSub"></span></div>
 
 <div class="grid">
 
   <!-- ═══ 미션 상태 패널 (C2) ═══ -->
   <div class="panel">
-    <h2>미션 상태 (FSM)</h2>
+    <h2>미션 상태 · FSM</h2>
     <div class="fsm" id="fsm">
       <!-- 순서 = mission_node.py State 정의 순서와 동일 -->
-      <span data-s="PATROL">순찰 PATROL</span>
-      <span data-s="APPROACH">접근 APPROACH</span>
-      <span data-s="GATHER">집결 GATHER</span>
-      <span data-s="GUIDE">유도 GUIDE</span>
-      <span data-s="SEARCH_BACK">재탐색 SEARCH_BACK</span>
-      <span data-s="ESCAPED">탈출 ESCAPED</span>
-      <span data-s="FAULT" class="danger-slot">고장 FAULT</span>
+      <span data-s="PATROL">PATROL 순찰</span>
+      <span data-s="APPROACH">APPROACH 접근</span>
+      <span data-s="GATHER">GATHER 집결</span>
+      <span data-s="GUIDE">GUIDE 유도</span>
+      <span data-s="SEARCH_BACK">SEARCH_BACK 재탐색</span>
+      <span data-s="ESCAPED">ESCAPED 탈출</span>
+      <span data-s="FAULT">FAULT 고장</span>
     </div>
-    <div id="siren">📢 싸이렌: OFF</div>
-    <div class="muted" style="margin-top:8px">마지막 수신: <span id="lastseen">—</span></div>
+    <div id="siren">SIREN &nbsp;OFF</div>
+    <div class="muted" style="margin-top:8px;font-size:11px">최종 수신 <span id="lastseen">—</span></div>
   </div>
 
   <!-- ═══ 원격 제어 (C2) ═══ -->
-  <div class="panel">
-    <h2>로봇 원격 제어</h2>
+  <div class="panel" id="panelCtrl">
+    <h2>원격 제어</h2>
     <div class="row">
-      <button class="btn-reset" id="btnReset">임무 재시작 (reset)</button>
-      <button class="btn-abort" id="btnAbort">임무 중단 (abort)</button>
+      <button id="btnReset">임무 재시작</button>
+      <button id="btnAbort">임무 중단</button>
     </div>
-    <button class="btn-estop" id="btnEstop">■ 비상 정지 (소프트)</button>
-    <div class="muted" style="margin-top:6px">
-      소프트 정지 = cmd_vel 0 + abort. 하드 정지는 구동부 Teensy 0.5s 워치독 담당.
-    </div>
+    <button class="btn-estop" id="btnEstop">비상 정지 (소프트)</button>
   </div>
 
   <!-- ═══ 화재 경보 입력 (C2 — 데모 트리거) ═══ -->
-  <div class="panel">
-    <h2>화재 경보 입력 (/alarm)</h2>
+  <div class="panel" id="panelFire">
+    <h2>화재 경보 · /alarm</h2>
     <div class="row">
-      X <input type="number" id="fx" value="14.0" step="0.5">
-      Y <input type="number" id="fy" value="0.0" step="0.5">
-      <button class="btn-abort" style="background:#b6572f" id="btnFire">🔥 화재 발생</button>
+      <label>X</label><input type="number" id="fx" value="30.0" step="0.5">
+      <label>Y</label><input type="number" id="fy" value="0.0" step="0.5">
+      <button id="btnFire">경보 발행</button>
     </div>
-    <div class="muted" style="margin-top:6px">T자 데모 (14,0) / 쌍굴 (30,0). 지도 클릭 발행은 C3 에서.</div>
   </div>
 
   <!-- ═══ 이벤트 로그 (C2) ═══ -->
-  <div class="panel">
-    <h2>탐지·이벤트 로그</h2>
+  <div class="panel" id="panelLog">
+    <h2>이벤트 로그</h2>
     <div id="log"></div>
   </div>
 
   <!-- ═══ 지도·위치 뷰 (C3) ═══ -->
   <div class="panel wide">
-    <h2>지도·위치 뷰</h2>
+    <h2>지도 · 위치</h2>
     <canvas id="mapCanvas"></canvas>
-    <div class="muted" style="margin-top:6px">
-      🔺 로봇 · 🔥 화재 · <span style="color:#6fe08d">─</span> 계획 경로(/plan) ·
-      <b>지도 클릭 → 화재 좌표 입력칸에 반영</b> (발행은 🔥 버튼으로)
+    <div class="muted" style="margin-top:8px;display:flex;gap:14px;align-items:center">
+      <span id="planLabel">경로 없음</span>
+      <span style="color:var(--fg-faint);font-size:11px">지도 클릭 → 화재 좌표 입력</span>
     </div>
   </div>
 
   <!-- ═══ 시스템 상태 (C4) ═══ -->
-  <div class="panel wide">
+  <div class="panel wide" id="panelSys">
     <h2>시스템 상태</h2>
     <div class="sys" id="sys">
-      <div><i id="h-scan">●</i> LiDAR <span class="muted">/scan</span> <b id="a-scan">—</b></div>
-      <div><i id="h-odom">●</i> 오도메트리 <span class="muted">/odom</span> <b id="a-odom">—</b></div>
-      <div><i id="h-imu">●</i> IMU <span class="muted">/imu/data</span> <b id="a-imu">—</b></div>
-      <div><i id="h-nav">●</i> Nav2 <b id="a-nav">목표 없음</b></div>
-      <div><i id="h-rtt">●</i> 통신 지연 <b id="a-rtt">—</b></div>
-      <div><i style="color:#3d4956">●</i> 배터리 <b class="muted">구동부 토픽 합의 대기</b></div>
+      <div><i id="h-scan">●</i> /scan <b id="a-scan">—</b></div>
+      <div><i id="h-odom">●</i> /odom <b id="a-odom">—</b></div>
+      <div><i id="h-imu">●</i> /imu/data <b id="a-imu">—</b></div>
+      <div><i id="h-nav">●</i> NAV2 <b id="a-nav">목표 없음</b></div>
+      <div><i id="h-rtt">●</i> RTT <b id="a-rtt">—</b></div>
+      <!-- 배터리 칸 삭제 (2026-08-17): /battery_state 는 구동부 계약에 없고 발행 코드도 없다.
+           영영 안 채워지는 칸은 화면을 고장난 것처럼 보이게 한다. 계약이 생기면 그때 추가. -->
     </div>
   </div>
 
   <!-- ═══ 자리 예약 패널 ═══ -->
-  <div class="panel wide"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
+  <div class="panel wide" id="panelVideo"><h2>영상</h2><div class="placeholder">NO SIGNAL · RGB / THERMAL</div></div>
 
 </div>
 
 <script src="roslib.min.js"></script>
+<script src="mock_map_twin.js"></script>   <!-- 실제 쌍굴 지도 픽스처 (목업 전용) -->
+<script src="mock.js"></script>   <!-- ?mock=1 일 때만 동작. 없으면 아무 일도 안 한다 -->
 <script>
 /* ════════════════════════════════════════════════════════════════
    관제 콘솔 C1+C2 초안 (2026-07-18)
@@ -149,13 +210,65 @@
    - 토픽 계약: 0718_관제시스템.md §4
    ════════════════════════════════════════════════════════════════ */
 
+// ── 0. 표시 모드 (?display=1) ────────────────────────────────────
+//   ?display=1 → 디스플레이 모드 (지도 크게, 조작 UI 숨김)
+//   ?          → 기존 관제 모드 그대로. 파일을 나누지 않고 클래스로만 분기한다.
+if (new URLSearchParams(location.search).has('display')) document.body.classList.add('display');
+
+/* ★ T3: 대피자에게 보이는 문구. FSM 이름(PATROL 등)은 현장에서 의미가 없다.
+
+   🔴 문구 승인 상태 (2026-08-17 역할 A 회신 기준)
+     ✅ 확정  : PATROL · APPROACH · GATHER · GUIDE · ESCAPED
+     🔴 임시  : SEARCH_BACK · FAULT  — **잠정 승인 (조건부)**
+       · 전제조건   : 이 "🔴 임시" 표시를 지우지 말 것. 표시가 사라지면 잠정 승인도 무효다.
+       · 재개방 조건: MASTER_PLAN §4 최종 시나리오 확정 회의(안건 ⑦·⑧) 결과가 나오는
+                      즉시 그날 이 표를 갱신한다.
+       → ⑦(놓쳤을 때 재탐색/관제문의/단독탈출) ⑧(화재·사람 동시 위험 시 우선순위)이
+         미확정이므로, 화면 문구를 확정하는 것은 그 정책을 먼저 정하는 것과 같다.
+       → 다만 '비워두기'는 택하지 않았다. 재난 화면에서 빈 칸·무의미한 상태명은
+         그 자체가 위험이다. 두 칸 모두 '어느 정책으로 결정되든 안전한 쪽' 문구를 임시로 넣었다.
+
+   🔴 이 표를 고칠 때의 원칙 — 화면은 '로봇이 무엇을 하는지'가 아니라
+      '사람이 무엇을 해야 하는지'를 말한다.
+      (예: SEARCH_BACK 초안 "로봇이 되돌아가고 있습니다" 는, 직전 GUIDE 에서
+       "로봇을 따라오세요" 라고 시킨 사람을 화재 쪽으로 되돌려보내는 경로를 연다.) */
+const STATE_TEXT = {
+  PATROL:      { big: '평시 순찰 중',       sub: '이상 없음',                     color: '#4f9ee8' },  // 확정
+  APPROACH:    { big: '화재 감지',           sub: '모이는 곳으로 이동 중입니다',   color: '#d0a215' },  // 확정("집결지"=내부용어라 수정)
+  GATHER:      { big: '집결지 대기',         sub: '로봇 주변으로 모여 주세요',     color: '#d0a215' },  // 확정
+  GUIDE:       { big: '로봇을 따라오세요',   sub: '출구로 유도 중입니다',          color: '#3fb950' },  // 확정
+  ESCAPED:     { big: '대피 완료',           sub: '안전구역에 도착했습니다',       color: '#3fb950' },  // 확정
+  // 🔴 임시 — 로봇이 화재 쪽으로 역행하는 상태. 사람은 따라오면 안 된다.
+  SEARCH_BACK: { big: '여기서 기다려 주세요', sub: '로봇이 뒤쪽을 확인하고 있습니다', color: '#e4523c' },
+  // 🔴 임시 — 관제실 지시가 대피자에게 닿는 수단이 미확정이라, 지시를 기다리게 하지 않는다.
+  FAULT:       { big: '로봇 정지',           sub: '이 로봇을 기다리지 말고 대피로를 따라 이동하세요', color: '#e4523c' },
+};
+function paintBigState(s) {
+  const t = STATE_TEXT[s];
+  const el = document.getElementById('bigState');
+  if (!el) return;
+  el.style.color = t ? t.color : '#5d6b7a';
+  el.innerHTML = (t ? t.big : '데이터 대기중') +
+                 `<span id="bigSub">${t ? t.sub : '통신을 확인하는 중입니다'}</span>`;
+}
+paintBigState(null);
+
 // ── 1. rosbridge 연결 (끊기면 3초마다 자동 재접속) ──────────────
 const connEl = document.getElementById('conn');
 let ros;
+/* ★ T4: 재접속 타이머 중복 방지.
+   roslibjs 는 상황에 따라 error → close 를 잇달아 올릴 수 있는데, 그때마다
+   setTimeout(connect) 이 하나씩 더 걸리면 재접속이 2배, 4배로 늘어난다.
+   장시간 무인 운전에서만 드러나는 종류의 누수라 미리 막는다. */
+let reconnectTimer = null;
 function connect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   ros = new ROSLIB.Ros({ url: 'ws://' + location.hostname + ':9090' });
-  ros.on('connection', () => { connEl.textContent = '연결됨';  connEl.classList.add('ok');  setupTopics(); });
-  ros.on('close',      () => { connEl.textContent = '연결 안 됨'; connEl.classList.remove('ok'); setTimeout(connect, 3000); });
+  ros.on('connection', () => { connEl.textContent = 'CONNECTED';  connEl.classList.add('ok');  setupTopics(); });
+  ros.on('close',      () => {
+    connEl.textContent = 'DISCONNECTED'; connEl.classList.remove('ok');
+    if (!reconnectTimer) reconnectTimer = setTimeout(connect, 3000);
+  });
   ros.on('error',      () => {});   // close 가 뒤따르므로 별도 처리 불필요
 }
 connect();
@@ -182,7 +295,11 @@ function setupTopics() {
       document.getElementById('lastseen').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
       if (msg.data !== lastState) {          // 전이 시에만 로그 (상시 발행 스팸 방지)
         if (lastState !== null) log('state', `상태 전이: ${lastState} → ${msg.data}`);
+        // ★ T1: 임무 초기화(PATROL 복귀)는 "상황 종료" → 이전 화재 마커·경로를 지운다.
+        //   전이 시점(edge)에만 지운다. 매 tick 지우면 화재 직후 마커가 즉시 사라진다.
+        if (msg.data === 'PATROL' && lastState !== null) { fireXY = null; planPts = []; }
         lastState = msg.data;
+        paintBigState(msg.data);          // ★ T3: 대형 배너 갱신
         document.querySelectorAll('#fsm span').forEach(el => {
           el.classList.toggle('on', el.dataset.s === msg.data);
           el.classList.toggle('danger', el.dataset.s === 'FAULT' && msg.data === 'FAULT');
@@ -194,7 +311,7 @@ function setupTopics() {
   new ROSLIB.Topic({ ros, name: '/siren', messageType: 'std_msgs/msg/Bool' })
     .subscribe(msg => {
       const el = document.getElementById('siren');
-      el.textContent = '📢 싸이렌: ' + (msg.data ? 'ON' : 'OFF');
+      el.textContent = 'SIREN \u00a0' + (msg.data ? 'ON' : 'OFF');
       el.classList.toggle('on', msg.data);
     });
 
@@ -284,6 +401,27 @@ let mapInfo = null, mapImage = null;      // 지도 메타 + 렌더 캐시
 let tfMapOdom = null, tfOdomBase = null;  // 2D 변환 {x,y,yaw}
 let robot = null, planPts = [], fireXY = null;
 
+/* ★ T1: 경로 신선도 — Nav2 는 목표가 끝나면 /plan 발행을 "그냥 멈춘다".
+   지우는 주체가 없으면 마지막 경로가 화면에 영원히 남는다(디스플레이는 계속 켜두는 물건).
+   §5.5 의 헬스 신선도와 같은 사상: 마지막 수신 시각만 들고 있다가 오래되면 버린다.
+   🔴 타임아웃 값 근거 (2026-08-17 역할 A 확인):
+      우리 Nav2 설정에는 planner_frequency 가 없다 → 주기적 재계획이 아니라
+      BT(behavior tree)가 요구할 때만 계획한다. 즉 /plan 발행 간격은 고정이 아니라 가변이다.
+      3500ms 는 '재계획 간격이 가변이라 넉넉히 잡은 여유값'이다. (1Hz 가정이 아니다)
+      값을 올리는 조건은 하나 — 정상 주행 중 경로가 한 번이라도 깜빡이면 그때 올린다. */
+let lastPlanAt = 0;
+const PLAN_TIMEOUT_MS = 3500;
+
+/* ★ T2: /plan 은 상태마다 의미가 다르다. 상태를 같이 보지 않으면
+   순찰 경로나 역행 재탐색 경로가 "탈출 경로"로 보인다 — 재난 화면에서 치명적 오표시. */
+const PLAN_STYLE = {
+  GUIDE:       { label: '탈출 경로',    color: '#2ea44f', width: 6, chevron: true },
+  APPROACH:    { label: '집결지 이동',  color: '#d0a215', width: 3   },
+  SEARCH_BACK: { label: '역행 재탐색',  color: '#e4523c', width: 3   },
+  PATROL:      { label: '순찰 경로',    color: '#6b737b', width: 1.5 },
+  // GATHER · ESCAPED · FAULT = 표시할 경로 없음 (그리지 않는다)
+};
+
 const quatToYaw = q => Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
 // 2D 변환 합성 a∘b (a 좌표계에서 본 b)
 function compose(a, b) {
@@ -340,58 +478,260 @@ function setupMap() {
     });
 
   new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/msg/Path', throttle_rate: 500 })
-    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); });
+    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); lastPlanAt = Date.now(); });
 
   new ROSLIB.Topic({ ros, name: '/alarm', messageType: 'geometry_msgs/msg/PoseStamped' })
     .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
 }
 
+/* ★ T3: 지도 → 캔버스 변환을 한 곳(view)에 모은다.
+   기존에는 캔버스 높이가 380 으로 박혀 있어 넓은 화면에서 오른쪽이 크게 남았다.
+   이제 실제 캔버스 크기에 맞춰 배율을 잡고 남는 쪽을 가운데로 민다.
+   그리기(m2p)와 클릭 역변환이 같은 view 를 쓰므로 둘이 어긋날 수 없다. */
+let view = { scale: 1, ox: 0, oy: 0 };
+
 // 지도 좌표(m) → 캔버스 픽셀
-function m2p(x, y, scale) {
+function m2p(x, y) {
   const cx = (x - mapInfo.origin.position.x) / mapInfo.resolution;
   const cy = (y - mapInfo.origin.position.y) / mapInfo.resolution;
-  return [cx * scale, (mapInfo.height - cy) * scale];
+  return [view.ox + cx * view.scale, view.oy + (mapInfo.height - cy) * view.scale];
+}
+// 캔버스 픽셀 → 지도 좌표(m)
+function p2m(px, py) {
+  return [
+    mapInfo.origin.position.x + ((px - view.ox) / view.scale) * mapInfo.resolution,
+    mapInfo.origin.position.y + (mapInfo.height - (py - view.oy) / view.scale) * mapInfo.resolution,
+  ];
+}
+
+/* ★ 표식 크기 — '지도상 몇 m 로 보이게 할지' 로 지정한다.
+   🔴 예전엔 픽셀 고정이라 창을 줄이면 지도만 작아져 로봇이 갑자기 거대해 보였다.
+      이제 축척(view.scale)을 따라가므로 창 크기·모드가 바뀌어도 비율이 그대로다.
+   참고: 터널 폭 5.7m, 실제 로봇은 약 0.5m 급. 아래 값은 '보이라고 키운 기호' 크기다.
+      1.6 = 통로의 약 28%. 더 키우려면 2.0~2.5, 실물에 가깝게 하려면 0.6.
+   최소 픽셀값은 지도를 아주 축소했을 때 점처럼 사라지지 않게 하는 하한선. */
+const MARKER_M  = { robot: 1.6, fire: 1.6 };   // 지도상 크기(m) — 터널 폭 5.7m 대비 약 28%
+const MARKER_MIN = { robot: 18,  fire: 16  };  // 최소 표시 크기(px)
+
+// 아이콘 좌표계 기준 폭(로봇 18units) / 높이(불꽃 24units) → 그릴 배율
+function markerScale(kind, units) {
+  const px = MARKER_M[kind] / mapInfo.resolution * view.scale;
+  return Math.max(px, MARKER_MIN[kind]) / units;
+}
+
+/* ★ 현장 표식 — 캔버스에 직접 그린다 (이미지 파일·이모지 무의존).
+   좌표계는 "원점 중심, +x = 진행 방향, 24px 기준" 으로 통일했고,
+   호출부에서 translate/rotate/scale 만 해준다. */
+
+// 화재: 불꽃 3겹 (외곽 적색 → 주황 → 심지). 아래 끝이 실제 좌표에 오도록 y 를 올려 그린다.
+function drawFire(c) {
+  c.beginPath();                                   // 외곽
+  c.moveTo(0, 12);
+  c.bezierCurveTo(-11, 7, -9.5, -3, -2.5, -12);
+  c.bezierCurveTo(-1.5, -6, 2.5, -7, 3, -3.5);
+  c.bezierCurveTo(5, -9, 8.5, -9.5, 8, -6);
+  c.bezierCurveTo(12, -1, 11, 7, 0, 12);
+  c.closePath(); c.fillStyle = '#e0402b'; c.fill();
+
+  c.beginPath();                                   // 중간
+  c.moveTo(0, 11.5);
+  c.bezierCurveTo(-6.5, 7.5, -5.5, 0, -1, -6.5);
+  c.bezierCurveTo(0, -2, 3.2, -3, 3.2, 0.5);
+  c.bezierCurveTo(6.5, 3.5, 5.5, 8.5, 0, 11.5);
+  c.closePath(); c.fillStyle = '#f5981f'; c.fill();
+
+  c.beginPath();                                   // 심지
+  c.moveTo(0, 11);
+  c.bezierCurveTo(-3.4, 8.5, -3, 3.5, -0.4, -0.5);
+  c.bezierCurveTo(0.4, 2, 2.6, 3, 2.6, 5.5);
+  c.bezierCurveTo(2.6, 8.5, 1.6, 10.5, 0, 11);
+  c.closePath(); c.fillStyle = '#ffd24a'; c.fill();
+}
+
+// 로봇: 위에서 본 차체(구동륜 2 + 전방 표시 + 상부 LiDAR)
+function drawRobot(c) {
+  c.fillStyle = '#1b2126';                         // 좌우 구동륜
+  c.fillRect(-4.5, -8.5, 9, 3);
+  c.fillRect(-4.5,  5.5, 9, 3);
+
+  c.beginPath();                                   // 차체
+  const w = 9, h = 6.5, r = 2;
+  c.moveTo(-w + r, -h);
+  c.lineTo(w - r, -h); c.quadraticCurveTo(w, -h, w, -h + r);
+  c.lineTo(w, h - r);  c.quadraticCurveTo(w, h, w - r, h);
+  c.lineTo(-w + r, h); c.quadraticCurveTo(-w, h, -w, h - r);
+  c.lineTo(-w, -h + r); c.quadraticCurveTo(-w, -h, -w + r, -h);
+  c.closePath();
+  c.fillStyle = '#c8d0d7'; c.fill();
+  c.lineWidth = 1; c.strokeStyle = '#12161a'; c.stroke();
+
+  c.fillStyle = '#2f6fb0';                         // 전방 표시등
+  c.fillRect(w - 3, -4, 3, 8);
+
+  c.beginPath();                                   // 상부 LiDAR
+  c.arc(-1.5, 0, 3, 0, Math.PI * 2);
+  c.fillStyle = '#3a444d'; c.fill();
+  c.lineWidth = 1; c.strokeStyle = '#7d8892'; c.stroke();
+}
+
+// 유도 경로 위의 진행 방향 화살표 (대피 유도 표지판과 같은 사상)
+function drawPathChevrons(c, pts, color, K) {
+  const step = 46 * K;
+  let acc = step;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    const seg = Math.hypot(x1 - x0, y1 - y0);
+    if (seg < 0.001) continue;
+    const ang = Math.atan2(y1 - y0, x1 - x0);
+    for (let d = acc; d < seg; d += step) {
+      const t = d / seg;
+      c.save();
+      c.translate(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+      c.rotate(ang); c.scale(K, K);
+      c.beginPath(); c.moveTo(-2.5, -3.4); c.lineTo(2.6, 0); c.lineTo(-2.5, 3.4);
+      c.lineWidth = 1.8; c.strokeStyle = color; c.lineJoin = 'round'; c.lineCap = 'round';
+      c.stroke(); c.restore();
+    }
+    acc = step - ((seg - acc) % step);
+  }
+}
+
+// 5m 격자 — 옅게 깔아 거리 감각을 준다 (지도 영역 안쪽만)
+function drawGrid(K) {
+  const gm = 5, c = mctx;
+  const x0 = mapInfo.origin.position.x, y0 = mapInfo.origin.position.y;
+  const x1 = x0 + mapInfo.width  * mapInfo.resolution;
+  const y1 = y0 + mapInfo.height * mapInfo.resolution;
+  c.save(); c.beginPath();
+  c.rect(view.ox, view.oy, mapInfo.width * view.scale, mapInfo.height * view.scale); c.clip();
+  c.strokeStyle = 'rgba(255,255,255,.045)'; c.lineWidth = 1;
+  c.beginPath();
+  for (let x = Math.ceil(x0 / gm) * gm; x < x1; x += gm) {
+    const [px] = m2p(x, y0); c.moveTo(px, view.oy); c.lineTo(px, view.oy + mapInfo.height * view.scale);
+  }
+  for (let y = Math.ceil(y0 / gm) * gm; y < y1; y += gm) {
+    const [, py] = m2p(x0, y); c.moveTo(view.ox, py); c.lineTo(view.ox + mapInfo.width * view.scale, py);
+  }
+  c.stroke(); c.restore();
+}
+
+// 축척 막대 — 화면 크기가 바뀌어도 "몇 m 인지" 읽히게
+function drawScaleBar(K) {
+  const c = mctx, target = 110 * K;                       // 목표 길이(px)
+  const raw = target / view.scale * mapInfo.resolution;   // 그에 해당하는 m
+  const nice = [1, 2, 5, 10, 20, 50].reduce((a, b) => Math.abs(b - raw) < Math.abs(a - raw) ? b : a);
+  const len = nice / mapInfo.resolution * view.scale;
+  const x = mapCanvas.width - len - 16 * K, y = mapCanvas.height - 16 * K;
+  c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 1 * K;
+  c.beginPath();
+  c.moveTo(x, y - 5 * K); c.lineTo(x, y); c.lineTo(x + len, y); c.lineTo(x + len, y - 5 * K);
+  c.stroke();
+  c.font = `${Math.round(10 * K)}px ui-monospace, Menlo, Consolas, monospace`;
+  c.fillStyle = 'rgba(255,255,255,.6)'; c.textAlign = 'center'; c.textBaseline = 'bottom';
+  c.fillText(`${nice} m`, x + len / 2, y - 7 * K);
 }
 
 function drawMap() {
   if (!mapImage || !mapInfo) return;
-  const cw = mapCanvas.clientWidth, ch = 380;
-  mapCanvas.width = cw; mapCanvas.height = ch;
+  const cw = mapCanvas.clientWidth, ch = mapCanvas.clientHeight || 380;
+  if (mapCanvas.width !== cw || mapCanvas.height !== ch) { mapCanvas.width = cw; mapCanvas.height = ch; }
   const scale = Math.min(cw / mapInfo.width, ch / mapInfo.height);
+  view = { scale, ox: (cw - mapInfo.width * scale) / 2, oy: (ch - mapInfo.height * scale) / 2 };
+  const K = document.body.classList.contains('display') ? 1.8 : 1;   // 디스플레이는 마커를 키운다
+
   mctx.fillStyle = '#12161c'; mctx.fillRect(0, 0, cw, ch);
   mctx.imageSmoothingEnabled = false;
-  mctx.drawImage(mapImage, 0, 0, mapInfo.width * scale, mapInfo.height * scale);
+  mctx.drawImage(mapImage, view.ox, view.oy, mapInfo.width * scale, mapInfo.height * scale);
 
-  // 계획 경로
-  if (planPts.length > 1) {
-    mctx.strokeStyle = '#6fe08d'; mctx.lineWidth = 2; mctx.beginPath();
-    planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y, scale); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
-    mctx.stroke();
+  drawGrid(K);      // 5m 격자 (축척 감각)
+
+  // ★ T1: 발행이 끊긴 지 오래면 경로를 버린다 (Nav2 는 멈출 뿐 "지워라"를 보내지 않는다)
+  if (planPts.length && Date.now() - lastPlanAt > PLAN_TIMEOUT_MS) {
+    planPts = [];
+    log('state', `계획 경로 소거 (/plan ${(PLAN_TIMEOUT_MS / 1000).toFixed(1)}초 이상 미수신)`);
+  }
+
+  // ★ 지나온 경로 잘라내기.
+  //   Nav2 는 /plan 을 1Hz 로만 재발행 → 그 사이 로봇이 전진한 만큼 꼬리가 남는다.
+  //   매 프레임 로봇에 가장 가까운 경로점을 찾아 그 앞을 버리고, 선을 로봇에서 시작시킨다.
+  //   🔴 경로가 로봇 근처를 두 번 지나갈 때 잘못 잘리지 않도록 1.5m 안쪽일 때만 적용한다.
+  function prunePlan() {
+    if (!robot || planPts.length < 2) return planPts;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < planPts.length; i++) {
+      const dx = planPts[i].x - robot.x, dy = planPts[i].y - robot.y;
+      const d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; bi = i; }
+    }
+    if (Math.sqrt(bd) > 1.5) return planPts;          // 경로에서 멀면 손대지 않는다
+    return [{ x: robot.x, y: robot.y }, ...planPts.slice(bi + 1)];
+  }
+
+  // ★ T2: 계획 경로 — 상태에 따라 색·굵기·라벨이 달라진다
+  const style = PLAN_STYLE[lastState];
+  const hasPlan = planPts.length > 1 && !!style;
+  if (hasPlan) {
+    const pp = prunePlan().map(p => m2p(p.x, p.y));
+    mctx.lineJoin = 'round'; mctx.lineCap = 'round';
+    mctx.strokeStyle = 'rgba(0,0,0,.55)';                 // 지도 위에서 뭉개지지 않게 밑선
+    mctx.lineWidth = (style.width + 2.5) * K;
+    mctx.beginPath(); pp.forEach(([x, y], i) => i ? mctx.lineTo(x, y) : mctx.moveTo(x, y)); mctx.stroke();
+    mctx.strokeStyle = style.color; mctx.lineWidth = style.width * K;
+    mctx.beginPath(); pp.forEach(([x, y], i) => i ? mctx.lineTo(x, y) : mctx.moveTo(x, y)); mctx.stroke();
+    if (style.chevron) drawPathChevrons(mctx, pp, '#08120c', K);   // 진행 방향 표시
   }
   // 화재 마커
   if (fireXY) {
-    const [px, py] = m2p(fireXY.x, fireXY.y, scale);
-    mctx.font = '20px sans-serif'; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
-    mctx.fillText('🔥', px, py);
+    const [px, py] = m2p(fireXY.x, fireXY.y);
+    mctx.save(); mctx.translate(px, py);
+    mctx.beginPath();                                    // 위험 반경(가늘게)
+    const sf = markerScale('fire', 24);
+    mctx.arc(0, 0, 21 * sf, 0, Math.PI * 2);
+    mctx.strokeStyle = 'rgba(224,64,43,.45)'; mctx.lineWidth = 1 * K;
+    mctx.setLineDash([4 * K, 4 * K]); mctx.stroke(); mctx.setLineDash([]);
+    mctx.scale(sf, sf); mctx.translate(0, -6);
+    drawFire(mctx);
+    mctx.restore();
   }
   // 로봇 (진행방향 삼각형 — 캔버스 y 반전이라 화면각 = -yaw)
   if (robot) {
-    const [px, py] = m2p(robot.x, robot.y, scale);
-    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw);
-    mctx.fillStyle = '#7fc4ff'; mctx.beginPath();
-    mctx.moveTo(10, 0); mctx.lineTo(-6, 6); mctx.lineTo(-6, -6); mctx.closePath(); mctx.fill();
+    const [px, py] = m2p(robot.x, robot.y);
+    const sr = markerScale('robot', 18);
+    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw); mctx.scale(sr, sr);
+    drawRobot(mctx);
     mctx.restore();
+    if (MARKER_M.robot > 1.0) {                // 기호가 실물보다 크면 '진짜 위치'를 점으로 같이 찍는다
+      mctx.beginPath(); mctx.arc(px, py, 1.6 * K, 0, Math.PI * 2);
+      mctx.fillStyle = '#12161a'; mctx.fill();
+      mctx.lineWidth = 1; mctx.strokeStyle = 'rgba(255,255,255,.75)'; mctx.stroke();
+    }
   }
+
+  // ★ T2: 경로 라벨 — 지도 위에 직접(멀리서 읽혀야 한다) + 지도 아래 텍스트에도 반영
+  const label = hasPlan ? style.label : '경로 없음';
+  const color = hasPlan ? style.color : '#5d6b7a';
+  const fs = Math.round(16 * K);
+  mctx.font = `600 ${fs}px ui-monospace, Menlo, Consolas, monospace`;
+  mctx.textAlign = 'left'; mctx.textBaseline = 'top';
+  const tw = mctx.measureText(label).width;
+  mctx.fillStyle = 'rgba(0,0,0,.55)'; mctx.fillRect(8, 8, tw + fs + 4, fs + 12);
+  mctx.fillStyle = color; mctx.fillText(label, 8 + fs / 2 + 2, 14);
+
+  drawScaleBar(K);
+
+  const lblEl = document.getElementById('planLabel');
+  if (lblEl) { lblEl.textContent = label; lblEl.style.color = color; }
 }
 setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
 
 // 지도 클릭 → 화재 좌표 입력칸에 반영 (발행은 버튼으로 — 오클릭 방지)
+// 🔴 디스플레이 모드에서는 아예 받지 않는다 (2026-08-17 역할 A 요청).
+//    대피자가 만질 수 있는 화면에서 좌표 입력 경로가 살아 있으면 안 된다.
 mapCanvas.addEventListener('click', ev => {
+  if (document.body.classList.contains('display')) return;
   if (!mapInfo) return;
   const r = mapCanvas.getBoundingClientRect();
-  const scale = Math.min(mapCanvas.width / mapInfo.width, mapCanvas.height / mapInfo.height);
-  const x = mapInfo.origin.position.x + ((ev.clientX - r.left) / scale) * mapInfo.resolution;
-  const y = mapInfo.origin.position.y + (mapInfo.height - (ev.clientY - r.top) / scale) * mapInfo.resolution;
+  const [x, y] = p2m(ev.clientX - r.left, ev.clientY - r.top);   // ★ T3: 그리기와 같은 view 사용
   document.getElementById('fx').value = x.toFixed(1);
   document.getElementById('fy').value = y.toFixed(1);
   log('ctrl', `지도 클릭 → 화재 후보 좌표 (${x.toFixed(1)}, ${y.toFixed(1)})`);
@@ -414,7 +754,7 @@ document.getElementById('btnEstop').onclick = () => {
   const zero = new ROSLIB.Message({ linear:{x:0,y:0,z:0}, angular:{x:0,y:0,z:0} });
   let n = 0;
   const iv = setInterval(() => { cmdVelPub.publish(zero); if (++n >= 10) clearInterval(iv); }, 100);
-  log('ctrl', '비상 정지(소프트): abort + cmd_vel 0 ×10');
+  log('ctrl', '비상 정지(소프트) — abort + cmd_vel 0 x10');
 };
 
 // ── 5. 화재 경보 발행 (기존 재발사 관례대로 2회) ────────────────
@@ -428,7 +768,7 @@ document.getElementById('btnFire').onclick = () => {
   });
   alarmPub.publish(msg);
   setTimeout(() => alarmPub.publish(msg), 300);   // /alarm 간헐 유실 대비 재발사
-  log('fire', `🔥 화재 경보 발행: (${x}, ${y})`);
+  log('fire', `화재 경보 발행 (${x}, ${y})`);
 };
 </script>
 </body>
