@@ -528,9 +528,21 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 이는 runtime guard 실패가 아니라 **상류 링크 정지(약 300ms 7회)를 RELIABLE 20ms 상한이
 `/odom` 유실로 바꾼 것**이며 R3는 아직 FAIL이다 (검토 §76.3 — 같은 정지에서
 BEST_EFFORT `/imu/data`는 유실 약 2건뿐이다).
-🔴 이 시행의 dmesg는 soak 시작 **43초 전** 스냅샷이라 사건 구간을 못 덮는다 (§76.2).
-"오류 0건"으로 읽지 않는다. 상세 판정은
+🔴 이 시행의 dmesg는 사건 구간을 못 덮는다 (§76.2 · §77.2 정정 — 마지막 *사건*
+22:44:41이 아니라 취득 시각 23:18:34가 근거다). "오류 0건"으로 읽지 않는다. 상세 판정은
 `MASTER_PLAN §7` 41-f와 `REAL_ROBOT_VALUES §1-g`가 소유한다.
+
+🔴 **다음 시행부터 dmesg는 이렇게 받는다** (예약 46 — 취득 경계를 사람이 아니라 도구가 남긴다):
+
+```bash
+# 주행·bag 을 완전히 끝낸 **뒤** Jetson 에서
+cd ~/ros2_ws && python3 tools/dmesg_coverage_check.py --capture ~/d0_evidence/dmesg_<이름>.log
+# 그러면 dmesg_<이름>.log 와 dmesg_<이름>.log.capture.json 이 같이 생긴다 — 둘 다 옮긴다
+python3 tools/dmesg_coverage_check.py ~/d0_evidence/<bag_dir> ~/d0_evidence/dmesg_<이름>.log
+```
+
+rc=0만 "이 구간을 봤다"이고, **rc=2는 판정 불능이지 통과가 아니다.** `dmesg` 권한이 막혀
+있으면 `sudo dmesg -T` 가 되는지부터 본다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
