@@ -768,5 +768,25 @@
     "id": "0813-d0-fw-77-fix-review-zero-new-p0-78",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§78 판정은 P0 0이며 커밋 `2cb931e` 유지와 승인 지문 1.6.1 유지다"
+  },
+  {
+    "id": "0813-sample-seq-has-no-periodic-path-to-host-79",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "MCU 안에서 증가하는 계수는 host 로 갈 주기 경로가 없으면 생존 증거가 아니다"
+  },
+  {
+    "id": "0813-verdict-unit-is-seq-delta-after-recovery-79",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "판정 단위는 표본 1개의 도착이 아니라 복귀 후 첫 표본의 `sample_seq` 증가량이다"
+  },
+  {
+    "id": "0813-code-only-coalescing-merges-seven-bursts-79",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "`code` 하나로 접는 coalescing 은 떨어진 7 burst 를 한 칸으로 합친다"
+  },
+  {
+    "id": "0813-d0-fw-78-fix-review-zero-new-p0-79",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§79 판정은 P0 0이며 커밋 `ee2f398` 유지와 승인 지문 1.6.1 유지다"
   }
 ]
