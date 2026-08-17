@@ -1370,7 +1370,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 | # | 무엇 | 확인 방법 | 절 | D+0 결과 (2026-08-03) |
 |---|---|---|---|---|
-| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. 🔴 L4T R36.5.0(JetPack 6.2.2 계열)이며 `nvidia-jetpack` 메타패키지·`nvcc`는 **없음** — D+0 비차단이지만 **CUDA 없이는 YOLO 추론이 CPU로 떨어져 역할 B 성능 전제가 통째로 바뀐다.** 소유자·트리거·완료판정은 `MASTER_PLAN.md §7` **예약 27** |
+| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. L4T R36.5.0(JetPack 6.2.2 계열). ⚠ **08-05 에 여기 적었던 "`nvidia-jetpack`·`nvcc` 없음"은 08-11 에 해소됐다** — `nvcc` 는 **`PATH` 미등록 오진**이었고(CUDA 12.6 툴킷은 08-06 설치본이 있었다), `nvidia-jetpack` 은 **08-11 에 설치**했다(6.2.3+b81 · 65개). 🔴 **이 칸의 구값을 인용하지 말 것.** 정본 = `MASTER_PLAN.md §7` **예약 27** |
 | 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 | ✅ IPv6 2/2 수신·손실 0%, 평균 175ms |
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |
