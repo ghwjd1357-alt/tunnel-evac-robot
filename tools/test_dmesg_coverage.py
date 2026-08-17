@@ -140,6 +140,40 @@ class DmesgCoverageTest(unittest.TestCase):
         self.assertEqual(2, rc, out)
         self.assertIn("sha256", out)
 
+    # ── §78.2 — 재현된 두 구멍 ────────────────────────────────────────
+    def test_c4_reversed_capture_interval_is_undecidable(self):
+        """🔴 §78.2 재현 A — identity 없이 `start>end` 인 sidecar 가 rc=0 을 냈었다."""
+        write_log(self.log, BASE - 6000, BASE - 43)
+        write_sidecar(
+            self.log, BASE + SOAK_SECONDS + 5,
+            capture_start=BASE + SOAK_SECONDS + 500)       # 시작이 종료보다 뒤
+        rc, out = run(self.bag, self.log)
+        self.assertEqual(2, rc, out)
+        self.assertNotIn("✅", out)
+
+    def test_c5_non_finite_capture_time_is_undecidable_not_crash(self):
+        """🔴 §78.2 재현 B — NaN 이 `fmt()` 를 터뜨려 traceback + **rc=1** 이 났었다.
+
+        크래시가 rc=1 로 새면 *"못 덮었다"* 라는 판정이 되어 rc=1/rc=2 구분이 죽는다.
+        """
+        for bad in (float("nan"), float("inf")):
+            write_log(self.log, BASE - 6000, BASE - 43)
+            write_sidecar(self.log, bad, capture_start=bad)
+            rc, out = run(self.bag, self.log)
+            self.assertEqual(2, rc, out)
+            self.assertNotIn("Traceback", out)
+
+    def test_capture_refuses_to_overwrite_existing_pair(self):
+        """🔴 §78.2 — 취득이 실패했을 때 옛 쌍이 이번 판정에 답하면 §73.2 의 재발이다."""
+        out_path = os.path.join(self.dir, "captured.log")
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write("어제 받은 로그\n")
+        proc = subprocess.run(
+            [sys.executable, TOOL, "--capture", out_path], capture_output=True, text=True)
+        self.assertEqual(2, proc.returncode, proc.stdout)
+        self.assertIn("취득 거부", proc.stdout)
+        self.assertEqual("어제 받은 로그\n", open(out_path, encoding="utf-8").read())
+
     def test_c3_broken_sidecar_is_undecidable(self):
         write_log(self.log, BASE - 6000, BASE - 43)
         with open(self.log + ".capture.json", "w", encoding="utf-8") as fh:

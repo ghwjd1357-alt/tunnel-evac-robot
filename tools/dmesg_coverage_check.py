@@ -21,6 +21,10 @@
   취득 경계가 필요하다:
   - `--capture` 가 남긴 sidecar 가 있고 sha256 이 맞으면 그 취득 종료로 판정한다.
   - sidecar 가 변조·불일치면 **rc=2**. 없으면 **rc=2**.
+  - 시각이 NaN·Inf 이거나 `capture_start > capture_end` 면 **rc=2** (§78.2).
+    🔴 크래시를 rc=1 로 흘리면 *"못 덮었다"* 라는 **판정**이 되어 rc=1/rc=2 구분이 죽는다.
+  - `--capture` 는 이미 있는 경로에 **덮어쓰지 않는다** (§78.2). 취득이 실패했을 때
+    같은 자리의 옛 쌍이 이번 판정에 답하는 것이 이 사슬의 원형(§73.2)이다.
   - `--trust-mtime` 은 "이 파일은 원본" 이라는 **검증되지 않은 사람의 주장**이다.
     그래서 **FAIL(rc=1) 은 낼 수 있어도 PASS 는 못 낸다** — 재시험을 요구하는 방향은
     약한 증거로 가도 안전하지만, 무사고 증명은 약한 증거로 갈 수 없다. mtime 이
@@ -39,6 +43,7 @@
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -120,6 +125,13 @@ def read_sidecar(log_path):
         recorded = str(info["sha256"])
     except Exception as exc:                                 # noqa: BLE001
         return "bad", str(exc)
+    # 🔴 §78.2 — 숫자가 숫자인지부터 본다. NaN 을 그냥 흘리면 뒤의 `fmt()` 가 터져
+    # traceback 과 함께 **rc=1** 이 나가는데, rc=1 은 "못 덮었다"는 *판정*이다.
+    # 크래시가 판정으로 새면 이 도구가 지키려던 rc=1/rc=2 구분이 사라진다.
+    if not (math.isfinite(start) and math.isfinite(end)):
+        return "bad", "capture_start/capture_end 가 유한한 수가 아니다 (NaN·Inf)"
+    if start > end:
+        return "bad", "capture_start 가 capture_end 보다 뒤다 (구간 역전)"
     if recorded != sha256_of(log_path):
         return "mismatch", recorded
     return "ok", {"capture_start": start, "capture_end": end}
@@ -149,6 +161,16 @@ def capture(out_path):
     이 도구가 경계의 소유자다 (예약 46). 사람이 기억해서 적는 절차는 08-17 에 두 번
     깨졌으므로, 취득한 쪽이 그 자리에서 기계로 남긴다.
     """
+    # 🔴 §78.2 — 이미 있는 경로에 덮어쓰지 않는다. 취득이 **실패**했을 때 같은 자리에
+    # 남아 있던 어제 쌍이 오늘 판정에 rc=0 을 내주는 것이 이 사슬의 원형(§73.2)이다.
+    # 실패를 조용히 통과시키지 않으려면, 성공 여부와 무관하게 **덮어쓰기를 막는** 것이
+    # 가장 단순하고 되돌릴 수 있는 방어다. 사용자가 새 이름을 고르게 한다.
+    for existing in (out_path, sidecar_path(out_path)):
+        if os.path.exists(existing):
+            print("  취득 거부 — 이미 있다: %s" % existing)
+            print("     🔴 덮어쓰면 취득이 실패했을 때 **옛 쌍**이 이번 판정에 답한다.")
+            print("     새 이름을 쓰거나, 옛 쌍을 옮긴 뒤 다시 실행한다.")
+            return 2
     started = time.time()
     try:
         proc = subprocess.run(

@@ -748,5 +748,25 @@
     "id": "0813-d0-fw-76-fix-review-zero-new-p0-77",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§77 판정은 P0 0이며 두 커밋 유지·현 보드 운용만 조건부 수용하고 승인 지문 이관은 보류한다"
+  },
+  {
+    "id": "0813-sidecar-holes-and-stale-capture-pair-78",
+    "path": "tools/dmesg_coverage_check.py",
+    "anchor": "sidecar 시각이 유한하지 않거나 구간이 역전됐으면 rc=2이고 취득은 기존 쌍을 덮지 않는다"
+  },
+  {
+    "id": "0813-loop-top-gap-cannot-separate-inside-from-between-78",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "판 꼭대기 간격은 직전 loop 실행시간을 포함하므로 loop 안과 판 사이를 가르지 못한다"
+  },
+  {
+    "id": "0813-decision-points-open-r4-r6-without-41g-78",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "R4·R6 진입 필요조건은 `R3 PASS`와 `41-g 완료` 둘 다이다"
+  },
+  {
+    "id": "0813-d0-fw-77-fix-review-zero-new-p0-78",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§78 판정은 P0 0이며 커밋 `2cb931e` 유지와 승인 지문 1.6.1 유지다"
   }
 ]
