@@ -185,6 +185,25 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
 행을 **발동한다**(시뮬 고도화 전환 + 시연 백업 = 시뮬 데모). **판정은 미루지 않는다** — 미루면
 플랜 B 를 쓸 시간까지 같이 사라진다.
 
+### ✅ 판정 결과 — **플랜 B 미발동** (기준일 2026-08-15 · 🔴 선언 기록은 08-17)
+
+| 항목 | 값 |
+|---|---|
+| 근거 시행 | `r2_line_0814_1231` (2026-08-14 · 재굽기 `build=Aug 14 2026 11:00:55` 이후) |
+| 직진 | 줄자 **3,075 mm** · `odom/줄자` = **0.997** → 오차 **0.3%** |
+| 기준 | 3% 이내 → ✅ **10배 여유로 통과** |
+| 회전 참고 | `odom Δyaw / 실측` = **0.993** (432.95° / 436°) |
+| 판정 | **'구동부 지연' 행을 발동하지 않는다.** 시뮬 고도화 전환·시연 백업 전환은 **하지 않는다** |
+
+🔴 **절차 위반 1건을 같이 적는다** — 판정 자체는 기한 하루 전(08-14)에 근거가 섰지만,
+**선언을 남기는 일을 08-17 까지 미뤘다.** 그 사이 이 문서만 보는 사람에게는 *"판정을 안 했다"*
+와 구별되지 않았다. 절차가 요구하는 것은 통과가 아니라 **기록**이다.
+⚠ 08-14 는 `~/Desktop/개발현황/` 당일 파일 자체가 없었다 — 그것도 같이 만들었다
+(`0814_현황.md`).
+
+⚠ **이 판정이 덮지 않는 것** — R2 통과는 **아크릴 4판 미장착 상태의 잠정값**이다(예약 42).
+붙이면 `+3.2kg` 로 R2·C10·차고·위험 수용 문장을 **전부 다시 잰다.** 그때 이 판정도 다시 본다.
+
 ## 7. SpeedManager 이후 예약 항목 (비차단 보류 — 지금 손대지 않음)
 
 1. **`map_promote.sh` release evidence 실전 확인** ⏸ **미실행 · 다음 정기 지도 제작 때** —
@@ -2588,8 +2607,91 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     (`applied_pwm_max` 81~86). 즉 **명령이 기록되지 않는다.**
     ✅ 자연실험으로 원인이 좁혀졌다: `stall_E`(내가 `ros2 topic pub` 로 명령) 는 **1,171건 전부
     기록**됐고, 지도 세션(`teleop_twist_keyboard`) 은 **0건**이다. 같은 토픽, 발행자만 다르다.
-    → **QoS 불일치**가 유력하다(BEST_EFFORT 발행자 + RELIABLE 구독자는 DDS 가 매칭하지 않는다).
-    확인 한 줄 = `ros2 topic info /cmd_vel -v` 로 양쪽 Reliability 를 본다.
+
+    #### ✅ 43-b — 원인 확정 (2026-08-17 · 로봇 없이 노트북에서 닫았다)
+
+    🔴 **구현자 정정 — 08-14 에 적은 *"QoS 불일치(BEST_EFFORT 발행자 + RELIABLE 구독자)"* 는
+    틀렸다.** 축도 방향도 둘 다 틀렸다. 축은 **reliability 가 아니라 durability** 였고,
+    방향은 **발행자가 약해서가 아니라 구독자가 너무 엄해서**였다.
+
+    **반증 2건**
+    ① `teleop_twist_keyboard.py:156` = `create_publisher(TwistMsg, 'cmd_vel', 10)` —
+       rclpy 기본값이라 **RELIABLE** 이다. BEST_EFFORT 발행자라는 전제가 성립하지 않는다.
+    ② bag 에 박힌 `offered_qos_profiles` 가 **전부 `reliability: 1`(RELIABLE)** 이다.
+       reliability 는 애초에 갈리는 축이 아니었다.
+
+    **갈린 축은 durability 였다** (`topics.offered_qos_profiles` 전수):
+
+    | bag | 발행자 | durability | 비영 `/cmd_vel` |
+    |---|---|---|---|
+    | `map_0814_1350` | `topic pub` | **1 = TRANSIENT_LOCAL** | 🔴 27건 전부 0 |
+    | `map_0814_1512` | 〃 | **1 = TRANSIENT_LOCAL** | 🔴 123건 전부 0 |
+    | `map_0814_1611` | 〃 | **1 = TRANSIENT_LOCAL** | 🔴 45건 전부 0 |
+    | `stall_E_1759` | 〃 | **1 = TRANSIENT_LOCAL** | ✅ 1,171 |
+    | `alt_F_1808` | **teleop** | **2 = VOLATILE** | ✅ **6,882** |
+
+    🔴 **`ros2 topic pub` 는 TRANSIENT_LOCAL 로 발행한다** — 도메인 77 격리 재현으로 확인했다
+    (`ros2 topic pub -r 10 /qos_probe … ` → `ros2 topic info -v` → `Durability: TRANSIENT_LOCAL`).
+    teleop 은 rclpy 기본값이라 **VOLATILE** 이다. 위 표의 두 값이 정확히 그것이다.
+
+    **기전** — `rosbag2_transport/qos.hpp:44` 의 `adapt_request_to_offers` 가 정확히 이렇게 적혀 있다:
+    > *"Adapts Durability and Reliability, falling back to the **least strict** publisher when
+    > there is a **mixed offer**."*
+
+    구독은 **발견 시점에 한 번** 만들어진다. 지도 세션의 발견 시점에는 `topic pub` 하나뿐이라
+    섞인 제안이 없었고, 그래서 rosbag2 가 **TRANSIENT_LOCAL 구독**을 만들었다. DDS 에서
+    **TRANSIENT_LOCAL 구독자는 VOLATILE 발행자와 호환되지 않는다** → 나중에 뜬 teleop 은
+    **매칭 자체가 안 되고 조용히 0건**이 된다.
+
+    🔴 **런북이 그 순서를 인코딩하고 있었다** (`~/Desktop/0814_지도제작_런북.md`):
+
+    ```
+    §179  ros2 bag record -a -x "/map|/map_updates"     ← 먼저 뜬다
+    §190  ros2 topic pub -r 10 /cmd_vel "{}"            ← TRANSIENT_LOCAL 이 여기서 처음 등장
+    §212  ros2 run teleop_twist_keyboard                ← VOLATILE. 이미 늦었다
+    ```
+
+    ✅ **다섯 bag 을 전부 설명한다.** `alt_F` 는 발견 시점 발행자가 teleop 이라 VOLATILE 구독이
+    만들어져 6,882건이 담겼고, `stall_E` 는 발행자가 `topic pub` 하나뿐이라 TRANSIENT_LOCAL 끼리
+    맞아 1,171건이 담겼다. **발행자가 문제가 아니라 순서가 문제였다.**
+
+    ⚠ **기록만 깨졌고 주행은 안 깨졌다** — Teensy 쪽 구독은 teleop 과 정상 매칭했다(로봇이 실제로
+    움직였고 `applied_pwm` 이 `64,64,64,64` 다). 피해 범위는 **증거**이지 제어가 아니다.
+
+    ✅ **보완 = 구독을 느슨하게 만든다.** VOLATILE **구독자**는 VOLATILE 발행자와
+    TRANSIENT_LOCAL 발행자를 **둘 다** 받는다(제안이 요청보다 엄하면 호환).
+    ⓐ 기록 쪽 (순서에 안 기대는 방어) —
+      `ros2 bag record --qos-profile-overrides-path <yaml>` 에 `/cmd_vel: {durability: volatile}`.
+    ⓑ 발행 쪽 (방아쇠 제거) — 런북 §190 의 예열 발행에 `--qos-durability volatile` 을 붙인다.
+    🔴 **ⓐ 를 주로 한다** — ⓑ 만 하면 누군가 맨 `topic pub` 을 다시 앞에 두는 순간 **똑같이
+    조용히** 깨진다. ⓑ 는 방아쇠를 없애는 보조다.
+    현장 확인 한 줄 = teleop 을 켠 뒤 `ros2 topic info /cmd_vel -v` 에서 **rosbag2 구독의
+    Durability 가 VOLATILE** 인지 본다.
+
+    ✅ **재현·검증했다 — 로봇 없이 노트북에서** (`tools/qos_record_repro.sh` · 도메인 77 격리 ·
+    `/cmd_vel` 을 안 쓰고 더미 토픽 `/qos_probe` 로 한다). 08-14 런북과 **같은 순서**로 세운다:
+
+    | 판 | 총 기록 | VOLATILE 발행자분(비영) |
+    |---|---|---|
+    | ① 보완 없음 | 127건 | 🔴 **0건** — 통째로 사라진다 |
+    | ② `--qos-profile-overrides-path` 적용 | 186건 | ✅ **60건 = 6초 × 10Hz 전부** |
+
+    🔴 **① 이 0 이 아니면 판정 불능이다** — 스크립트가 그것부터 검사하고 `rc=1` 을 낸다.
+    "보완이 통과했다" 는 **결함이 같은 판에서 재현됐을 때만** 쓸 수 있다(예약 41 에서 배운
+    *"단일 음성으로 닫지 않는다"* 와 같은 규율이다).
+
+    **반영된 자리**
+    · `tools/bag_qos_overrides.yaml` (신설 · Tier B) — 전제조건·재개방 조건을 파일 안에 적었다
+    · `tools/qos_record_repro.sh` (신설 · Tier B) — 위 표를 언제든 다시 만든다
+    · `~/Desktop/0814_지도제작_런북.md` §8 기록 · §9 예열 발행 · §10 주행 전 확인 한 줄
+
+    ⚠ **전제조건** — `/cmd_vel` 의 모든 발행자가 RELIABLE 이다(teleop · `topic pub` ·
+    Nav2 `controller_server` 확인). 🔴 **재개방 조건** — BEST_EFFORT 로 `/cmd_vel` 을 내는
+    발행자가 생기면 이 설정이 **그것을 조용히 놓친다.** 그때 `bag_qos_overrides.yaml` 을 다시
+    판단한다.
+
+    ⏸ **남은 것** — 실차 20분 주행 bag 에서 비영 `/cmd_vel` 이 조작 횟수만큼 담기는지 확인
+    (완료판정의 뒷절반). **원인·보완은 닫혔고 현장 확인만 남았다.**
 
     🔴 **왜 이게 중요한가** — 어떤 주행이든 *"무엇을 명령했는가"* 를 사후에 재구성할 수 없다.
     A-10·R2·지도 세션의 증거가 전부 이 구멍 위에 있다. 예약 39(좌향 편향)나 예약 40(각속도
@@ -2615,6 +2717,8 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 
 | 결정 | 날짜 | 근거 |
 |---|---|---|
+| ✅ **플랜 B 미발동 — '구동부 지연' 행을 발동하지 않는다** — 기준일 `2026-08-15` 의 조건은 *"그날까지 R2 3m 직진 3% 이내 통과 선언"* 이었고, 08-14 재굽기 이후 시행 `r2_line_0814_1231` 이 줄자 `3,075 mm` 에 `odom/줄자 = 0.997`(**오차 0.3%**)로 기준의 **10배 여유**로 통과했다(회전 참고 `0.993`). 시뮬 고도화 전환·시연 백업 전환은 하지 않는다. 🔴 **절차 위반 1건을 같이 남긴다 — 근거는 기한 하루 전에 섰지만 선언 기록을 08-17 까지 미뤘다.** 절차가 요구한 것은 통과가 아니라 **기록**이고, 그 사이 문서만 보는 사람에게는 *"판정을 안 했다"* 와 구별되지 않았다. ⚠ **아크릴 미장착 잠정값**이다(예약 42) — 붙이면 이 판정도 다시 본다 | 08-15 (기록 08-17) | `MASTER_PLAN §6` 판정 결과 절 · `~/Desktop/개발현황/0814_현황.md` |
+| 🔴 **`ros2 bag record` 의 구독 QoS 를 순서에 맡기지 않는다 — `/cmd_vel` 은 override 로 VOLATILE 에 고정한다** — rosbag2 는 토픽을 **발견하는 순간의 발행자**만 보고 구독 QoS 를 정하고(`rosbag2_transport/qos.hpp:44` `adapt_request_to_offers`) 그 구독은 **한 번만** 만들어진다. 08-14 런북이 `bag record` → `ros2 topic pub`(**TRANSIENT_LOCAL**) → `teleop`(**VOLATILE**) 순서였고, TRANSIENT_LOCAL 구독자는 VOLATILE 발행자와 **호환되지 않아** 지도 3세션의 명령이 **에러 없이 0건**이 됐다. 🔴 **08-14 에 적은 "QoS 불일치(BEST_EFFORT 발행자 + RELIABLE 구독자)" 는 축도 방향도 틀렸다** — 축은 durability 였고, 원인은 발행자가 약한 게 아니라 **구독자가 너무 엄한 것**이었다. → 구독을 **느슨한 쪽**(VOLATILE)에 고정하면 두 종류 발행자를 다 받는다. ⚠ 전제조건 = 모든 `/cmd_vel` 발행자가 RELIABLE. 🔴 재개방 = BEST_EFFORT 발행자 등장 | 08-17 | `MASTER_PLAN §7` 예약 43-b · `tools/bag_qos_overrides.yaml` · `tools/qos_record_repro.sh`(① 0/60 → ② 60/60) |
 | 🔴 **디바운스 문턱 `30ms` 는 표본 수로 "확정" 승격하지 않는다 — 관측 구조가 검열(censoring)을 갖기 때문이다** — `estop_rejected_max_ms` 에는 **문턱 아래 사건만** 들어가고 문턱을 넘은 HIGH 는 진짜 누름과 함께 `estop_max_high_ms` 로 간다. 그래서 `rejected_max=20ms` 가 여러 번 보여도 **30ms 초과 꼬리가 없다는 증명이 아니다.** → 판정을 "값 확정"에서 **운용 수용**으로 바꾼다: ① 의도되지 않은 `disarm_estop` 증가 0 ② 시행 시작·끝 기준값 확보 ③ `rejected_max` 의 문턱 접근 추세 없음 을 **모두** 만족하면 일정 보험으로 유지하고, 쓰는 표현은 **"현재 운용 창에서 추가 false stop 없음"** 이다. 🔴 한 번이라도 원인 불명 `disarm_estop` 이 오르거나 `rejected_max` 가 30 에 가까워지면 **전기 원인을 재개방하고 값을 키우지 않는다**(키울수록 진짜 E-stop 도 늦게 안다) | 08-13 | 검토 §64.5 · `REAL_ROBOT_VALUES §1-f`⓶-c·⓶-d |
 | 🔴 **"무장을 푼 원인" 계수에 이미 풀린 뒤의 사건을 섞지 않는다 — 사유는 `DISARMED` 로 실제 전이한 순간에만 쓴다** — 구판은 정지와 사유 기록이 갈려 있어 `/cmd_vel` 10Hz 비영이 E-stop 이 남긴 `y=4` 를 덮었고, `/drive/diag` 는 1Hz 라 **그 사유가 밖에서 한 번도 안 보였다**. `checkSafety()` 가 루프마다 불려 "한 번 누름 = 누계 50" 이 되는 파생 결함까지 있었다. → `rearmGateDisarmWithReason()` 이 전이 판정·사유·누계를 한 동작으로 묶고 `driveDisarmWithReason()` 이 거기에 정지를 묶는다. ⚠ **이미 `DISARMED` 인데 뜬 E-stop 은 어느 계수에도 안 들어간다**(새 정지를 만든 원인이 아니다 · 원시 전이는 `estop_raw_edges` 에 남는다). 훗날 "모든 E-stop 활성 횟수"가 필요하면 **별도 promoted-HIGH 계수를 신설**하지 `disarm_estop` 의 뜻을 넓히지 않는다. 같은 이유로 **진짜 누름과 필터가 버린 글리치의 자를 분리**했다(`estop_rejected*` vs `estop_max_high_ms`) | 08-13 | 검토 §63.1·§64.1·§64.2 · `a1268dc` · `REAL_ROBOT_VALUES §1-f`⓶-b |
 | 🔴 **`§7-c-0` R0 watchdog 합격 기준을 재정의한다 (안 ⓐ)** — 구 조건 1(총 정지 ≤500ms)은 **펌웨어 구조상 달성 불가**다: `WATCHDOG_TIMEOUT_MS = 500` 이 500ms 에 정지를 *시작*하므로 총 정지는 반드시 `500 + α`. 08-11 영상 분석이 **α 의 관성 몫에 상한**을 줬다 — 바퀴가 전속에서 정지까지 **1~2 프레임(17~33ms)** 뿐이라 기계 관성의 몫이 작다. 🔴 **다만 나머지 `~16ms` 를 성분별로 가르지는 못한다**(검토 §57.2 — 전송·loop·관성·bag 저장 지연이 섞여 있다). 말할 수 있는 것은 **상수를 안 건드리면 500 미만이 원리적으로 불가능**하고 **낮추면 반드시 통과**한다는 것뿐이다. 안 ⓑ(구조 개선)는 재굽기 + `§7-c-E` 13행 + `§5-G6` 10회를 다시 요구하고 ⓒ(보류)는 `R0→R1` 사다리 위반이라 ⓐ 를 골랐다. 🔴 **안 닫혔다 — 검토 §57 이 구현자 정식화(1-a 구조 `WATCHDOG_TIMEOUT_MS ≤ 500` + 1-b 실측 총 정지 ≤600ms)를 확인 보류했고 08-07 증거의 현행 펌웨어 승계도 불인정했다.** 사용자가 고른 **"ⓐ 로 간다" 자체는 유지**된다. ✅ **⓵ 사용자 근거 한 줄 = 08-11 결정**: *"적용 속도 상한 `0.12 m/s` 에서 명령이 끊긴 뒤 약 7 cm 더 나아가는 것까지는 받아들인다. 안전요원이 E-stop 을 들고 양옆 1 m 를 비운 상태라 그 거리가 물리적 위험을 만들지 않는다."* (미끄러짐 `≈ v × 0.6 s` — `0.05` 에서 30mm · `0.12` 에서 72mm. 🔴 최악 지연의 증명이 아니라 **수용 판단**이고, 🔴 **속도 상한을 올리면 재개방**된다). 남은 것 = ⓶ 현행 펌웨어 재측정 1회 ⓷ 검토자 재확인 | 08-11 | 사용자 결정 ⓐ + 근거 한 줄 · 검토 §57·§58 · `JETSON_SETUP §7-c-0` · `D1_FIRST_STEP §0-a` · `FREEZE_MANIFEST §6` |
