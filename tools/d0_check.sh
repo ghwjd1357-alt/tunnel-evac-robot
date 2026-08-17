@@ -519,9 +519,9 @@ next_idx; check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  "$IDX"
 #
 # 🔴 [08-17 D0-FW] 위는 승인본 1.5.0의 역사다. `drive_0817_1325`에서 주기 RELIABLE
 # 발행의 1000ms ACK 상한이 같은 단일 제어 loop에 연쇄돼 `/odom`·`/imu`가 함께 최대
-# 6.85초 비었다. 1.6 계열(첫 굽기 후보 `…runtime-guard-1.6.1`)부터
-# 8개 주기 telemetry 전부 BEST_EFFORT다. 서비스만 RELIABLE로
-# 남는다. 상태 토픽은 현재값을 반복하므로 한 건의 재전송보다 신선도가 우선이다.
+# 6.85초 비었다. 1.6.1에서 8개를 전부 BEST_EFFORT로 바꿨지만 512B MTU를 넘는
+# /odom·/firmware/info가 0건인 회귀가 첫 bench에서 재현됐다. 1.6.2 후보는 두 대형
+# 표본만 RELIABLE+20ms로 제한하고 나머지 6개와 소비자 구독은 BEST_EFFORT로 둔다.
 #
 #   고치지 않았다면 D+0 에 `/odom 발행자가 계약과 다르다` **오경보**가 떴을 것이고,
 #   런북은 "구동부에게 지금 확인한다"고 지시한다 — 인수 현장에서 가장 비싼 자원(담당자의
@@ -635,7 +635,7 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   echo
 }
 # ★ 기대값 근거 = 현재 작업 트리 펌웨어의 publisher 초기화 함수.
-next_idx; check_qos "$ODOM_TOPIC" "$IDX" BEST_EFFORT
+next_idx; check_qos "$ODOM_TOPIC" "$IDX" RELIABLE
 next_idx; check_qos "$IMU_TOPIC"  "$IDX" BEST_EFFORT
 
 # ── [6] 전진 부호 ───────────────────────────────────────────────────────────

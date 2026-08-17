@@ -51,10 +51,10 @@
   reliability: reliable
   durability: volatile
 
-# 08-17 D0-FW: Teensy의 모든 주기 telemetry는 BEST_EFFORT다. RELIABLE은 한 건의
-# 전달을 재시도하는 동안 같은 단일 loop의 모터 watchdog·E-stop 표본까지 세웠고,
-# drive_0817_1325에서 최대 6.85초 공백으로 관측됐다. 아래 구독은 더 강한 QoS를
-# 요청하지 않는다. 센서/상태는 현재값을 반복 발행하므로 오래된 한 건보다 신선도가 우선이다.
+# 08-17 D0-FW 1.6.2: 512-byte MTU를 넘는 `/odom`·`/firmware/info` 발행자는
+# RELIABLE+20ms이고, 나머지 6개 주기 telemetry 발행자는 BEST_EFFORT다. 아래는
+# **발행 QoS 표가 아니라 rosbag 구독 QoS**다. 구독을 BEST_EFFORT로 두면 두 종류
+# 발행자와 모두 호환되고, 기록기가 RELIABLE ACK 대기열을 새로 만들지도 않는다.
 /odom:
   history: keep_last
   depth: 1000

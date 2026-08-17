@@ -1534,3 +1534,33 @@ FLASH code 294,176 / RAM1 variables 62,656 로 지문 3개 일치.
   telemetry 동시 공백, 사건 시각 dmesg USB/agent 오류, enable 실패/timeout과 overrun 동시
   관측, 문서와 header enum 불일치, 자동 판독 도입 중 하나. 그때 임계를 단순히 높이지 않고
   관측 원인을 다시 분류한다.
+
+### 10.28-a. 1.6.2 MTU 보완 — **현장 시험 완료 · 승인 지문 미이관**
+
+1.6.1의 전 telemetry BEST_EFFORT는 512-byte MTU보다 큰 `/odom`·`/firmware/info`를
+보내지 못했다. 1.6.2는 두 publisher만 RELIABLE로 복구하고 각각
+`rmw_uros_set_publisher_session_timeout(..., 20)`을 둔다. 나머지 6개와 runtime guard,
+re-arm·E-stop 배선은 그대로다.
+
+🔴 **승인 상태를 분리한다.** 사용자가 남은 현장 시간 안에 검토보다 시험을 먼저 하기로
+명시해 1.6.2 exact candidate를 compile·upload했다. 이는 현장 증거를 만든 것이지 Codex
+구현자가 자기 diff를 승인한 것이 아니다. §75는 1.6.1까지의 판정이며 1.6.2 독립검토는
+아직 없다. 따라서 `FIRMWARE_REBUILD §4`의 승인 지문도 1.6.1에 유지한다.
+
+| 항목 | 1.6.2 현장 후보 |
+|---|---|
+| source sha256(승인값 아님) | `20e0af71f9000f72982ba5fb762bf962318aa394fa8d515a99ab0308d72f1f2d` |
+| source 크기 | 1,848줄 / 70,798 bytes |
+| clean compile | FLASH code/data/headers `295264/86500/8376`, RAM1 variables/code `62784/160248`, RAM2 `12448` |
+| hex sha256 | `d4c4a10de0a8dc474c7c3c456bf89cdf60db225d0fd285cb81050a7a5289cfbc` |
+| 보드 정체 | `version=…1.6.2`, `build=Aug 17 2026 21:49:19`, `ARDUINO=10607`, `TEENSYDUINO=158` |
+
+현장 사다리: 큰 두 표본 수신, E-stop **10/10**, 공중 409.4초, 판재 후 R1/R2,
+지면 soak 744.697초를 수행했다. soak에서 `runtime_overruns/disarm_runtime/disarm_spin=0`,
+loop max 47.165ms로 수 초 감시-loop 정지는 재발하지 않았다. 그러나 `/odom` publish 실패
+7묶음(`publish_failures 13→83`)과 210~297ms header stamp 결측이 남아 R3는 통과하지
+못했다. field evidence의 유일한 서사는 `MASTER_PLAN §7` 41-f다.
+
+**독립검토 완료판정** — 8 publisher 매핑에서 큰 두 자리만 RELIABLE인지, timeout 두 자리가
+정확히 20ms인지, MTU 반례와 1000ms 역회귀를 검사하고 위 7개 단기 실패를 재산출한다.
+승인 전에는 이 절의 source hash를 precheck 허용값으로 옮기지 않는다.

@@ -44,7 +44,7 @@
 // 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
 // 🔴 1.5.0 (2026-08-13) = ① E-stop 디바운스 ② odom 재교정(ODOM_WHEEL_RADIUS·ODOM_WHEEL_BASE)
 //    ③ appliedPwm 관측. 버전을 올려야 bag 만 보고 어느 보드인지 가른다.
-static const char FW_VERSION[] = "rearm-latch-pi-runtime-guard-1.6.1";
+static const char FW_VERSION[] = "rearm-latch-pi-runtime-guard-1.6.2";
 // ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
 // 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
 // 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
@@ -129,6 +129,13 @@ static const int8_t ENCODER_POLARITY[4] = {1, 1, 1, 1};
 
 static const uint8_t ESTOP_PIN = 21;
 static const bool ESTOP_ACTIVE_LOW = false;
+
+// micro_ros_arduino 2.0.8-humble의 현재 custom-transport MTU는 512 bytes다.
+// BEST_EFFORT XRCE stream은 MTU를 넘는 표본을 fragment하지 못하므로, 약 700 bytes인
+// nav_msgs/Odometry와 최대 1407 bytes인 firmware info는 RELIABLE stream이 필요하다.
+// 기본 RELIABLE ACK 상한 1000ms를 그대로 쓰면 motor loop가 다시 멎을 수 있으므로
+// 두 대형 publisher만 20ms로 제한한다. 나머지 6개 주기 telemetry는 BEST_EFFORT다.
+static const int LARGE_PUBLISH_TIMEOUT_MS = 20;
 
 // ============================================================================
 // Robot parameters
@@ -1622,14 +1629,19 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
       "imu/reset_yaw"));
 
-  // Periodic telemetry must never wait for a RELIABLE ACK inside the motor
-  // loop.  Freshness is the contract: state topics repeat, and odom/IMU are
-  // streams.  The service response remains RELIABLE.
-  RCCHECK(rclc_publisher_init_best_effort(
+  // BEST_EFFORT XRCE output cannot fragment a sample larger than the installed
+  // 512-byte transport MTU.  Odom and firmware info therefore use RELIABLE
+  // fragmentation, but their ACK wait is bounded immediately after creation.
+  // The other six periodic telemetry publishers remain BEST_EFFORT.  The
+  // service response also remains RELIABLE.
+  RCCHECK(rclc_publisher_init_default(
       &odomPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
       "odom"));
+  RCCHECK(rmw_uros_set_publisher_session_timeout(
+      rcl_publisher_get_rmw_handle(&odomPublisher),
+      LARGE_PUBLISH_TIMEOUT_MS));
 
   RCCHECK(rclc_publisher_init_best_effort(
       &imuPublisher,
@@ -1655,11 +1667,14 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
       "estop/state"));
 
-  RCCHECK(rclc_publisher_init_best_effort(
+  RCCHECK(rclc_publisher_init_default(
       &firmwareInfoPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
       "firmware/info"));
+  RCCHECK(rmw_uros_set_publisher_session_timeout(
+      rcl_publisher_get_rmw_handle(&firmwareInfoPublisher),
+      LARGE_PUBLISH_TIMEOUT_MS));
 
   RCCHECK(rclc_publisher_init_best_effort(
       &driveEnabledPublisher,

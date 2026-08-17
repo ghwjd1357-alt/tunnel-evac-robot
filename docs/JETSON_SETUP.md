@@ -469,9 +469,10 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `transport=serial`, `baud=115200`, `wheel_radius=0.05698`, `control=PI`,
 `kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
-⚠ **굽기 전 보드에서 `version=…-1.3.0` 이 나오는 것이 정상이다**(위 두 상태 표).
-🔴 **D0-FW §73 보완 재검토 뒤 다음 굽기에는 `…runtime-guard-1.6.1` 이 정상**이다. 굽기 전에는
-보드 값을 추정하지 말고 이 표의 `build`와 실제 `/firmware/info`를 그대로 기록한다.
+⚠ `version` 문자열만으로 펌웨어를 판별하지 않는다.
+🟨 **08-17 현장 보드는 미승인 시험 후보 `…runtime-guard-1.6.2`**이며
+`build=Aug 17 2026 21:49:19`를 실제 확인했다. 승인 지문은 아직 1.6.1이므로,
+보드 값과 저장소 승인 상태를 섞지 않는다.
 `FW_GIT_SHA` 는 양쪽 다 0 이라 **이 필드로 커밋을 판별할 수 없다.**
 
 🔴 **08-13 부터 정체 키가 갈라졌다** (검토 §65.1·§65.3 → §66.1). 구판은 `wheel_radius`
@@ -489,7 +490,7 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 기대값을 `.ino` 에서 직접 읽어 대조하고 **화면에 자기 기대값을 같이 찍는다.**
 현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
 
-**🔴 1.6.1 runtime 계수 첫 bench 판독 (검토 §73.5)**
+**🔴 1.6.2 runtime 계수 현장 판독 (검토 §73.5 계약 유지)**
 
 해독 계약의 정본은 `REAL_ROBOT_VALUES §1-g`다. Jetson 앞에서는 다음 순서로
 읽는다.
@@ -512,12 +513,21 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 - 시작·끝 사이 `runtime_overruns` 또는 `disarm_runtime`이 늘거나 `/drive/diag y=7`이면
   중단하고 `runtime_last`·두 max 배열·시각을 같이 남긴다.
 - `/drive/diag y=8` 또는 `disarm_spin` 증가는 enable 응답 spin 실패다.
-- 첫 bench 기대범위는 아직 **미실측**이다. 임시 경계 400,000us에 근접하면
+- 08-17 지면 soak 실측은 phase max `4487,41997,4255,20,1304,798,47165`,
+  publish max `41993,23,7,6,5,5,6,1212`us다. 임시 경계 400,000us에 근접하면
   값을 높이지 말고 원인을 분류한다.
 🔴 기존 "호출 상한 합 320ms" 산술은 CDC write를 1회로만 세었다. 한 판에
 최대 8 publish가 겹칠 수 있으므로, 첫 판의 `y=7` 1회는 하드웨어 고장이 아니라
 **400ms 임계 후보의 반증**으로 먼저 읽고 계측값을 보존한다.
 첫 공중 무장 관측은 **최소 30초** 유지해 1·5·30초 주기가 겹치는 판을 포함한다.
+
+**08-17 1.6.2 현장 결과** — `fw162_ground_soak_0817_2320` 744.697초에서
+`runtime_overruns=0`, `disarm_runtime=0`, `disarm_spin=0`, 전체 loop max 47.165ms다.
+수 초 감시-loop 정지는 재발하지 않았다. 그러나 `publish_failures=13→83`과 함께
+`/odom` header stamp 결측 7회(210~297ms), 수신 최대 공백 346.35ms가 남았다.
+이는 runtime guard 실패가 아니라 **RELIABLE odom 단기 전송 실패**이며 R3는 아직 FAIL이다.
+시험 구간 dmesg의 USB reset·disconnect·`ttyACM` 오류는 0건이다. 상세 판정은
+`MASTER_PLAN §7` 41-f와 `REAL_ROBOT_VALUES §1-g`가 소유한다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
@@ -683,7 +693,7 @@ bash tools/d0_check.sh
 |---|---|---|
 | 1 | 시리얼 장치 | `/dev/teensy_drive` 존재 |
 | 2·3 | `/odom`·`/imu/data` 주기 | **관측 창을 같은 관측자가 끝까지 채움** → 평균 ≥ 하한 · **최대 간격 ≤ EKF 한 주기** · **표본 수**가 창을 채움 · **창 끝에도 수신** |
-| 4 | `/odom` QoS | 발행자 **BEST_EFFORT**(D0-FW 1.6) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
+| 4 | `/odom` QoS | 발행자 **RELIABLE**(D0-FW 1.6.2 · ACK 상한 20ms) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
 | 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(D0-FW 1.6) · 위와 동일 |
 | 6 | 전진 부호 | 바퀴를 손으로 앞으로 굴리면 `linear.x > 0` |
 | 7 | 펌웨어 정체 | `/firmware/info` 의 정체 키가 **`.ino` 와 일치** — 기대값은 스크립트가 소스에서 읽어 화면에 같이 찍는다(§5-d). 🔴 08-13 부터 `wheel_radius` 한 개가 아니라 `odom_wheel_radius`·`control_wheel_radius`·`cmd_wheel_base`·`odom_wheel_base` 넷이다 |
@@ -696,9 +706,9 @@ bash tools/d0_check.sh
 복사해 두면 R3 실측으로 계약을 갱신할 때 **런북만 옛 숫자로 남는다** — 실제로 활성 런북
 두 곳에서 그 드리프트가 났다. 현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
 
-🔴 **D0-FW 1.6부터 주기 telemetry 8개는 전부 BEST_EFFORT다.** 옛 보드(1.5 이하)의
-`/odom`·상태 토픽은 RELIABLE일 수 있지만 BEST_EFFORT 구독자는 양쪽과 모두 매칭된다.
-반대로 새 BEST_EFFORT 발행에 RELIABLE 구독을 붙이면 조용히 0건이므로 검사 4·5를 생략하지 않는다.
+🔴 **D0-FW 1.6.2는 큰 `/odom`·`/firmware/info`만 RELIABLE+20ms이고 나머지 6개는
+BEST_EFFORT다.** BEST_EFFORT 구독자는 양쪽 발행 QoS와 모두 매칭된다. 반대로
+BEST_EFFORT 발행에 RELIABLE 구독을 붙이면 조용히 0건이므로 검사 4·5를 생략하지 않는다.
 
 - 종료 코드 **0 = 전량 통과** · 1 = 실패 · **2 = 불완전**(건너뛴 검사 있음).
   2 를 통과로 기록하지 않는다.
@@ -934,7 +944,7 @@ zero 발행기를 껐다.
 | 항목 | 값 | 관측계 |
 |---|---|---|
 | bag | `~/robot_evidence/d0_watchdog_0811_1938` (노트북 · 젯슨 원본 보존) | **정본** |
-| 마지막 비영 `/cmd_vel` → 마지막 `pose` 이동 | **516.0 ms** (계약 500ms 대비 **+16.0 ms**) | bag |
+| 마지막 비영 `/cmd_vel` → 마지막 `pose` 이동 | **516.0 ms** (펌웨어 발동 500ms 뒤 +16.0ms · 운용 수용선 600ms 이내) | bag |
 | 판정선 민감도 | `2mm/s→536.7` · **`5→516.0`** · `10→495.0` · `20→473.8` ms — 08-07 처럼 10초대로 튀지 않는다 | bag |
 | 조건 2 | 정지 후 **37,130 ms** 관찰 · `pose` 가 `0.2620 / 0.3978` 로 **완전 고정** · 재기동 0 | bag |
 | 영상 | `~/Desktop/d0_evidence/video/IMG_3483.mov` · 3840×2160 HEVC · **59.9925 fps** · 804프레임/13.4초 | 교차 |
@@ -1069,7 +1079,7 @@ ros2 topic echo /drive/diag
 ```
 
 ⚠ **`z=4`(ARMING) 는 눈에 안 띄는 것이 정상이다** — 서비스 콜백 반환과 같은 `loop()` 안에서
-`z=3` 이 되므로 그 사이에 발행이 없다. 현행 1.6.1에서 executor spin 실패는
+`z=3` 이 되므로 그 사이에 발행이 없다. 현행 1.6.x에서 executor spin 실패는
 `z=0/y=8`로 DISARMED가 정상이다. 🔴 **지속 `z=4` 또는 진단 발행 정지는 정상적인 gate
 fail-closed가 아니라 loop 정체·stale 표본 가능성**이므로 `REAL_ROBOT_VALUES §1-f`의 현행
 해석에 따라 loop와 굽힌 펌웨어 정체부터 확인한다.
@@ -1157,10 +1167,10 @@ ros2 topic type /drive/diag       # → geometry_msgs/msg/Vector3
 무장 4 단계를 스크립트가 밟고 `z`·`enabled` 를 자동으로 읽는다. 사람은 E-stop 조작과
 "바퀴가 돌았나" 판정만 한다.
 
-🔴 **1.6.1은 이 축소판 대상이 아니다.** `rearm_gate.h`·`publishDiagnostics()`·
-runtime 해제 배선을 바꾼다. 도구의 예전 해시를 앞당겨 갱신하지 않았으므로 시작 즉시
-판정 불능으로 거부해야 정상이다. Claude 재검토·clean compile·굽기 후에는 **§7-c-E
-13행 전량**을 다시 밟고, 그 실측 결과 없이 축소 해시를 승격하지 않는다.
+🔴 **1.6.1 도입 때는 이 축소판 대상이 아니었다.** `rearm_gate.h`·`publishDiagnostics()`·
+runtime 해제 배선을 바꿨기 때문이다. 1.6.2는 큰 publisher 두 개의 QoS·timeout만
+바꾸고 `rearm_gate.h`·`drive_wiring.h` 내용은 그대로지만, 독립검토·승인 지문 이관 전에는
+축소 해시를 새 후보 승인으로 읽지 않는다.
 
 🔴 **축소가 성립하는 조건은 하나다** — 굽는 diff 가 **상태기계·정지 배선·PWM 출력단을
 안 건드릴 것**. 그래서 도구가 시작할 때 `rearm_gate.h`·`drive_wiring.h` 의 **내용
@@ -1414,7 +1424,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
 | 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. ✅ **잔여 종결(08-12)** — `FW_VERSION` 1.3.0 vs 폴더명 v1_4 불일치는 **08-05 당시의 잔여**였고, 저장소는 08-12 에 `rearm-latch-pi-continuous-low-speed-1.4.0` 으로 정정했다(예약 32 묶음). 🔴 **구동부 확인 사항이 아니다** — 08-06 합의로 펌웨어는 역할 A 소유다. ✅ **08-12 굽기로 보드도 `1.4.0` 이 됐다** — 이제 `1.3.0` 이 보이면 안 구워진 것이다(정체 표 = `§5-d`) |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
-| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ 08-03 역사: `/odom` RELIABLE→BEST_EFFORT 호환. 🔴 D0-FW 1.6 굽기 뒤 `/odom` BEST_EFFORT→BEST_EFFORT를 다시 확인한다 |
+| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ 08-17 보드 `/odom`은 RELIABLE+20ms, EKF 구독은 BEST_EFFORT라 호환된다. `d0_check.sh` 기대도 RELIABLE로 갱신했다 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
 | 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 | ✅ **2026-08-07 통과** — 전기 시공 완주(`ELECTRICAL_BASELINE.md §14`). `평상시 false` · `누름 → true 전환 확인 — 배선 정상`. 같은 실행에서 **검사 1~8 전항목 OK**. ⚠ 08-03 의 `⚠ 물리 버튼 없음·임시 생략` 은 그때의 사실이고 지금은 아니다. 🔴 **이 통과는 신호 경로에 대한 것이다** — 릴레이 DC 차단 정격은 여전히 미증명(`§14-b`) |
 | 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 영상(1차) + `/odom.pose`(정본 측정) 교차 확인 | §7-c-0 | ✅ **종결 — 2026-08-11 (검토 §59 확인).** 🔴 **08-10 재산출 = `519.9 / 532.0 / 516.2 ms`**(구 기준 500ms 초과 16.2~32.0ms). ~~537.1~~ 은 검토 §52 가 결함을 재현한 구판 도구의 값이라 폐기했다. ✅ **08-11 영상 분석 완료** — `28프레임=466.7ms`(bag 1522 와 같은 시행) · 🔴 **영상은 하한이라 PASS 를 못 만든다**(bag 과의 차이 49.5ms 는 **관측계 차이**이지 렌더 지연 확정이 아니다 — 검토 §57.2) · ✅ **조건 2 는 펌웨어 독립 증거로 충족**(정지 후 0.595 mm/s). ✅ **결정 1 = ⓐ 기준 재정의**(08-11 사용자) — 🔴 **구현자 정식화는 검토 §57 에서 확인 보류**. ✅ **사용자 근거 한 줄 = 08-11 결정**(`0.12 m/s` 에서 약 7cm 수용 · 재개방 = 상한 상향). ✅ **08-11 19:41 현행 펌웨어 재측정 완료** — `d0_watchdog_0811_1938` **`516.0 ms`**(1-b `≤600ms` 충족) · 조건 2 = 정지 후 37,130ms `pose` 완전 고정 · 영상 `IMG_3483.mov` 교차 `450.1ms`(하한) · 🔴 **`관측 완전성 413~650 238프레임 ✅`**(전 구간은 손각대 흔들림으로 판정 불능 — 끊은 사실을 판정과 같이 읽는다). ✅ **검토 §59 = 증거 승인 · 정식화 확인 · `#11` 종결 · R1 진입 가능**(P0 0 · P1 0 · P2 2). 🔴 **재개방 = 속도 상한 상향 · 재굽기/안전 배선 변경 · 자율 발행자 연결.** 전문 = §7-c-0 |

@@ -3,7 +3,10 @@
 
 08-17 bag에서는 `/odom`·`/imu/data`만이 아니라 같은 Teensy loop의 상태
 토픽까지 동시에 비었다. 펌웨어의 주기 RELIABLE publish가 각각 최대 1초 ACK를
-기다릴 수 있었고, 단일 loop 안에서 그 대기가 연쇄될 수 있었다.
+기다릴 수 있었고, 단일 loop 안에서 그 대기가 연쇄될 수 있었다. 1.6.1에서 8개를
+모두 BEST_EFFORT로 바꿨지만 512-byte MTU보다 큰 `/odom`·`/firmware/info`가 아예
+발행되지 않는 회귀를 실차에서 재현했다. 두 대형 표본만 RELIABLE+20ms 상한으로
+되돌리고 나머지 6개는 BEST_EFFORT로 유지한다.
 
 이 시험은 지목된 `/odom` 한 자리만 보지 않는다. 생산 `.ino`에서 주기 publisher
 8개와 실제 publish 8개를 전수하고, 현장 도구 구독 12곳과 bag override 8곳까지
@@ -40,6 +43,22 @@ PUBLISHERS = {
     "firmwareInfoPublisher": "RUNTIME_PUBLISH_FIRMWARE_INFO",
     "driveEnabledPublisher": "RUNTIME_PUBLISH_DRIVE_ENABLED",
     "driveDiagPublisher": "RUNTIME_PUBLISH_DRIVE_DIAG",
+}
+
+PUBLISHER_QOS = {
+    "odomPublisher": "default",
+    "imuPublisher": "best_effort",
+    "imuYawPublisher": "best_effort",
+    "gyroBiasPublisher": "best_effort",
+    "estopStatePublisher": "best_effort",
+    "firmwareInfoPublisher": "default",
+    "driveEnabledPublisher": "best_effort",
+    "driveDiagPublisher": "best_effort",
+}
+
+LARGE_PUBLISHERS = {
+    "odomPublisher",
+    "firmwareInfoPublisher",
 }
 
 TELEMETRY_TOPICS = {
@@ -91,8 +110,25 @@ def assert_publisher_contract(testcase, source):
     testcase.assertEqual(len(initializers), len(PUBLISHERS), initializers)
     testcase.assertEqual(
         {name for _, name in initializers}, set(PUBLISHERS), initializers)
-    testcase.assertTrue(
-        all(kind == "best_effort" for kind, _ in initializers), initializers)
+    testcase.assertEqual(
+        {name: kind for kind, name in initializers}, PUBLISHER_QOS,
+        initializers)
+
+    timeout_match = re.search(
+        r"static\s+const\s+int\s+LARGE_PUBLISH_TIMEOUT_MS\s*=\s*(\d+)\s*;",
+        source,
+    )
+    testcase.assertIsNotNone(timeout_match)
+    testcase.assertEqual(int(timeout_match.group(1)), 20)
+    timeout_publishers = re.findall(
+        r"rmw_uros_set_publisher_session_timeout\s*\(\s*"
+        r"rcl_publisher_get_rmw_handle\s*\(\s*&([A-Za-z][A-Za-z0-9]*Publisher)"
+        r"\s*\)\s*,\s*LARGE_PUBLISH_TIMEOUT_MS\s*\)",
+        source,
+        re.S,
+    )
+    testcase.assertEqual(len(timeout_publishers), len(LARGE_PUBLISHERS))
+    testcase.assertEqual(set(timeout_publishers), LARGE_PUBLISHERS)
 
     measured, raw_matches = publish_contract(source)
     testcase.assertEqual(len(raw_matches), len(PUBLISHERS), raw_matches)
@@ -328,7 +364,8 @@ int main()
   if (guard.lastOverrunCode !=
       RUNTIME_PUBLISH_CODE_BASE + RUNTIME_PUBLISH_IMU) return 11;
   if (runtimeGuardRecordPhase(&guard, RUNTIME_PHASE_COUNT, 1U)) return 12;
-  if (runtimeGuardRecordPublish(&guard, RUNTIME_PUBLISH_COUNT, 1U, true)) return 13;
+  if (runtimeGuardRecordPublish(
+          &guard, RUNTIME_PUBLISH_COUNT, 1U, true)) return 13;
   return 0;
 }
 '''
@@ -339,35 +376,55 @@ class FirmwareRuntimeGuardTest(unittest.TestCase):
     def setUp(self):
         self.ino = read(INO_PATH)
 
-    def test_all_periodic_publishers_are_best_effort_and_measured(self):
+    def test_periodic_publishers_match_mtu_qos_and_are_measured(self):
         assert_publisher_contract(self, self.ino)
 
-    def test_publisher_enumeration_rejects_addition_removal_and_reliable(self):
+    def test_publisher_enumeration_rejects_qos_timeout_and_count_mutations(
+            self):
         removed = self.ino.replace(
-            "rclc_publisher_init_best_effort(\n      &odomPublisher,",
-            "rclc_publisher_init_best_effort(\n      &notTelemetry,",
+            "rclc_publisher_init_default(\n      &odomPublisher,",
+            "rclc_publisher_init_default(\n      &notTelemetry,",
             1,
         )
         with self.assertRaises(AssertionError):
             assert_publisher_contract(self, removed)
 
         added = self.ino.replace(
-            "  // Periodic telemetry must never wait",
+            "  // BEST_EFFORT XRCE output cannot fragment",
             "  RCCHECK(rclc_publisher_init_best_effort(\n"
             "      &extraPublisher, &node, type_support, \"extra\"));\n\n"
-            "  // Periodic telemetry must never wait",
+            "  // BEST_EFFORT XRCE output cannot fragment",
             1,
         )
         with self.assertRaises(AssertionError):
             assert_publisher_contract(self, added)
 
-        reliable = self.ino.replace(
-            "rclc_publisher_init_best_effort(\n      &odomPublisher,",
-            "rclc_publisher_init_default(\n      &odomPublisher,",
-            1,
+        mutations = (
+            # Large samples must not return to unfragmented BEST_EFFORT.
+            self.ino.replace(
+                "rclc_publisher_init_default(\n      &odomPublisher,",
+                "rclc_publisher_init_best_effort(\n      &odomPublisher,", 1),
+            self.ino.replace(
+                "rclc_publisher_init_default(\n      &firmwareInfoPublisher,",
+                "rclc_publisher_init_best_effort(\n"
+                "      &firmwareInfoPublisher,", 1),
+            # Small telemetry must not regain the default 1000ms ACK wait.
+            self.ino.replace(
+                "rclc_publisher_init_best_effort(\n      &imuPublisher,",
+                "rclc_publisher_init_default(\n      &imuPublisher,", 1),
+            # Both bounded reliable publishers and the exact bench candidate
+            # timeout are part of the safety contract.
+            self.ino.replace(
+                "rcl_publisher_get_rmw_handle(&odomPublisher),",
+                "rcl_publisher_get_rmw_handle(&imuPublisher),", 1),
+            self.ino.replace(
+                "LARGE_PUBLISH_TIMEOUT_MS = 20;",
+                "LARGE_PUBLISH_TIMEOUT_MS = 1000;", 1),
         )
-        with self.assertRaises(AssertionError):
-            assert_publisher_contract(self, reliable)
+        for mutated in mutations:
+            self.assertNotEqual(mutated, self.ino)
+            with self.assertRaises(AssertionError):
+                assert_publisher_contract(self, mutated)
 
     def test_runtime_guard_production_boundary_and_observability(self):
         rc, output = compile_guard(read(GUARD_PATH), GUARD_MAIN)
@@ -423,7 +480,8 @@ class FirmwareRuntimeGuardTest(unittest.TestCase):
             header, "RuntimePublishSite", "RUNTIME_PUBLISH_")
 
         # 배열 크기는 시험에 숫자를 복사하지 않고 헤더에서 읽는다.
-        phase_value, phase_args = firmware_info_fields(self.ino)["phase_max_us"]
+        phase_value, phase_args = firmware_info_fields(
+            self.ino)["phase_max_us"]
         mutated = self.ino.replace(
             "phase_max_us=" + phase_value,
             "phase_max_us=" + phase_value.replace(",%lu", "", 1),
@@ -462,14 +520,18 @@ class FirmwareRuntimeGuardTest(unittest.TestCase):
     def test_state_messages_refresh_after_preceding_publish_side_effects(self):
         assert_diagnostics_refresh_contract(self, self.ino)
         diagnostics = extract_function(self.ino, "publishDiagnostics")
-        assignment = "  driveEnabledMessage.data = (driveGate.state == DRIVE_ARMED);\n"
+        assignment = (
+            "  driveEnabledMessage.data = "
+            "(driveGate.state == DRIVE_ARMED);\n")
         mutated_diagnostics = diagnostics.replace(assignment, "", 1)
         mutated_diagnostics = mutated_diagnostics.replace(
             "  RCSOFTCHECK(publishMeasured(\n"
-            "      &gyroBiasPublisher, &gyroBiasMessage, RUNTIME_PUBLISH_GYRO_BIAS));",
+            "      &gyroBiasPublisher, &gyroBiasMessage, "
+            "RUNTIME_PUBLISH_GYRO_BIAS));",
             assignment
             + "  RCSOFTCHECK(publishMeasured(\n"
-            "      &gyroBiasPublisher, &gyroBiasMessage, RUNTIME_PUBLISH_GYRO_BIAS));",
+            "      &gyroBiasPublisher, &gyroBiasMessage, "
+            "RUNTIME_PUBLISH_GYRO_BIAS));",
             1,
         )
         mutated = self.ino.replace(diagnostics, mutated_diagnostics, 1)
@@ -494,7 +556,8 @@ class FirmwareRuntimeGuardTest(unittest.TestCase):
         relative = "tools/rearm_field_regress.py"
         source = read(os.path.join(ROOT, relative))
         mutated = source.replace("qos_profile_sensor_data)", "10)", 1)
-        calls = re.findall(r"create_subscription\s*\([\s\S]{0,180}?\)", mutated)
+        calls = re.findall(
+            r"create_subscription\s*\([\s\S]{0,180}?\)", mutated)
         self.assertFalse(
             len(calls) == FIELD_CONSUMERS[relative]
             and all("qos_profile_sensor_data" in call for call in calls))

@@ -187,7 +187,7 @@ class ContractTest(unittest.TestCase):
         self.assertGreater(verdict['last_move_ms'], wr.PRINT_WINDOW_MS[1])
 
     def test_18_constants_match_the_canon(self):
-        self.assertEqual(500, wr.WATCHDOG_CONTRACT_MS)
+        self.assertEqual(600, wr.WATCHDOG_CONTRACT_MS)
         self.assertEqual(2000, wr.REQUIRED_TAIL_MS)
         self.assertEqual(0.5, wr.MOVE_EPS_MM)          # 잡음 바닥
         self.assertEqual(5.0, wr.MOTION_RATE_MM_S)     # 이동 판정선 — 다른 값이다

@@ -248,21 +248,24 @@ costmap·footprint·TF 가 전부 어긋났을 것이다.
 ### ★★ §1-d. 펌웨어 소스에서 확정된 값 (08-17 D0-FW 갱신 — **최종 정본**)
 
 > 출처 = 저장소 `firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino`.
-> **현재 작업본은 §75 최종 독립검토에서 P0 0·bench 조건부 승인을 받았고 아직 보드에 굽지 않았다.** 회신 PDF·옛 수령본과
-> 다르면 검토가 끝난 저장소 소스와 실제 보드의 `build`를 각각 확인한다.
+> **현재 보드는 08-17 현장 시험용 1.6.2 후보**(`build=Aug 17 2026 21:49:19`)다.
+> 1.6.2 diff는 구현자 Codex가 자기 승인하지 않으며 독립검토가 남았다. 회신 PDF·옛
+> 수령본과 다르면 저장소 소스와 실제 보드의 `build`를 각각 확인한다.
 
 **ⓐ QoS — 회신 PDF 가 틀렸다**
 
 | 토픽 | Reliability | 근거 (소스 함수) |
 |---|---|---|
-| `/odom` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
+| `/odom` | **RELIABLE · ACK 상한 20ms** | `rclc_publisher_init_default` + `rmw_uros_set_publisher_session_timeout` |
 | `/imu/data` · `/imu/yaw_deg` · `/imu/gyro_bias` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
-| `/estop/state` · `/firmware/info` · `/drive/enabled` · `/drive/diag` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
+| `/firmware/info` | **RELIABLE · ACK 상한 20ms** | `rclc_publisher_init_default` + 같은 timeout |
+| `/estop/state` · `/drive/enabled` · `/drive/diag` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
 
-🔴 **08-17 이전 이력** — `/odom`·상태 4개는 `init_default`라 RELIABLE이었다. micro-ROS의
-RELIABLE 발행 대기 상한은 이 환경에서 한 호출당 1000ms이고, 08-17 bag에서 같은 단일 loop의
-`/odom`·`/imu/data`·상태 토픽이 최대 **6.85초 함께 비었다.** 그래서 주기 telemetry 8개를
-전부 BEST_EFFORT로 통일했다. `/drive/enable` **서비스 응답**은 RELIABLE 계약을 유지한다.
+🔴 **왜 1.6.2가 필요한가** — 1.6.1은 8개를 전부 BEST_EFFORT로 바꿨지만 설치본
+`micro_ros_arduino 2.0.8-humble`의 custom-transport MTU가 512B라 약 700B `/odom`과
+최대 1407자 `/firmware/info`가 아예 발행되지 않았다. 반대로 구판 RELIABLE 기본 상한
+1000ms는 단일 loop에서 최대 **6.85초** ACK 대기를 만들었다. 그래서 큰 두 표본만
+RELIABLE로 복구하되 상한을 20ms로 줄였다. `/drive/enable` 서비스 응답도 RELIABLE이다.
 
 ★ DDS 호환 규칙은 그대로다. 구독자가 BEST_EFFORT면 RELIABLE·BEST_EFFORT 발행자 모두와
 매칭되고, `robot_localization`은 이미 BEST_EFFORT로 구독한다. **고장 조합은 하나뿐이다:**
@@ -908,8 +911,8 @@ fail-closed"* 라고 적혀 있었다. **거짓이다.** `rearmGateArmBarrierSta
 
 ### ★★ §1-g. D0-FW runtime 계측·해독 계약 (2026-08-17 · 검토 §73 보완)
 
-현재 펌웨어 후보는 `rearm-latch-pi-runtime-guard-1.6.1`이다. 🔴 아직 굽지
-않았고, 아래 기대범위의 **실측값은 빈칸**이다.
+현재 보드의 현장 시험 후보는 `rearm-latch-pi-runtime-guard-1.6.2`다. 🔴 구현자가
+직접 시험했지만 자기 승인하지 않으며, 승인 지문 정본은 아직 1.6.1에 머물러 있다.
 
 | 필드 | 뜻 | 현장 판독 |
 |---|---|---|
@@ -952,11 +955,27 @@ firmware_info`.
 **§75 판정은 P0 0이며 현재 Tier A diff는 최종 승인·커밋 가능하다.** 범위는 승인 지문·clean
 compile 뒤 모터 전력 0V·바퀴 공중·물리 E-stop 담당자의 bench까지이며, 실차 결함 종결은 아니다.
 
-| 계측 | 첫 bench 기대범위 | 재개방 |
+| 계측 | 08-17 1.6.2 실측 | 재개방 |
 |---|---|---|
-| `phase_max_us` 7개 | **미실측** | 임시 경계 400,000us 근접/초과 |
-| `publish_max_us` 8개 | **미실측** | 특정 publish 지연이 반복 최대를 소유 |
-| `runtime_overruns` | 첫 시행 시작·끝 차이 **0 기대** | 1 이상 증가하면 임계를 높이지 말고 원인 분류 |
+| `phase_max_us` 7개 | 지면 soak 최종 **4487,41997,4255,20,1304,798,47165** | 임시 경계 400,000us 근접/초과 |
+| `publish_max_us` 8개 | 지면 soak 최종 **41993,23,7,6,5,5,6,1212** | 특정 publish 지연이 반복 최대를 소유 |
+| `runtime_overruns` | 공중 409.4s·지면 744.7s 모두 **0**, `runtime_last=0,0` | 1 이상 증가하면 임계를 높이지 말고 원인 분류 |
+| `disarm_runtime`·`disarm_spin` | 시작→끝 **0→0 · 0→0** | 하나라도 증가 |
+| `publish_failures` | 지면 soak **13→83(+70)** | 아래 단기 전송 실패 분류를 유지 |
+
+**08-17 지면 soak 해석** — `fw162_ground_soak_0817_2320`은 744.697초, 비영 명령
+341.7초, odom 누적 경로 22.256m다. 6.85초짜리 board-loop 정지는 재발하지 않았고
+loop 작업시간 최대도 47.165ms였다. 다만 RELIABLE `/odom` 전송 실패가 7묶음 생겨
+header stamp가 210~297ms 건너뛰었고, rosbag 수신 간격도 최대 346.35ms(`/imu/data`
+349.41ms)였다. `publish_failures +70`과 같은 시각에 맞으며, 400ms runtime guard를
+발동할 정지는 아니지만 **R3의 33.33ms 입력 주기 계약은 미통과**다. 시험 전 구간을 덮은
+dmesg에는 USB reset·disconnect·`ttyACM` 오류가 새로 생기지 않았다. `/scan`은 라이다가
+연결되지 않아 0건이므로 Teensy와 라이다의 동시 비교에는 쓰지 않는다.
+
+같은 시행에서 E-stop 계수는 `raw_edges=39→67`, `rejected=5→19`,
+`rejected_max=12ms`, `disarm_estop=3→3`이었다. 30ms 미만 HIGH 펌스 14건은
+디바운스가 전부 걸러 추가 false stop은 없었지만, 짧은 전기 잡음 자체는
+남아 있다. 원인·재개방 규약은 `ELECTRICAL_BASELINE §4-f-5` 정본을 따른다.
 
 🔴 `RUNTIME_STALL_LIMIT_US=400000`은 **첫 bench 계측용 임시값**이다. 기존
 320ms 산술은 USB CDC write 120ms를 loop당 1회로만 세었지만, 생산 코드에서는
@@ -983,11 +1002,11 @@ odom 1 + IMU 2 + diagnostics 4 + firmware info 1 = **한 판 최대 8회 publish
 
 | # | 값 | 반영할 **신규** 파일 | 내용 | 상태 |
 |---|---|---|---|---|
-| 1 | separation 0.49 · 반지름 **0.053** | `tunnel_bringup/urdf/robot_real.urdf` | 실측 치수로 **새로 작성**(시뮬 URDF 복사 아님, Gazebo 태그 0). 바퀴 반경이 작아지므로 belly clearance 재확인 (URDF 함정 ① — `PITFALLS.md §5`) | ✅ **08-02 반영 완료** (예약 19 ③). separation 0.49(`y=±0.245`) 유지 · `z` **0.065 → 0.053**. 차고는 실측 **20mm** 를 주석에 기록(기구 문제라 URDF 로 못 고친다 — R6 항목) |
+| 1 | separation 0.49 · 반지름 **0.053** | `tunnel_bringup/urdf/robot_real.urdf` | 실측 치수로 **새로 작성**(시뮬 URDF 복사 아님, Gazebo 태그 0). 바퀴 반경이 작아지므로 belly clearance 재확인 (URDF 함정 ① — `PITFALLS.md §5`) | ✅ **08-02 반영 완료**. 🔴 08-17 외장 판재 뒤 기구 재실측은 축 높이 LF/LR/RF/RR **43.5/43.5/44.0/43.5mm**, 최저 차고 **19mm**다. URDF 기하 반경은 오늘 바꾸지 않았다 |
 | 2 | footprint 0.55×0.57 | `tunnel_bringup/config/nav2_params_real.yaml` | 꼭짓점 = `[[0.285,0.275],[0.285,-0.275],[-0.285,-0.275],[-0.285,0.275]]` (§3). `inflation_radius ≥ 외접반경 0.40` 확인 (현 0.9 여유 있음) | ✅ 반영 (local·global costmap 양쪽) |
 | 3 | **IMU** 장착 오프셋 | `tunnel_bringup/urdf/robot_real.urdf` | 실측 후 `base_link→imu_link` 고정 TF | ✅ **08-02 수령** — 3차 회신 §10: 바닥기준 `x/y/z = 0/0/392mm`, `rpy = 0/0/-90°`. → URDF 값 = `xyz="0 0 0.339" rpy="0 0 -1.5708"` (z = 0.392 − 0.053, §1-b). ✅ **08-02 반영 완료** (예약 19 ④) — `tf2_echo base_footprint imu_link` 가 **0.392 m · yaw −90°** 로 나와 **바닥 기준 실측과 일치**함을 확인했다. ⚠ 부호 검산은 여전히 R0 몫이다 |
 | 3-a | **라이다** 장착 오프셋 | `tunnel_bringup/urdf/robot_real.urdf` | `base_link→lidar_link` 고정 TF. **라이다는 몸통 최상면보다 위** (자기타격 방지) | 🟢 **2026-08-13 실측 완료 — 5번째 미해결이 닫혔다.** 값·근거 = 아래 **§3-a-1**. URDF 반영은 `src/**` 동결이라 사용자 승인 대기 |
-| 3-b | 몸통 높이 · 차고 · wheelbase | `tunnel_bringup/urdf/robot_real.urdf` | 지상고 확인은 URDF 숫자가 아니라 기구 확인 사항 | 🟨 **부분** — 08-02 수령: **몸통 최저점→바닥 20mm**. ⚠ **매우 낮다** — 터널 바닥 요철·케이블·물웅덩이 걸림 위험(R6 항목). 앞뒤 wheelbase 는 여전히 ❌(시각화 전용이라 주행 영향 0) |
+| 3-b | 몸통 높이 · 차고 · wheelbase | `tunnel_bringup/urdf/robot_real.urdf` | 지상고 확인은 URDF 숫자가 아니라 기구 확인 사항 | 🟨 **부분** — 08-17 외장 판재 뒤 **몸통 최저점→바닥 19mm**. ⚠ 매우 낮아 평탄한 바닥 전용이며 터널 요철·케이블·물웅덩이는 R6 위험이다. 앞뒤 wheelbase 는 여전히 ❌(시각화 전용이라 주행 영향 0) |
 | 4 | TOTAL_PPR **2641.1** · 체배 ×4 | Teensy 펌웨어 | 구동부 몫 — 역할 A 는 `/odom` 결과만 소비 | (구동부) ✅ 08-02 확정 |
 | 5 | (시뮬 자산) | `src/tunnel_sim/**` | **변경 금지.** T자·쌍굴 회귀 기준선으로 보존 | ✅ 무변경 유지 |
 
@@ -1022,7 +1041,10 @@ lidar_joint z = 0.832 − 0.053 = 0.779 m
 🔴 **동결 예외 5회차**(사용자 명시 승인 · 범위 = 그 한 줄) — 기록·전제조건·재개방 조건 3종 =
 `FREEZE_MANIFEST.md §10.26`. 굽기 당일 **줄자를 다시 재 `832 mm` 로 일치**함을 확인하고 넣었다
 (핸드오프 함정 ① — 줄자 하나가 상수를 바꾸게 두지 않는다).
-⚠ **하중이 바뀌면 이 값은 그 순간 무효다**(아크릴 4판·배터리 교체·장비 추가 — `§1-b` 재개방 공통).
+✅ **2026-08-17 외장 판재 뒤 재측정** — 실제 스캔 평면 **831mm**, TF
+`base_footprint→lidar_link` **832mm**로 차이 1mm다. `lidar_joint z=0.779`는 그대로
+유지했고 URDF를 다시 수정하지 않았다. 최저 차고는 **19mm**다. 이후 배터리·장비·마스트가
+바뀌면 다시 재개방한다.
 
 **검증 2건**:
 - 🟢 **유령 장애물 없음** — 벽 1m 앞에서 `/scan` 최소 거리 `1.0035 m`. 로봇 반폭이 `0.275m`

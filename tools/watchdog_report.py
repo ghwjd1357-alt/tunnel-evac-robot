@@ -57,7 +57,9 @@ MOTION_RATE_MM_S = 5.0     # 관측 주행속도 약 0.1 m/s 의 5%. 이보다 �
 MOTION_WINDOW_MS = 200     # 그 속도를 재는 창. 창 안 변위 1.0mm 가 실판정 임계가 된다
 # 판정선의 민감도를 항상 함께 낸다 — 임계 하나로 수치가 흔들리는 것을 숨기지 않는다.
 SENSITIVITY_RATES_MM_S = (2.0, 5.0, 10.0, 20.0)
-WATCHDOG_CONTRACT_MS = 500
+# 펌웨어가 정지를 *시작하는* WATCHDOG_TIMEOUT_MS=500과 실제 완전 정지의 운용
+# 수용선은 다른 값이다. 정본 JETSON_SETUP §7-c-0의 1-b는 총 정지 <=600ms다.
+WATCHDOG_CONTRACT_MS = 600
 # §7-c-0 조건 2 — 마지막 이동 뒤 이만큼은 관찰해야 "섰다"고 말할 수 있다.
 REQUIRED_TAIL_MS = 2000
 # 출력만 좁히는 값이다. 판정 구간과 혼동하지 않는다(§52.1).
