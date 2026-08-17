@@ -79,11 +79,11 @@ enum DriveReject : uint8_t {
   //    구판은 서비스 경로에서만 이 칸을 채웠다. 그래서 E-stop·NaN·부팅으로 풀린
   //    경우가 전부 `y=0` 으로 보였고, 08-12 에 **진단으로 원인을 못 가려** 6시간을
   //    태웠다(ELECTRICAL_BASELINE §4-f). 이제 푼 주체가 자기 이름을 남긴다.
-  //    ⚠ 값 1~3 의 뜻은 바뀌지 않는다 — 기존 표(`JETSON_SETUP §7-c-E`)는 그대로 유효하다.
+  //    ⚠ 값 1~6 의 뜻은 바뀌지 않는다 — 7·8 은 자동 해제 사유다.
   //    ⚠ `y` 는 **가장 최근 사건**만 담는다. 누계가 필요하면 `x`(서비스)와
   //      `/firmware/info` 의 disarm/estop 계수를 같이 본다.
   //
-  //    🔴 4~6 은 **무장이 실제로 풀린 순간에만** 쓴다 (§63.1 지적 — 1회차 검토).
+  //    🔴 4~8 은 **무장이 실제로 풀린 순간에만** 쓴다 (§63.1 지적 — 1회차 검토).
   //       구판은 이미 DISARMED 인데도 다음 비영 명령마다 6 을 덮어썼다. `/cmd_vel`
   //       10Hz · `/drive/diag` 1Hz 이므로, E-stop 이 푼 4 는 진단이 나가기 전에
   //       평균 10번 덮여 **밖에서는 영영 안 보였다.** 원인을 밝히려고 넣은 칸이
@@ -91,6 +91,8 @@ enum DriveReject : uint8_t {
   REARM_DISARM_ESTOP = 4,        // checkSafety()/cmdVelCallback 이 E-stop 으로 풀었다
   REARM_DISARM_NONFINITE = 5,    // 유한하지 않은 /cmd_vel (§54.3)
   REARM_DISARM_NONZERO = 6,      // ARMED 아닌 상태에서 비영 = 장벽 위반 (§54.2)
+  REARM_DISARM_RUNTIME_OVERRUN = 7,  // runtime phase/publish 가 임시 상한을 넘음 (§73.4)
+  REARM_DISARM_SPIN_RESPONSE = 8,    // enable 응답을 담은 spin 이 실패 (§74.2)
 };
 
 // 호출자가 이번 명령으로 무엇을 해야 하는가. 기본이 정지다.
@@ -105,7 +107,7 @@ struct RearmGate {
   uint32_t zeroSinceMs;     // 센티널로 0 을 못 쓴다.
   uint32_t quietSinceMs;    // PENDING 진입 시각
   uint32_t serviceCalls;    // 도달한 서비스 호출 누계 (거절 포함)
-  uint8_t rejectReason;     // 가장 최근 **사건** 하나 (0~3 = 거절 / 4~6 = 전이 시점의 해제)
+  uint8_t rejectReason;     // 가장 최근 **사건** 하나 (0~3 = 거절 / 4~8 = 전이 시점의 해제)
 
   // 🔴 사유별 단조 증가 누계 — `y` 는 한 칸뿐이라 최근 사건 하나만 담는다.
   //    "이번 주행에서 E-stop 이 몇 번 풀었나"는 이쪽으로만 답이 나온다.
@@ -113,6 +115,8 @@ struct RearmGate {
   uint32_t disarmEstopCount;
   uint32_t disarmNonfiniteCount;
   uint32_t disarmNonzeroCount;
+  uint32_t disarmRuntimeCount;
+  uint32_t disarmSpinCount;
 };
 
 // ── 전이표 ───────────────────────────────────────────────────────────────────
@@ -143,6 +147,8 @@ static inline void rearmGateInit(struct RearmGate* g)
   g->disarmEstopCount = 0;
   g->disarmNonfiniteCount = 0;
   g->disarmNonzeroCount = 0;
+  g->disarmRuntimeCount = 0;
+  g->disarmSpinCount = 0;
 }
 
 // DISARMED 로 가는 유일한 문. 타이머를 전부 지운다 — 남겨 두면 다음 hold 가
@@ -172,6 +178,10 @@ static inline bool rearmGateDisarmWithReason(struct RearmGate* g, uint8_t reason
     g->disarmNonfiniteCount++;
   } else if (reason == REARM_DISARM_NONZERO) {
     g->disarmNonzeroCount++;
+  } else if (reason == REARM_DISARM_RUNTIME_OVERRUN) {
+    g->disarmRuntimeCount++;
+  } else if (reason == REARM_DISARM_SPIN_RESPONSE) {
+    g->disarmSpinCount++;
   }
   return true;
 }

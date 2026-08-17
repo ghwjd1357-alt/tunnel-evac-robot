@@ -1482,3 +1482,55 @@ FLASH code 294,176 / RAM1 variables 62,656 로 지문 3개 일치.
 🔴 **변이로 감도 증명**: 하한 제거 / 상한 제거 / `vx` 상한 제거 각각에서 해당 사례를
 놓치는 것을 확인. ⚠ **실측 표본은 전부 `≤0` 규칙 하나로 잡힌다** — 하한·상한은 실측이
 요구한 규칙이 아니라 방어적으로 더 둔 것이고, 그 사실을 회귀가 스스로 검사한다.
+
+---
+
+## 10.28 🔴 **일곱 번째 예외** — 08-17 D0-FW 단일 loop 정지 계측·fail-closed
+
+| 항목 | 값 |
+|---|---|
+| 승인 경계 | 2026-08-17 사용자가 Codex 구현자 예외를 명시. Claude Opus 5 §74 보완 뒤 구현자와 다른 Codex 세션 §75가 **P0 0 · P1 2 · P2 1**, **현재 Tier A diff 최종 승인·커밋 가능**으로 판정했다. 범위는 지문·clean compile 뒤 바퀴 공중 bench까지이며 실차 결함 종결은 아님 |
+| 열린 이유 | `drive_0817_1325`에서 ARMED·`cmd_vel wz=-1.0` 지속 중 Teensy 8 telemetry가 약 6.85초 생성되지 않음. 단일 `loop()` 정지로 watchdog·E-stop 표본·PWM 갱신까지 같이 멈추는 안전 구조 결함 |
+| 실제 변경 | 주기 telemetry 8개 BEST_EFFORT, publish 8·phase 7 계측, runtime overrun 해제 사유 7·`disarm_runtime`, spin 응답 실패 해제 사유 8·`disarm_spin`, state-bearing 진단 발행 직전 상태 재생성. `src/tunnel_bringup` 3파일은 **주석·docstring 전용**(QoS 배경 설명 정정, 실행 코드 0줄). 임시 경계는 실측 전 **400ms** |
+| 변경 안 함 | `CMD_WHEEL_BASE`, FF/게인, 지도 자산, 하드웨어 watchdog, 08-14 torn `/odom` 원인, §72.2 odom 3×3 가드 구현 |
+| 회귀 | runtime-guard **11/11**, re-arm host **989/0 + 구조 11/0**, firmware-info **61/61**·상한 1407/1535. 전체 게이트는 `CURRENT_HANDOFF` 현재 결과를 따름 |
+
+**§73 조건부 수용과 보완 폐포**
+
+- **사건 시각 커널 기록은 미관측**이다. `dmesg_drive_0817_1320.log`는 주행 전
+  13:21에 끝나 13:30 정지를 보지 못했다. USB 재열거를 기각하지 않는다.
+- **runtime 임시 경계 400ms는 실측 전 후보**다. 기존 320ms 산술은 CDC
+  write를 loop당 1회로 세었지만 생산 코드에서는 한 판 최대 8 publish가 겹칠 수
+  있다. 400ms가 정상 상한 위라고 단정하지 않고 첫 bench 계측을 받는다. `phase_max_us`·
+  `publish_max_us` 실측 분포 전에 최종값이라고 쓰지 않는다.
+- **runtime overrun은 `/drive/diag y=7`**로 실제 해제 순간에만 남고,
+  `disarm_runtime`이 전이 누계를 보존한다.
+- **spin 응답 실패는 `/drive/diag y=8`**로 실제 해제 순간에만 남고,
+  `disarm_spin`이 전이 누계를 보존한다.
+- **runtime 계수 해독표가 현장 계약**이다. 코드 0~6·16~23과 배열 순서는
+  `REAL_ROBOT_VALUES §1-g`·`JETSON_SETUP §5-d`에서 소유한다.
+- **§74 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다.** 실차 결함
+  종결·R6 진입 승인이 아니다.
+- **§75 최종 독립 재검토는 P0 0·P1 2·P2 1이며 현재 Tier A diff의 커밋을 승인했다.**
+  구현자와 다른 Codex 세션이 검토했고, 모델명이 아니라 구현자≠최종 승인자 불변조건을 지켰다.
+  P1은 ① 400ms 이상 실패 spin에서 사유 7이 먼저 남아 사유 8이 사라질 수 있음
+  ② enum 숫자 wire code 변이를 회귀가 못 잡음이다. 둘 다 모터 DISARMED 성질은 유지하며,
+  같은 사슬 3회차라 `AGENTS §6`의 조건부 수용으로 동결한다.
+- 승인된 스케치 소스 내용 지문은 `.ino`·`rearm_gate.h`·`drive_wiring.h`·
+  `estop_debounce.h`·새 `runtime_guard.h` **5개**이며 값의 유일한 정본은
+  `FIRMWARE_REBUILD §4`다. 구판 지문으로 rc=1을 확인한 뒤 §75 승인 후 이관했다.
+- 지문 이관 뒤 실제 precheck **rc=0**·픽스처 **73/73**, clean compile 링크 성공.
+  FLASH code/data/headers **295,072/86,500/8,568**, RAM1 variables **62,784**, RAM2
+  **12,448**, 환경 지문 **10607/158**. 아직 업로드하지 않았고 상세는 `FIRMWARE_REBUILD §4-c-3`이다.
+
+**전제·재개방**
+
+- 전제 = 모터 전력 0V·바퀴 공중·물리 E-stop 담당자, 지문 이관 후 clean
+  compile, 첫 판에서 `phase_max_us`·`publish_max_us`를 반드시 회수.
+- §75 추가 전제 = enable 호출과 겹친 `y=7`은 spin 실패를 배제하지 못하고,
+  `runtime_last` 숫자는 현행 header enum과 수동 대조한다.
+- 재개방 = 정상 loop가 400ms에 근접/초과, `runtime_overruns>0`, `y=7`,
+  `y=8`/`disarm_spin` 증가, 수 초
+  telemetry 동시 공백, 사건 시각 dmesg USB/agent 오류, enable 실패/timeout과 overrun 동시
+  관측, 문서와 header enum 불일치, 자동 판독 도입 중 하나. 그때 임계를 단순히 높이지 않고
+  관측 원인을 다시 분류한다.

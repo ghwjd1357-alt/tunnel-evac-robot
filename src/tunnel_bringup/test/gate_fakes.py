@@ -30,10 +30,10 @@ gate_fakes.py — `readiness_gate` 회귀용 '가짜 조건' 발생기 (로봇·
                    **관측 가능한 결과**(소실→복구→ACTIVE 1회 ⇒ rc 1)를 증명한다.
   action     : 액션 서버를 그래프에 올려 둔다 (goal 은 전부 거절 — 존재만 흉내).
 
-[QoS 를 일부러 BEST_EFFORT 로 발행하는 이유]
-  소스 v1.4 실계약은 /odom=RELIABLE, /imu/data=BEST_EFFORT 다.
-  페이크는 실차 /odom 의 직접 복제가 아니라, 더 약한 BEST_EFFORT
-  발행자와도 매칭해야 하는 게이트 구독 QoS 회귀를 검사한다.
+[QoS 를 BEST_EFFORT 로 발행하는 이유]
+  08-17 D0-FW부터 실차의 주기 telemetry 8개가 전부 BEST_EFFORT다.
+  RELIABLE ACK 대기가 단일 모터 loop를 최대 6.85초 세운 실측을 반영한다.
+  페이크도 같은 계약으로 readiness gate의 구독 QoS 회귀를 검사한다.
   게이트가 RELIABLE 로 바뀌는 순간 /imu/data 호환 계약이 깨져 회귀가 실패한다.
 
 [실행 — 하네스(tools/test_gate_regression.sh)가 부른다]

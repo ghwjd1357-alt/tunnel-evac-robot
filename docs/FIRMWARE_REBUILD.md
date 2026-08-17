@@ -125,8 +125,8 @@ arduino-cli compile -b teensy:avr:teensy41 --output-dir /tmp/fwout teensy_integr
 bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1 = 멈춘다 / 2 = 판정 불능
 ```
 
-🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). **2026-08-11 지문 이관 후
-허용된 변경은 세 건**이고, 아래 64자리 세 개가 **이 절의 정본**이다:
+🔴 **판정하는 값은 파일 **내용**의 sha256 다** (patch 가 아니다). 현재 승인된 스케치 소스는
+아래 **5개**이며, 64자리 다섯 개가 **이 절의 정본**이다:
 
 ✅ **2026-08-12 — `.ino` 지문을 예약 32 계수(`375→335`)로 옮겼다.** `REAL_ROBOT_VALUES §1-f` ⓷ 의
 순서는 `코드 수정 → 빌드 → **구판 지문으로 FAIL** → 독립 검토 → 지문 갱신` 이고, 이번엔 그대로
@@ -156,19 +156,27 @@ bash ~/ros2_ws/tools/firmware_precheck.sh      # 종료 0 = 굽어도 된다 / 1
 (`1102/433`)보다 뒤에 있다. 🔴 **둘 다 다음 firmware 변경 묶음에서 닫는다** — 지금 고치면
 승인받은 blob 이 아니게 된다. 재개방·완료판정 = `MASTER_PLAN §7` 예약 32-d.
 
+✅ **2026-08-17 — 다섯 지문을 §75 승인본으로 이관했다.** 08-17 전 telemetry 6.85초 침묵을
+재현한 뒤 D0-FW 1.6.1을 구현했고, 구판 지문으로 실제 precheck `rc=1`을 유지한 채
+§73 → §74 → **§75(P0 0 · Tier A diff 최종 승인·커밋 가능)**까지 독립 검토했다.
+§75의 P1 2건은 모터 DISARMED 성질을 유지하는 관측 계약이며 `CURRENT_HANDOFF`의 전제·재개방
+조건으로 동결했다. `runtime_guard.h`는 이번 승인에서 새로 들어온 다섯째 스케치 소스다.
+
 ```
-d40d6967b83f54b2bb9ac0d483c0dfb7ba3b70ce7beb22620ec2b82bd68b556d
-  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 447,31 · 1,723줄 / 64,779 bytes · 08-14 §71 승인본 = 구름 반지름 0.05698 + base 0.829 + CONTROL_* 삭제)
-ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340
-  firmware/teensy_integrated_base_v1_4/rearm_gate.h        (298,0 · 298줄 / 16,932 bytes)
+819180ebc9c27bec6cc41befe606f952174097914c7903d54f8afe5cc0faf872
+  firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino     (기준점 대비 569,44 · 1,833줄 / 69,852 bytes · 08-17 §75 승인본 = runtime-guard-1.6.1)
+abff1f7b292f766540854b3c6a8493525f5494f3ff177dd290ed74a3aa77eea3
+  firmware/teensy_integrated_base_v1_4/rearm_gate.h        (308,0 · 308줄 / 17,369 bytes)
 f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860
   firmware/teensy_integrated_base_v1_4/drive_wiring.h      (114,0 · 114줄 / 5,953 bytes)
 126fc729074cbcca170c93c93514c5bddd4545e67d2044d1bbd5734f92380940
   firmware/teensy_integrated_base_v1_4/estop_debounce.h    (신규 · 140,0 · 140줄 / 7,208 bytes · §64 E-stop 디바운스)
+19332991f027569c48e5231d707e1592efb83f5e0a7b584025e74384da539f01
+  firmware/teensy_integrated_base_v1_4/runtime_guard.h     (신규 · 127,0 · 127줄 / 3,935 bytes · §75 승인 runtime 계측·복귀 후 fail-closed)
 ```
 
 ```bash
-sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h,estop_debounce.h}
+sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,rearm_gate.h,drive_wiring.h,estop_debounce.h,runtime_guard.h}
 ```
 
 ✅ **2026-08-14 — `.ino` 지문을 §71 승인본으로 옮겼다.** 08-13 밤 지면이 `0.04603` 을
@@ -187,17 +195,18 @@ sha256sum firmware/teensy_integrated_base_v1_4/{teensy_integrated_base_v1_4.ino,
 `rearm_gate.h` `7b3a0462…`(247,0) · `drive_wiring.h` `f4b6d65e…`(101,0). **더 이상 판정에
 쓰지 않는다.**
 
-허용된 세 건이 담고 있는 것: ① `ESTOP_ACTIVE_LOW true→false`(`.ino:111` 과 그 위 주석 —
+현재 승인된 다섯 소스가 담고 있는 것: ① `ESTOP_ACTIVE_LOW true→false`(`.ino:111` 과 그 위 주석 —
 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 이 재개방된다) ② re-arm 래치 배선 ③ 상태전이 정본
-(`rearm_gate.h`)과 **모터 정지의 관측 가능한 자리**(`drive_wiring.h`).
+(`rearm_gate.h`)과 **모터 정지의 관측 가능한 자리**(`drive_wiring.h`) ④ E-stop 디바운스
+⑤ D0-FW runtime 계측·복귀 후 fail-closed(`runtime_guard.h`와 `.ino` 1.6.1 배선).
 
 ⚠ **구판 기록** — 08-07 기준 허용 변경은 `ESTOP_ACTIVE_LOW` **한 건**이었고 그때의 내용
 sha256 은 `1db24326…`(1307→1313줄 · 37,965→38,458 bytes · 증감 `8 2`)였다. 이 값은 **더 이상
 판정에 쓰지 않는다** — 위 세 개가 대체했다. 이관 경위는 `§4-a`.
 
-🔴 **이 세 지문은 검토 §56 조건부 수용까지 받은 내용을 가리킨다.** `§56.1` **P1 은 열린 채**
-동결됐다(전제조건·재개방·완료판정 = `REAL_ROBOT_VALUES §1-f` ⓵). **지문이 `rc=0` 이라는 것은
-"굽어도 되는 상태"라는 뜻이지 "결함이 없다"는 뜻이 아니다.**
+🔴 **현재 다섯 지문은 검토 §75 조건부 승인본을 가리킨다.** §75 P1 2건은
+`CURRENT_HANDOFF`의 전제·재개방 조건으로 열린 채 동결됐다. **지문이 `rc=0` 이라는 것은
+"승인받은 소스와 같다"는 뜻이지 "결함이 없다"는 뜻이 아니다.**
 
 ### 4-a. 2026-08-11 — 지문 이관 **완료**. `rc=0` 이고, **굽기 차단이 풀렸다**
 
@@ -401,6 +410,26 @@ strings -n 3 /tmp/fwout/*.elf | grep -xE "158|10607"
 (`MASTER_PLAN §7` 32-c). ⚠ **"보드에 335 가 확인됐다"고 쓰지 않는다.**
 
 지문 이관은 승인 뒤 **지문 전용 별도 커밋** `5c36e12` 에서만 했다(§4 · `REAL_ROBOT_VALUES §1-f` ⓷).
+
+### 4-c-3. 2026-08-17 — D0-FW 1.6.1 승인본 clean compile (미업로드)
+
+§75 최종 독립 재검토의 `P0 0 · Tier A diff 최종 승인·커밋 가능` 판정 뒤 다섯 소스 지문을
+이관하고 실제 `firmware_precheck rc=0`을 확인했다. 이어 같은 고정 환경에서 `--clean`으로
+컴파일했으며 링크에 성공했다. 🔴 **보드에는 아직 업로드하지 않았다.**
+
+| 항목 | 08-17 clean compile | 판정 |
+|---|---:|---|
+| FLASH code / data / headers | **295,072 / 86,500 / 8,568** | 링크 성공 |
+| RAM1 variables / code / padding | **62,784 / 160,056 / 3,784** | 지역변수 여유 **297,664** |
+| RAM2 variables | **12,448** | 기존과 동일 |
+| 환경 지문 | `ARDUINO=10607` · `TEENSYDUINO=158` | ELF 문자열 일치 |
+| version | `rearm-latch-pi-runtime-guard-1.6.1` | ELF 문자열 일치 |
+| build 기대값 | `Aug 17 2026 20:35:06` | 업로드 뒤 보드에서 대조할 값 |
+| `.hex` sha256 | `923d39e50abdf316cf632f05a60c25b781d8a5e86765c16b26ecee4764792565` | 참고 · 플래시 되읽기 증거 아님 |
+
+첫 sandbox 실행은 Arduino 캐시 unlink가 read-only라 실패한 **인프라 실패**였고, 같은 명령을
+캐시 접근 가능한 환경에서 다시 실행해 위 결과로 닫았다. 라이브러리·기존 소스 경고는 있었지만
+컴파일과 링크 종료코드는 0이었다.
 
 **2026-08-11 관측값 (re-arm 래치 · 🔴 아직 굽지 않았다 — ⚠ 이 표는 굽기 *전* 기록이다. 굽힘 = `§4-c`)**
 

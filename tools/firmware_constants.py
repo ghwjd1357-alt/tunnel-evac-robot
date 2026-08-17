@@ -171,10 +171,19 @@ REQUIRED_IDENTITY_KEYS = (
 )
 
 #: 주행이 쌓는 값. 사라져도 정체 검사를 막지 않는다(계약이 아니다).
+#: 🔴 D0-FW runtime guard 필드는 아래 별도 계약이 소유한다.
 RUNTIME_COUNTER_KEYS = (
     "estop_raw_edges", "estop_max_high_ms", "estop_rejected",
     "estop_rejected_max_ms", "disarm_estop", "disarm_nonfinite",
     "disarm_nonzero", "applied_pwm", "applied_pwm_max", "applied_pwm_epoch",
+)
+
+#: §74.3 — 첫 bench에서 원인을 해독하는 D0-FW 관측 필드.
+#: `test_firmware_runtime_guard.py` 가 이 목록을 실제로 소비해
+#: format 속 존재·배열 크기·enum 순서까지 강제한다.
+RUNTIME_GUARD_FIELDS = (
+    "disarm_runtime", "disarm_spin", "runtime_overruns", "runtime_last",
+    "publish_failures", "phase_max_us", "publish_max_us",
 )
 
 #: `%s` 로 나가지만 값이 `.ino` 상수가 아닌 것(빌드 시각·경로 등). 스키마에서 뺀다.

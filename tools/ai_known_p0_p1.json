@@ -638,5 +638,75 @@
     "id": "0813-reopen-condition-had-no-observer-71",
     "path": "docs/TEST_GATES.md",
     "anchor": "재개방 조건에는 관측자와 시점을 함께 적는다"
+  },
+  {
+    "id": "0813-odom-guard-missed-ekf-input-matrix-72",
+    "path": "tools/odom_guard.py",
+    "anchor": "EKF가 사용하는 세 값과 3×3 공분산 9칸을 함께 검사한다"
+  },
+  {
+    "id": "0813-guard-death-not-connected-to-fail-closed-72",
+    "path": "src/tunnel_bringup/launch/real_bringup.launch.py",
+    "anchor": "가드 사망은 준비 완료 뒤에도 fail-closed로 전환한다"
+  },
+  {
+    "id": "0813-two-hop-entrypoints-kept-raw-odom-contract-72",
+    "path": "tools/d0_check.sh",
+    "anchor": "2-hop 계약은 raw와 guarded 토픽의 소유자를 각각 검사한다"
+  },
+  {
+    "id": "0813-dmesg-snapshot-read-as-event-coverage-73",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "사건 시각 커널 기록은 미관측"
+  },
+  {
+    "id": "0813-unmeasured-runtime-threshold-enforced-73",
+    "path": "firmware/teensy_integrated_base_v1_4/runtime_guard.h",
+    "anchor": "runtime 임시 경계 400ms는 실측 전 후보"
+  },
+  {
+    "id": "0813-runtime-overrun-disarm-hid-reason-73",
+    "path": "firmware/teensy_integrated_base_v1_4/rearm_gate.h",
+    "anchor": "runtime overrun은 `/drive/diag y=7`"
+  },
+  {
+    "id": "0813-runtime-counters-had-no-decoder-73",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "runtime 계수 해독표가 현장 계약"
+  },
+  {
+    "id": "0813-d0-fw-review-zero-new-p0-73",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§73 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다"
+  },
+  {
+    "id": "0813-spin-response-disarm-hid-reason-74",
+    "path": "firmware/teensy_integrated_base_v1_4/rearm_gate.h",
+    "anchor": "spin 응답 실패 해제는 `/drive/diag y=8`"
+  },
+  {
+    "id": "0813-runtime-observability-fields-unenforced-74",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "runtime 관측 필드 7개는 생산 회귀가 존재·개수·enum 순서를 강제한다"
+  },
+  {
+    "id": "0813-d0-fw-rereview-zero-new-p0-74",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§74 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다"
+  },
+  {
+    "id": "0813-long-failed-spin-lost-spin-reason-75",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "모터 정지는 유지된다. 따라서 enable 호출과 겹친"
+  },
+  {
+    "id": "0813-runtime-enum-wire-codes-unpinned-75",
+    "path": "tools/test_firmware_runtime_guard.py",
+    "anchor": "숫자 자체를 바꾸는 변이는 아직 생산 회귀가 고정하지 못한다"
+  },
+  {
+    "id": "0813-d0-fw-final-review-zero-new-p0-75",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§75 판정은 P0 0이며 현재 Tier A diff는 최종 승인·커밋 가능하다"
   }
 ]

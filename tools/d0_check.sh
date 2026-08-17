@@ -509,13 +509,19 @@ next_idx; check_hz "$IMU_TOPIC"  "$HZ_EXPECT_IMU"  "$IDX"
 #   회신 PDF §7 은 Durability 만 적고 Reliability 를 비워 뒀고, 우리는 2차 회신의
 #   "IMU QoS = BEST_EFFORT" 를 /odom 까지 확장해 읽었다. **소스가 그 확장을 부정했다:**
 #
-#     rclc_publisher_init_default    (&odomPublisher, ...)        // RELIABLE
+#     rclc_publisher_init_default    (&odomPublisher, ...)        // 당시 RELIABLE
 #     rclc_publisher_init_best_effort(&imuPublisher, ...)         // BEST_EFFORT
 #     rclc_publisher_init_default    (&estopStatePublisher, ...)  // RELIABLE
 #     rclc_publisher_init_default    (&firmwareInfoPublisher, ...)// RELIABLE
 #
 #   (소스 주석은 이 블록을 "BEST_EFFORT / VOLATILE sensor publishers" 라고 적어 두었으나
 #    `init_default` 는 rclc 에서 RELIABLE 이다. **주석이 아니라 함수 이름이 사실이다.**)
+#
+# 🔴 [08-17 D0-FW] 위는 승인본 1.5.0의 역사다. `drive_0817_1325`에서 주기 RELIABLE
+# 발행의 1000ms ACK 상한이 같은 단일 제어 loop에 연쇄돼 `/odom`·`/imu`가 함께 최대
+# 6.85초 비었다. 1.6 계열(첫 굽기 후보 `…runtime-guard-1.6.1`)부터
+# 8개 주기 telemetry 전부 BEST_EFFORT다. 서비스만 RELIABLE로
+# 남는다. 상태 토픽은 현재값을 반복하므로 한 건의 재전송보다 신선도가 우선이다.
 #
 #   고치지 않았다면 D+0 에 `/odom 발행자가 계약과 다르다` **오경보**가 떴을 것이고,
 #   런북은 "구동부에게 지금 확인한다"고 지시한다 — 인수 현장에서 가장 비싼 자원(담당자의
@@ -608,9 +614,9 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   elif [ -n "$off_pub" ]; then
     ng "$topic 발행자가 소스와 다르다 (기대 $expect): $(echo "$off_pub" | tr '\n' ' ')"
     ng "  → 인수받은 펌웨어가 우리가 읽은 v1.4 소스가 아닐 수 있다."
-    ng "     ros2 topic echo /firmware/info --field data --full-length --once  로 정체를 먼저 확인한다"
+    ng "     ros2 topic echo /firmware/info --qos-reliability best_effort --field data --full-length --once  로 정체를 먼저 확인한다"
   else
-    ok "$topic 발행자 ${npub}개 전부 $expect (소스 v1.4 와 일치)"
+    ok "$topic 발행자 ${npub}개 전부 $expect (현재 펌웨어 소스와 일치)"
   fi
 
   # ⓑ 진짜 고장: **BEST_EFFORT 발행** + RELIABLE 구독 = 매칭 안 됨(조용한 0건)
@@ -628,8 +634,8 @@ check_qos() {  # $1=토픽 $2=검사 번호 $3=소스로 확정된 기대 Reliab
   fi
   echo
 }
-# ★ 기대값 근거 = 펌웨어 소스 v1.4 (sha256 13f929cb…2106) 의 publisher 초기화 함수.
-next_idx; check_qos "$ODOM_TOPIC" "$IDX" RELIABLE
+# ★ 기대값 근거 = 현재 작업 트리 펌웨어의 publisher 초기화 함수.
+next_idx; check_qos "$ODOM_TOPIC" "$IDX" BEST_EFFORT
 next_idx; check_qos "$IMU_TOPIC"  "$IDX" BEST_EFFORT
 
 # ── [6] 전진 부호 ───────────────────────────────────────────────────────────
@@ -717,7 +723,8 @@ echo
 next_idx; echo "[$IDX] 펌웨어 정체 (/firmware/info · 5초 주기)"
 FWOUT="$TMP/fw.txt"
 clock_begin
-hard_timeout "$FW_INFO_SECS" ros2 topic echo /firmware/info --field data --full-length --once \
+hard_timeout "$FW_INFO_SECS" ros2 topic echo /firmware/info --qos-reliability best_effort \
+  --field data --full-length --once \
    >"$FWOUT" 2>&1
 clock_end $? "$FW_INFO_SECS" "$FWOUT"
 if [ "$CLK_RC" = "0" ] && [ -s "$FWOUT" ]; then
@@ -821,7 +828,8 @@ if [ "$SKIP_ESTOP" = "1" ]; then
 else
   ESOUT="$TMP/estop_idle.txt"
   clock_begin
-  hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state --field data --once >"$ESOUT" 2>&1
+  hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state \
+    --qos-reliability best_effort --field data --once >"$ESOUT" 2>&1
   clock_end $? "$SNAP_ECHO_SECS" "$ESOUT"
   if [ "$CLK_RC" = "0" ] && [ -s "$ESOUT" ]; then
     if grep -qi "false" "$ESOUT"; then
@@ -840,7 +848,8 @@ else
         *)
           ESOUT2="$TMP/estop_press.txt"
           clock_begin
-          hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state --field data --once \
+          hard_timeout "$SNAP_ECHO_SECS" ros2 topic echo /estop/state \
+             --qos-reliability best_effort --field data --once \
              >"$ESOUT2" 2>&1
           clock_end $? "$SNAP_ECHO_SECS" "$ESOUT2"
           if [ "$CLK_RC" = "0" ] && [ -s "$ESOUT2" ]; then

@@ -470,7 +470,8 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
 ⚠ **굽기 전 보드에서 `version=…-1.3.0` 이 나오는 것이 정상이다**(위 두 상태 표).
-🔴 **다음 굽기 뒤에는 `…-1.5.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
+🔴 **D0-FW §73 보완 재검토 뒤 다음 굽기에는 `…runtime-guard-1.6.1` 이 정상**이다. 굽기 전에는
+보드 값을 추정하지 말고 이 표의 `build`와 실제 `/firmware/info`를 그대로 기록한다.
 `FW_GIT_SHA` 는 양쪽 다 0 이라 **이 필드로 커밋을 판별할 수 없다.**
 
 🔴 **08-13 부터 정체 키가 갈라졌다** (검토 §65.1·§65.3 → §66.1). 구판은 `wheel_radius`
@@ -487,6 +488,36 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 있던 이유다(§66.1). 판정은 `bash tools/d0_check.sh` 검사 [7] 이 한다. 그 검사는
 기대값을 `.ino` 에서 직접 읽어 대조하고 **화면에 자기 기대값을 같이 찍는다.**
 현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
+
+**🔴 1.6.1 runtime 계수 첫 bench 판독 (검토 §73.5)**
+
+해독 계약의 정본은 `REAL_ROBOT_VALUES §1-g`다. Jetson 앞에서는 다음 순서로
+읽는다.
+
+| `runtime_last` | 뜻 | `runtime_last` | 뜻 |
+|---:|---|---:|---|
+| 0 | spin | 16 | odom publish |
+| 1 | odom phase | 17 | IMU publish |
+| 2 | IMU phase | 18 | IMU yaw publish |
+| 3 | diagnostics phase | 19 | gyro bias publish |
+| 4 | firmware info phase | 20 | E-stop publish |
+| 5 | time sync phase | 21 | drive enabled publish |
+| 6 | 전체 loop | 22 | drive diag publish |
+| — | — | 23 | firmware info publish |
+
+- `phase_max_us` = `spin,odom,imu,diagnostics,firmware_info,time_sync,loop` 순서.
+- 마지막 `loop`는 `delay(1)`·판 사이 틈을 제외한 **작업 시간**이다.
+- `publish_max_us` = `odom,imu,imu_yaw,gyro_bias,estop,drive_enabled,drive_diag,firmware_info` 순서.
+- `runtime_overruns`는 **사건 수가 아니라 overrun이 있던 loop 수**다.
+- 시작·끝 사이 `runtime_overruns` 또는 `disarm_runtime`이 늘거나 `/drive/diag y=7`이면
+  중단하고 `runtime_last`·두 max 배열·시각을 같이 남긴다.
+- `/drive/diag y=8` 또는 `disarm_spin` 증가는 enable 응답 spin 실패다.
+- 첫 bench 기대범위는 아직 **미실측**이다. 임시 경계 400,000us에 근접하면
+  값을 높이지 말고 원인을 분류한다.
+🔴 기존 "호출 상한 합 320ms" 산술은 CDC write를 1회로만 세었다. 한 판에
+최대 8 publish가 겹칠 수 있으므로, 첫 판의 `y=7` 1회는 하드웨어 고장이 아니라
+**400ms 임계 후보의 반증**으로 먼저 읽고 계측값을 보존한다.
+첫 공중 무장 관측은 **최소 30초** 유지해 1·5·30초 주기가 겹치는 판을 포함한다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
@@ -652,8 +683,8 @@ bash tools/d0_check.sh
 |---|---|---|
 | 1 | 시리얼 장치 | `/dev/teensy_drive` 존재 |
 | 2·3 | `/odom`·`/imu/data` 주기 | **관측 창을 같은 관측자가 끝까지 채움** → 평균 ≥ 하한 · **최대 간격 ≤ EKF 한 주기** · **표본 수**가 창을 채움 · **창 끝에도 수신** |
-| 4 | `/odom` QoS | 발행자 **RELIABLE**(소스 v1.4) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
-| 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(소스 v1.4) · 위와 동일 |
+| 4 | `/odom` QoS | 발행자 **BEST_EFFORT**(D0-FW 1.6) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
+| 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(D0-FW 1.6) · 위와 동일 |
 | 6 | 전진 부호 | 바퀴를 손으로 앞으로 굴리면 `linear.x > 0` |
 | 7 | 펌웨어 정체 | `/firmware/info` 의 정체 키가 **`.ino` 와 일치** — 기대값은 스크립트가 소스에서 읽어 화면에 같이 찍는다(§5-d). 🔴 08-13 부터 `wheel_radius` 한 개가 아니라 `odom_wheel_radius`·`control_wheel_radius`·`cmd_wheel_base`·`odom_wheel_base` 넷이다 |
 | 8 | E-stop 배선 | 버튼을 **누르면** `/estop/state` 가 `true` 로 바뀐다 |
@@ -665,9 +696,9 @@ bash tools/d0_check.sh
 복사해 두면 R3 실측으로 계약을 갱신할 때 **런북만 옛 숫자로 남는다** — 실제로 활성 런북
 두 곳에서 그 드리프트가 났다. 현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
 
-⚠ **발행자 QoS 는 토픽마다 다르다** — `/odom` 은 RELIABLE, `/imu/*` 만 BEST_EFFORT 다
-(펌웨어 소스 v1.4 의 `rclc_publisher_init_default` vs `_best_effort`). 예전 표에 적혀 있던
-"발행자 BEST_EFFORT" 단일값은 **틀렸다** — 그대로 뒀으면 정상 로봇을 계약 위반으로 읽었다.
+🔴 **D0-FW 1.6부터 주기 telemetry 8개는 전부 BEST_EFFORT다.** 옛 보드(1.5 이하)의
+`/odom`·상태 토픽은 RELIABLE일 수 있지만 BEST_EFFORT 구독자는 양쪽과 모두 매칭된다.
+반대로 새 BEST_EFFORT 발행에 RELIABLE 구독을 붙이면 조용히 0건이므로 검사 4·5를 생략하지 않는다.
 
 - 종료 코드 **0 = 전량 통과** · 1 = 실패 · **2 = 불완전**(건너뛴 검사 있음).
   2 를 통과로 기록하지 않는다.
@@ -1023,7 +1054,7 @@ R1 이 달릴 물건은 `build=Aug 11 2026 15:13:20` 이다. 🔴 **승계는 �
 
 🔴 **08-11 개정 — 상태가 5개가 됐고 무장에 단계가 하나 늘었다** (검토 §54·§55).
 **전이 자체는 이 절에서 판정하지 않는다** — 그건 PC 에서 `bash tools/rearm_gate_host_test.sh`
-가 결정론적으로 끝냈다(동작 922건 + 구조 7건). **이 절이 보는 것은 오직 배선이다**: 상태에 맞게
+가 결정론적으로 끝냈다(동작 989건 + 구조 11건). **이 절이 보는 것은 오직 배선이다**: 상태에 맞게
 *모터가 실제로 서는가*, *토픽이 실제로 나오는가*. 실기로 500ms 경계를 재려 들지 않는다.
 
 **준비** — 터미널 3개
@@ -1031,16 +1062,17 @@ R1 이 달릴 물건은 `build=Aug 11 2026 15:13:20` 이다. 🔴 **승계는 �
 # T1  상태 관측 (이 창을 보면서 진행한다)
 ros2 topic echo /drive/enabled          # std_msgs/Bool — true 면 ARMED
 # T2  진단 — geometry_msgs/Vector3
-#     x = 서비스 호출수(거절 포함) · y = 거절사유 · z = 상태
+#     x = 서비스 호출수(거절 포함) · y = 최근 사건(0~8) · z = 상태
 #     🔴 z: 0 DISARMED / 1 READY / 2 ARMED / 3 PENDING / 4 ARMING (08-11 신설)
 ros2 topic echo /drive/diag
 # T3  명령·서비스
 ```
 
 ⚠ **`z=4`(ARMING) 는 눈에 안 띄는 것이 정상이다** — 서비스 콜백 반환과 같은 `loop()` 안에서
-`z=3` 이 되므로 그 사이에 발행이 없다. 🔴 **반대로 `z=4` 가 계속 붙어 있으면** `loop()` 의
-`rearmGateArmBarrierStart()` 가 안 불리는 것이고, 그 보드는 **영원히 무장되지 않는다**
-(fail-closed 라 위험하진 않다). 그때는 굽힌 펌웨어가 이 묶음이 맞는지부터 본다.
+`z=3` 이 되므로 그 사이에 발행이 없다. 현행 1.6.1에서 executor spin 실패는
+`z=0/y=8`로 DISARMED가 정상이다. 🔴 **지속 `z=4` 또는 진단 발행 정지는 정상적인 gate
+fail-closed가 아니라 loop 정체·stale 표본 가능성**이므로 `REAL_ROBOT_VALUES §1-f`의 현행
+해석에 따라 loop와 굽힌 펌웨어 정체부터 확인한다.
 
 🔴 **08-11 절차 정정 ① — 눈으로 재면 안 되는 행이 셋 있다. 도구를 쓴다.**
 `/drive/diag`·`/drive/enabled` 는 **둘 다 `publishDiagnostics()` 안에서 1초에 한 번**만 나간다
@@ -1118,12 +1150,17 @@ ros2 topic type /drive/diag       # → geometry_msgs/msg/Vector3
 
 | 분류 | 행 | 누가 보는가 |
 |---|---|---|
-| 상태기계·서비스 | 부정 2·3 · 전환 1·2·3 · 부정 5 · 해제 | `rearm_gate_host_test.sh` 가 **동작 967 + 구조 7** 로 결정론적으로 닫는다. 실기는 같은 것을 더 나쁜 해상도로 볼 뿐이다 |
+| 상태기계·서비스 | 부정 2·3 · 전환 1·2·3 · 부정 5 · 해제 | `rearm_gate_host_test.sh` 가 **동작 989 + 구조 11** 로 결정론적으로 닫는다. 실기는 같은 것을 더 나쁜 해상도로 볼 뿐이다 |
 | **배선** | 부정 1·4·7·8 · 역회귀 1·2 | 🔴 **실기로만 볼 수 있다** — 모터가 실제로 서는가/도는가 |
 
 → 축소판 = `python3 -u tools/rearm_field_wiring.py` (배선 6 행 · 약 8 분).
 무장 4 단계를 스크립트가 밟고 `z`·`enabled` 를 자동으로 읽는다. 사람은 E-stop 조작과
 "바퀴가 돌았나" 판정만 한다.
+
+🔴 **1.6.1은 이 축소판 대상이 아니다.** `rearm_gate.h`·`publishDiagnostics()`·
+runtime 해제 배선을 바꾼다. 도구의 예전 해시를 앞당겨 갱신하지 않았으므로 시작 즉시
+판정 불능으로 거부해야 정상이다. Claude 재검토·clean compile·굽기 후에는 **§7-c-E
+13행 전량**을 다시 밟고, 그 실측 결과 없이 축소 해시를 승격하지 않는다.
 
 🔴 **축소가 성립하는 조건은 하나다** — 굽는 diff 가 **상태기계·정지 배선·PWM 출력단을
 안 건드릴 것**. 그래서 도구가 시작할 때 `rearm_gate.h`·`drive_wiring.h` 의 **내용
@@ -1377,7 +1414,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 | 5 | agent 확보 성공 여부(A안/B안) | §5-d 의 `topic list` | §5 | ✅ 안 A 소스 빌드·실행, agent 엔티티 생성 및 펌웨어 토픽 8개 확인 |
 | 6 | **`micro_ros_arduino` 버전** | ★ 번호를 묻지 말고 `~/Arduino/libraries/` **폴더를 통째로 복사**받는다 | §5-d | ✅ **08-05 수령 완료** — 노트북 `~/Desktop/teensy_required_libraries_v1_4/`, 1946 파일. `micro_ros_arduino` **2.0.8-humble** · Encoder 1.4.3 · BNO055 1.6.4 · Unified Sensor 1.1.15 · BusIO 1.17.4. Teensy 4.x 사전컴파일 `libmicroros.a` 존재 확인. 해시·전수 대조 = §5-d. ✅ **잔여 종결(08-12)** — `FW_VERSION` 1.3.0 vs 폴더명 v1_4 불일치는 **08-05 당시의 잔여**였고, 저장소는 08-12 에 `rearm-latch-pi-continuous-low-speed-1.4.0` 으로 정정했다(예약 32 묶음). 🔴 **구동부 확인 사항이 아니다** — 08-06 합의로 펌웨어는 역할 A 소유다. ✅ **08-12 굽기로 보드도 `1.4.0` 이 됐다** — 이제 `1.3.0` 이 보이면 안 구워진 것이다(정체 표 = `§5-d`) |
 | 7 | Teensy `idVendor`/`idProduct` | `udevadm info -q property …` | §6 | ✅ `/dev/ttyACM0`, `16c0:0483`, serial `20379630`; `/dev/teensy_drive -> ttyACM0` |
-| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ `ekf_filter_node` frequency 30.0; `/odom` RELIABLE→BEST_EFFORT 및 `/imu/data` BEST_EFFORT→BEST_EFFORT 호환·구독 유지 확인 |
+| 8 | `robot_localization` 버전과 구독 QoS | `d0_check.sh` 검사 4·5 — **EKF 를 띄운 뒤**(§7-a)여야 판정이 성립한다 | §7 | ✅ 08-03 역사: `/odom` RELIABLE→BEST_EFFORT 호환. 🔴 D0-FW 1.6 굽기 뒤 `/odom` BEST_EFFORT→BEST_EFFORT를 다시 확인한다 |
 | 9 | **NTP 동기 여부** ★08-02 신설 | `timedatectl` → `NTPSynchronized=yes` | §1-b | ✅ 시계 동기화 yes·NTP active·Asia/Seoul |
 | 10 | **E-stop 배선 여부** ★08-02 신설 | `d0_check.sh` **검사 8** (버튼을 눌러야 한다. 못 누르면 `s` = 확인 못 함) | §7 | ✅ **2026-08-07 통과** — 전기 시공 완주(`ELECTRICAL_BASELINE.md §14`). `평상시 false` · `누름 → true 전환 확인 — 배선 정상`. 같은 실행에서 **검사 1~8 전항목 OK**. ⚠ 08-03 의 `⚠ 물리 버튼 없음·임시 생략` 은 그때의 사실이고 지금은 아니다. 🔴 **이 통과는 신호 경로에 대한 것이다** — 릴레이 DC 차단 정격은 여전히 미증명(`§14-b`) |
 | 11 | **R0 watchdog 실제 정지** ★08-03 §34 보완 | 영상(1차) + `/odom.pose`(정본 측정) 교차 확인 | §7-c-0 | ✅ **종결 — 2026-08-11 (검토 §59 확인).** 🔴 **08-10 재산출 = `519.9 / 532.0 / 516.2 ms`**(구 기준 500ms 초과 16.2~32.0ms). ~~537.1~~ 은 검토 §52 가 결함을 재현한 구판 도구의 값이라 폐기했다. ✅ **08-11 영상 분석 완료** — `28프레임=466.7ms`(bag 1522 와 같은 시행) · 🔴 **영상은 하한이라 PASS 를 못 만든다**(bag 과의 차이 49.5ms 는 **관측계 차이**이지 렌더 지연 확정이 아니다 — 검토 §57.2) · ✅ **조건 2 는 펌웨어 독립 증거로 충족**(정지 후 0.595 mm/s). ✅ **결정 1 = ⓐ 기준 재정의**(08-11 사용자) — 🔴 **구현자 정식화는 검토 §57 에서 확인 보류**. ✅ **사용자 근거 한 줄 = 08-11 결정**(`0.12 m/s` 에서 약 7cm 수용 · 재개방 = 상한 상향). ✅ **08-11 19:41 현행 펌웨어 재측정 완료** — `d0_watchdog_0811_1938` **`516.0 ms`**(1-b `≤600ms` 충족) · 조건 2 = 정지 후 37,130ms `pose` 완전 고정 · 영상 `IMG_3483.mov` 교차 `450.1ms`(하한) · 🔴 **`관측 완전성 413~650 238프레임 ✅`**(전 구간은 손각대 흔들림으로 판정 불능 — 끊은 사실을 판정과 같이 읽는다). ✅ **검토 §59 = 증거 승인 · 정식화 확인 · `#11` 종결 · R1 진입 가능**(P0 0 · P1 0 · P2 2). 🔴 **재개방 = 속도 상한 상향 · 재굽기/안전 배선 변경 · 자율 발행자 연결.** 전문 = §7-c-0 |
@@ -1497,9 +1534,13 @@ ros2 run robot_localization ekf_node --ros-args \
   --params-file ~/ros2_ws/src/tunnel_bringup/config/ekf_real.yaml
 ```
 
-관측 터미널에서 다음을 확인한다. 현재 URDF의 라이다 z는 미실측 표시인 0이므로
-`base_footprint→lidar_link`는 값 확정이 아니라 **연결 여부만** 본다.
-라이다를 아직 장착하지 않은 2026-08-03 실행에서는 해당 명령만 건너뛰고 나머지를 수행한다.
+관측 터미널에서 다음을 확인한다. 🔴 **`base_footprint→lidar_link` 는 연결 여부가 아니라
+`z = 0.832` 를 본다** — 라이다 높이는 2026-08-14 에 확정·동결됐다(`773a` = `773d1a7`,
+`FREEZE_MANIFEST §10.26`). `0.053` 바퀴축 + `0.779` lidar_joint 다.
+값이 다르면 **그 자리에서 멈춘다.** URDF 는 동결 대상이라 고쳐서 진행하지 않는다.
+
+> 📜 2026-08-03 실행 당시에는 라이다가 미장착이라 이 명령을 건너뛰었고, URDF 의 `0` 은
+> "아직 안 쟀다"는 표시였다. **그 상태는 08-14 에 끝났다** — 지금 `0` 이 보이면 정상이 아니다.
 
 ```bash
 timeout --kill-after=2s 10s ros2 run tf2_ros tf2_echo base_footprint imu_link

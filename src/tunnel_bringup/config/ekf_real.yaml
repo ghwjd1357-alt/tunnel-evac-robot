@@ -57,7 +57,8 @@ ekf_filter_node:
     world_frame: odom                 # "odom 기준 위치를 추정" = odom→base TF 를 만든다는 뜻
 
     # ===== ★ QoS 정합 — 여기에 오버라이드를 쓰지 않는 이유 (08-02 실측) =====
-    # 배경: 소스 v1.4 실계약은 /odom=RELIABLE, /imu/data=BEST_EFFORT 다
+    # 배경: 08-17 D0-FW부터 /odom·/imu/data 모두 BEST_EFFORT다. 구판은
+    # /odom=RELIABLE였으나 1000ms ACK 대기가 단일 모터 loop를 세워 폐기했다.
     #   (REAL_ROBOT_VALUES §1-d). BEST_EFFORT 퍼블리셔 + RELIABLE 구독자는 **매칭되지 않고**,
     #   증상이 "에러 없이 조용히 0건" 이라 `ros2 topic hz /odom` 은 정상인데 EKF 만
     #   아무것도 못 받는 형태로 나타난다. 그래서 예약 19 ①은 여기에 구독 QoS 오버라이드를

@@ -178,6 +178,9 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("bringup", (
         "src/tunnel_bringup/**", "docs/JETSON_SETUP.md", "docs/D1_FIRST_STEP.md",
         "tools/d0_check.sh", "tools/bag_gap_report.py", "tools/todo_d0_scan.py",
+        # 검토 §72.2: EKF 앞 2-hop 가드. 입력 계약과 R4/d0 진입점을 bringup
+        # 문맥에서 함께 봐야 raw/guarded 토픽 소유가 갈라지지 않는다.
+        "tools/odom_guard.py", "tools/test_odom_guard.py",
         # 검토 §52: R0 watchdog 판정기. 판정 기준은 `JETSON_SETUP §7-c-0` 이 소유하고
         # 이 도구는 그 기준에 넣을 수치를 만든다 — 둘을 같은 프로필에 둔다.
         # 회귀도 같은 자리다 — 08-10 에 판정기만 넣고 그 테스트를 빠뜨렸다.
@@ -226,6 +229,7 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "tools/ino_host_probe.py",
         "tools/firmware_constants.py", "tools/firmware_info_length_check.py",
         "tools/test_control_feedback_scale.py", "tools/test_applied_pwm_epoch.py",
+        "tools/test_firmware_runtime_guard.py",
         # 08-13 밤: odom 상수를 지면 실측으로 검증한다(예약 32-e) · 배선 6행 실기 도구.
         "tools/test_odom_constants.py", "tools/rearm_field_wiring.py",
     )),

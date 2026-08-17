@@ -87,10 +87,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# 기대 목록의 기본값 = 2026-08-11 지문 이관 후 **허용된 변경 세 건**.
+# 기대 목록의 기본값 = 2026-08-17 §75 조건부 승인 뒤 이관한 **스케치 소스 다섯 개**.
 #   ① `.ino` — `ESTOP_ACTIVE_LOW true→false`(`.ino:111`, 되돌리면 `ELECTRICAL_BASELINE §2`-⑧ 재개방)
 #      + re-arm 래치 배선(§54→§55 보완).
-#   ② `rearm_gate.h`(신규) — 상태전이 정본. ③ `drive_wiring.h`(신규) — 모터 정지의 관측 가능한 자리.
+#   ② `rearm_gate.h` — 상태전이 정본. ③ `drive_wiring.h` — 모터 정지의 관측 가능한 자리.
+#   ④ `estop_debounce.h` — E-stop 디바운스. ⑤ `runtime_guard.h` — runtime 계측·복귀 후 fail-closed.
 #   🔴 아래 64자리는 **파일 내용의 sha256** 이다(patch 가 아니다). 정본 `docs/FIRMWARE_REBUILD.md §4`
 #   가 같은 값을 64자리 전문으로 갖고 있고, 재생성은 그쪽에 적힌 `sha256sum <파일>` 한 줄이다.
 #   스케치 소스를 정당하게 고치면 **두 자리를 같이** 옮긴다.
@@ -114,10 +115,11 @@ done
 #   "결함이 없다"가 아니다. 재개방 조건은 `MASTER_PLAN §7` 예약 32-a.
 if [ ${#EXPECT_ARGS[@]} -eq 0 ]; then
     EXPECT_ARGS=(
-        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=447,31,d40d6967b83f54b2bb9ac0d483c0dfb7ba3b70ce7beb22620ec2b82bd68b556d"
-        "firmware/teensy_integrated_base_v1_4/rearm_gate.h=298,0,ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340"
+        "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino=569,44,819180ebc9c27bec6cc41befe606f952174097914c7903d54f8afe5cc0faf872"
+        "firmware/teensy_integrated_base_v1_4/rearm_gate.h=308,0,abff1f7b292f766540854b3c6a8493525f5494f3ff177dd290ed74a3aa77eea3"
         "firmware/teensy_integrated_base_v1_4/drive_wiring.h=114,0,f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860"
         "firmware/teensy_integrated_base_v1_4/estop_debounce.h=140,0,126fc729074cbcca170c93c93514c5bddd4545e67d2044d1bbd5734f92380940"
+        "firmware/teensy_integrated_base_v1_4/runtime_guard.h=127,0,19332991f027569c48e5231d707e1592efb83f5e0a7b584025e74384da539f01"
     )
 fi
 

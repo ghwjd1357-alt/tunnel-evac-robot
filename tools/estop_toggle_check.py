@@ -17,6 +17,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool
 
 CYCLES = 10
@@ -28,7 +29,8 @@ class EstopWatch(Node):
         super().__init__("estop_toggle_check")
         self.samples = []
         self.state = None
-        self.create_subscription(Bool, "/estop/state", self.on_state, 10)
+        self.create_subscription(
+            Bool, "/estop/state", self.on_state, qos_profile_sensor_data)
 
     def on_state(self, m):
         self.samples.append((time.monotonic(), m.data))

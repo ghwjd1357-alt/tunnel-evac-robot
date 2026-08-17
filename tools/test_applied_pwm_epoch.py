@@ -47,10 +47,10 @@ ROOT = probe.ROOT
 SKETCH = probe.SKETCH_DIR
 
 #: 🔴 게이트 헤더 내용 고정. `git diff HEAD` 는 커밋 뒤 항상 비어 무의미했다(§66.2).
-#:   이 값이 바뀌면 967/0 재검증 없이는 이 시험이 통과하면 안 된다.
+#:   이 값이 바뀌면 host harness 재검증 없이는 이 시험이 통과하면 안 된다.
 GATE_SHA256 = {
     "rearm_gate.h":
-        "ddf416b939c79cd094a6aeaac989da5050db25928410890fbc91a2ff8d10b340",
+        "abff1f7b292f766540854b3c6a8493525f5494f3ff177dd290ed74a3aa77eea3",
     "drive_wiring.h":
         "f34ba116fbd94a317362754dd1fc846a39ca76a387cd9d1e7a9d43783e08b860",
 }
@@ -256,7 +256,7 @@ def structural_checks(source):
         path = os.path.join(SKETCH, name)
         with open(path, "rb") as handle:
             actual = hashlib.sha256(handle.read()).hexdigest()
-        check("게이트 헤더 %s 내용이 967/0 계약 시점 그대로다" % name,
+        check("게이트 헤더 %s 내용이 host 계약 시점 그대로다" % name,
               actual == expected,
               "sha256 %s\n      기대   %s\n"
               "      🔴 헤더를 고쳤으면 rearm_gate_host_test 재실행 뒤 이 값을 갱신한다"

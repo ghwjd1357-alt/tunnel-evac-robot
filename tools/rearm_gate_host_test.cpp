@@ -1386,6 +1386,64 @@ static void t48_glitch_ruler_survives_wraparound()
     expectBool("T48 랩 이후에도 500ms 진짜 누름은 잡힌다", tripped, true);
 }
 
+// ── T49 runtime overrun 해제도 같은 사유/누계 규율을 지킨다 (§73.4) ──
+static void t49_runtime_overrun_reason_is_latched_once()
+{
+    RearmGate g;
+    FakeDriveSink sink;
+    rearmGateInit(&g);
+    armFully(g, 0);
+
+    expectBool("T49 runtime overrun 이 실제로 풀었다",
+               driveDisarmWithReason(
+                   &g, REARM_DISARM_RUNTIME_OVERRUN, sink), true);
+    expectState("T49 runtime overrun -> DISARMED", g, DRIVE_DISARMED);
+    expectU32("T49 사유 = RUNTIME_OVERRUN", g.rejectReason,
+              REARM_DISARM_RUNTIME_OVERRUN);
+    expectU32("T49 runtime 누계 1", g.disarmRuntimeCount, 1u);
+    expectU32("T49 E-stop 누계는 0", g.disarmEstopCount, 0u);
+    expectU32("T49 nonfinite 누계는 0", g.disarmNonfiniteCount, 0u);
+    expectU32("T49 nonzero 누계는 0", g.disarmNonzeroCount, 0u);
+    expectU32("T49 spin 누계는 0", g.disarmSpinCount, 0u);
+
+    // 이미 풀린 상태의 중복 보고는 사유/누계를 덮지 않는다.
+    expectBool("T49 DISARMED 중복 overrun 은 새 전이가 아니다",
+               driveDisarmWithReason(
+                   &g, REARM_DISARM_RUNTIME_OVERRUN, sink), false);
+    expectU32("T49 중복 뒤 runtime 누계 유지", g.disarmRuntimeCount, 1u);
+    expectU32("T49 중복 뒤 사유 유지", g.rejectReason,
+              REARM_DISARM_RUNTIME_OVERRUN);
+}
+
+// ── T50 spin/서비스 응답 실패도 사유 8 과 누계를 남긴다 (§74.2) ──
+static void t50_spin_response_failure_reason_is_latched_once()
+{
+    RearmGate g;
+    FakeDriveSink sink;
+    rearmGateInit(&g);
+    armFully(g, 0);
+
+    expectBool("T50 spin 응답 실패가 실제로 풀었다",
+               driveDisarmWithReason(
+                   &g, REARM_DISARM_SPIN_RESPONSE, sink), true);
+    expectState("T50 spin 응답 실패 -> DISARMED", g, DRIVE_DISARMED);
+    expectU32("T50 사유 = SPIN_RESPONSE", g.rejectReason,
+              REARM_DISARM_SPIN_RESPONSE);
+    expectU32("T50 spin 누계 1", g.disarmSpinCount, 1u);
+    expectU32("T50 runtime 누계는 0", g.disarmRuntimeCount, 0u);
+    expectU32("T50 E-stop 누계는 0", g.disarmEstopCount, 0u);
+    expectU32("T50 nonfinite 누계는 0", g.disarmNonfiniteCount, 0u);
+    expectU32("T50 nonzero 누계는 0", g.disarmNonzeroCount, 0u);
+
+    // 이미 풀린 상태의 중복 보고는 최초 사유와 누계를 보존한다.
+    expectBool("T50 DISARMED 중복 spin 실패는 새 전이가 아니다",
+               driveDisarmWithReason(
+                   &g, REARM_DISARM_SPIN_RESPONSE, sink), false);
+    expectU32("T50 중복 뒤 spin 누계 유지", g.disarmSpinCount, 1u);
+    expectU32("T50 중복 뒤 사유 유지", g.rejectReason,
+              REARM_DISARM_SPIN_RESPONSE);
+}
+
 int main()
 {
     std::printf("=== re-arm 래치 상태 전이 + 정지 배선 harness (검토 §54·§55) ===\n");
@@ -1444,6 +1502,8 @@ int main()
     t46_real_presses_do_not_pollute_the_glitch_ruler();
     t47_promoted_high_is_not_a_rejected_glitch();
     t48_glitch_ruler_survives_wraparound();
+    t49_runtime_overrun_reason_is_latched_once();
+    t50_spin_response_failure_reason_is_latched_once();
 
     std::printf("\n검사 %d건 · 실패 %d건\n", g_checks, g_failures);
     if (g_failures != 0) {

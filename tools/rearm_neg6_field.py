@@ -15,6 +15,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
 
@@ -27,8 +28,10 @@ class Neg6(Node):
         self.pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.cli = self.create_client(SetBool, "/drive/enable")
         self.diag, self.enab, self.t0 = [], [], time.monotonic()
-        self.create_subscription(Vector3, "/drive/diag", self.on_diag, 10)
-        self.create_subscription(Bool, "/drive/enabled", self.on_en, 10)
+        self.create_subscription(
+            Vector3, "/drive/diag", self.on_diag, qos_profile_sensor_data)
+        self.create_subscription(
+            Bool, "/drive/enabled", self.on_en, qos_profile_sensor_data)
 
     def on_diag(self, m):
         self.diag.append((time.monotonic() - self.t0, m.x, m.y, m.z))

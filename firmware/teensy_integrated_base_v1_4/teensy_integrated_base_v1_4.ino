@@ -27,6 +27,7 @@
 #include "rearm_gate.h"
 #include "drive_wiring.h"
 #include "estop_debounce.h"
+#include "runtime_guard.h"
 
 // ============================================================================
 // Firmware identity
@@ -43,7 +44,7 @@
 // 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
 // 🔴 1.5.0 (2026-08-13) = ① E-stop 디바운스 ② odom 재교정(ODOM_WHEEL_RADIUS·ODOM_WHEEL_BASE)
 //    ③ appliedPwm 관측. 버전을 올려야 bag 만 보고 어느 보드인지 가른다.
-static const char FW_VERSION[] = "rearm-latch-pi-odomcal-appliedpwm-1.5.0";
+static const char FW_VERSION[] = "rearm-latch-pi-runtime-guard-1.6.1";
 // ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
 // 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
 // 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
@@ -405,7 +406,7 @@ int appliedPwm[4] = {0, 0, 0, 0};
 //   읽는 법 = applied_pwm_epoch 가 같은 두 표본 사이에서만 applied_pwm_max 를 비교한다.
 //             epoch 가 바뀌었으면 앞 시행의 최대와는 아무 관계가 없다.
 // ⚠ rearm_gate.h 상태기계는 건드리지 않는다 (§64 에서 막 승인된 계약). 여기서는 상태를
-//   **관측만** 한다 — 전이 검출이 게이트 밖에 있으므로 게이트 회귀 967+7 이 그대로 유효하다.
+//   **관측만** 한다 — 전이 검출이 게이트 밖에 있으므로 게이트 회귀 989+11 이 이 계약을 지킨다.
 int appliedPwmMaxMagnitude = 0;
 uint32_t appliedPwmEpoch = 0;
 uint8_t appliedPwmEpochPrevState = 0;  // DRIVE_DISARMED
@@ -421,6 +422,13 @@ double wheelFilteredDerivative[4] = {0.0, 0.0, 0.0, 0.0};
 bool cmdVelReceived = false;
 bool imuInitialized = false;
 bool gyroBiasCalibrated = false;
+
+// Every potentially blocking runtime phase reports into this one structure.
+// The first-bench 400 ms overrun boundary is provisional until phase_max_us is
+// measured on the real board.  On return it disarms with reason 7, and a fresh
+// enable service is required before motion can resume.  The physical E-stop
+// remains the only protection against a call that never returns at all.
+RuntimeGuard runtimeGuard;
 
 // Re-arm latch state. One struct, so there is exactly one place a transition
 // can be written and exactly one place the host test has to construct.
@@ -898,6 +906,32 @@ void disarmDriveWithReason(uint8_t reason)
   driveDisarmWithReason(&driveGate, reason, driveSink);
 }
 
+bool recordRuntimePhase(uint8_t phase, uint32_t startedUs)
+{
+  const uint32_t elapsedUs = micros() - startedUs;
+  const bool withinBudget =
+      runtimeGuardRecordPhase(&runtimeGuard, phase, elapsedUs);
+  if (!withinBudget) {
+    disarmDriveWithReason(REARM_DISARM_RUNTIME_OVERRUN);
+  }
+  return withinBudget;
+}
+
+rcl_ret_t publishMeasured(rcl_publisher_t* publisher,
+                          const void* message,
+                          uint8_t site)
+{
+  const uint32_t startedUs = micros();
+  const rcl_ret_t rc = rcl_publish(publisher, message, nullptr);
+  const uint32_t elapsedUs = micros() - startedUs;
+  const bool withinBudget = runtimeGuardRecordPublish(
+      &runtimeGuard, site, elapsedUs, rc == RCL_RET_OK);
+  if (!withinBudget) {
+    disarmDriveWithReason(REARM_DISARM_RUNTIME_OVERRUN);
+  }
+  return rc;
+}
+
 void checkSafety()
 {
   // 🔴 판정 직전에 핀을 표본한다. 루프마다 두 번 불리므로 필터 표본 주기 = 루프 주기.
@@ -1064,7 +1098,8 @@ void publishOdometry(uint64_t timestampNs)
   odomMessage.twist.twist.angular.y = 0.0;
   odomMessage.twist.twist.angular.z = odomAngularVelocity;
 
-  RCSOFTCHECK(rcl_publish(&odomPublisher, &odomMessage, nullptr));
+  RCSOFTCHECK(publishMeasured(
+      &odomPublisher, &odomMessage, RUNTIME_PUBLISH_ODOM));
 }
 
 // ============================================================================
@@ -1229,8 +1264,10 @@ void publishImu(uint64_t timestampNs,
 
   imuYawMessage.data = imuYawUnwrappedRad * 180.0 / PI;
 
-  RCSOFTCHECK(rcl_publish(&imuPublisher, &imuMessage, nullptr));
-  RCSOFTCHECK(rcl_publish(&imuYawPublisher, &imuYawMessage, nullptr));
+  RCSOFTCHECK(publishMeasured(
+      &imuPublisher, &imuMessage, RUNTIME_PUBLISH_IMU));
+  RCSOFTCHECK(publishMeasured(
+      &imuYawPublisher, &imuYawMessage, RUNTIME_PUBLISH_IMU_YAW));
 }
 
 // ============================================================================
@@ -1334,15 +1371,26 @@ void publishDiagnostics()
   //                                          z = DriveState (0/1/2/3)
   // Two topics rather than one: Bool cannot carry the counters, and the counter
   // is what separates "the request never arrived" from "the logic refused it".
+  RCSOFTCHECK(publishMeasured(
+      &gyroBiasPublisher, &gyroBiasMessage, RUNTIME_PUBLISH_GYRO_BIAS));
+  RCSOFTCHECK(publishMeasured(
+      &estopStatePublisher, &estopStateMessage, RUNTIME_PUBLISH_ESTOP));
+
+  // A preceding measured publish can disarm on return.  Materialize each
+  // state-bearing message only after those side effects, otherwise this same
+  // loop can publish a stale `enabled=true` after the drive is already off
+  // (review §73.6 P2-2).
   driveEnabledMessage.data = (driveGate.state == DRIVE_ARMED);
+  RCSOFTCHECK(publishMeasured(
+      &driveEnabledPublisher, &driveEnabledMessage, RUNTIME_PUBLISH_DRIVE_ENABLED));
+
+  // The enabled publish itself can also overrun and disarm.  Refresh diag after
+  // it so y=7/z=DISARMED is visible in the following state-bearing sample.
   driveDiagMessage.x = static_cast<double>(driveGate.serviceCalls);
   driveDiagMessage.y = static_cast<double>(driveGate.rejectReason);
   driveDiagMessage.z = static_cast<double>(driveGate.state);
-
-  RCSOFTCHECK(rcl_publish(&gyroBiasPublisher, &gyroBiasMessage, nullptr));
-  RCSOFTCHECK(rcl_publish(&estopStatePublisher, &estopStateMessage, nullptr));
-  RCSOFTCHECK(rcl_publish(&driveEnabledPublisher, &driveEnabledMessage, nullptr));
-  RCSOFTCHECK(rcl_publish(&driveDiagPublisher, &driveDiagMessage, nullptr));
+  RCSOFTCHECK(publishMeasured(
+      &driveDiagPublisher, &driveDiagMessage, RUNTIME_PUBLISH_DRIVE_DIAG));
 }
 
 void publishFirmwareInfo()
@@ -1359,7 +1407,7 @@ void publishFirmwareInfo()
   //       python3 tools/firmware_info_length_check.py
   //   그 도구는 이 파일에서 format·인자·버퍼 크기를 직접 파싱해 host gcc 로 잰다.
   //   여기 적힌 수를 믿지 말고 도구를 돌려라. 이 주석이 낡으면 도구가 이긴다.
-  //     실측(1536 버퍼) : 운용 표본 약 857자 / 현재 소스 상한 1072자 / 여유 463자
+  //     08-17 §74 보완 뒤(1536 버퍼): 현재 소스 상한 1407자 / 여유 128자
   //     🔴 검토 §67.4 — 앞 판은 이 줄을 "타입 이론 최악 1157 / 여유 378" 이라 적었다.
   //        %f 를 -999999.999999 로 잡은 시나리오였지 타입 경계가 아니다. 지금은
   //        tools/firmware_info_length_check.py 가 %f 를 소스 상수 실값으로 풀어 잰다.
@@ -1388,12 +1436,16 @@ void publishFirmwareInfo()
       //    아래 rejected 쌍만이 "필터가 먹은 글리치"다 = 30ms 판정의 근거 (§63.1).
       "estop_rejected=%lu; estop_rejected_max_ms=%lu; "
       "disarm_estop=%lu; disarm_nonfinite=%lu; disarm_nonzero=%lu; "
+      "disarm_runtime=%lu; disarm_spin=%lu; "
       // 🔴 2026-08-13 신설 (예약 33 선행). applied_pwm 은 **5초 주기 스냅샷**이라
       //    시행 중 파형을 못 본다. 포화 판정은 applied_pwm_max 로 한다 —
       //    145(FF 상한)·160(MAX_CONTROL_PWM) 에 닿았는지가 그 한 숫자에 있다.
       // 🔴 검토 §65.2 보완 — max 는 **이번 epoch(= 이번 무장) 안의 최대**다. 절대값을
       //    그대로 읽는다. epoch 가 다른 두 표본의 max 는 비교하지 않는다.
       "applied_pwm=%d,%d,%d,%d; applied_pwm_max=%d; applied_pwm_epoch=%lu; "
+      "runtime_overruns=%lu; runtime_last=%lu,%lu; publish_failures=%lu; "
+      "phase_max_us=%lu,%lu,%lu,%lu,%lu,%lu,%lu; "
+      "publish_max_us=%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1428,12 +1480,33 @@ void publishFirmwareInfo()
       static_cast<unsigned long>(driveGate.disarmEstopCount),
       static_cast<unsigned long>(driveGate.disarmNonfiniteCount),
       static_cast<unsigned long>(driveGate.disarmNonzeroCount),
+      static_cast<unsigned long>(driveGate.disarmRuntimeCount),
+      static_cast<unsigned long>(driveGate.disarmSpinCount),
       appliedPwm[FL],
       appliedPwm[RL],
       appliedPwm[FR],
       appliedPwm[RR],
       appliedPwmMaxMagnitude,
       static_cast<unsigned long>(appliedPwmEpoch),
+      static_cast<unsigned long>(runtimeGuard.overrunCount),
+      static_cast<unsigned long>(runtimeGuard.lastOverrunCode),
+      static_cast<unsigned long>(runtimeGuard.lastOverrunUs),
+      static_cast<unsigned long>(runtimeGuard.publishFailureCount),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_SPIN]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_ODOM]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_IMU]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_DIAGNOSTICS]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_FIRMWARE_INFO]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_TIME_SYNC]),
+      static_cast<unsigned long>(runtimeGuard.phaseMaxUs[RUNTIME_PHASE_LOOP]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_ODOM]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_IMU]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_IMU_YAW]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_GYRO_BIAS]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_ESTOP]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_DRIVE_ENABLED]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_DRIVE_DIAG]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_FIRMWARE_INFO]),
       FW_LIBRARY_LIST);
 
   if (infoLength < 0 ||
@@ -1445,7 +1518,10 @@ void publishFirmwareInfo()
   }
 
   rosidl_runtime_c__String__assign(&firmwareInfoMessage.data, infoBuffer);
-  RCSOFTCHECK(rcl_publish(&firmwareInfoPublisher, &firmwareInfoMessage, nullptr));
+  RCSOFTCHECK(publishMeasured(
+      &firmwareInfoPublisher,
+      &firmwareInfoMessage,
+      RUNTIME_PUBLISH_FIRMWARE_INFO));
 }
 
 void periodicTimeSync()
@@ -1546,8 +1622,10 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
       "imu/reset_yaw"));
 
-  // BEST_EFFORT / VOLATILE sensor publishers
-  RCCHECK(rclc_publisher_init_default(
+  // Periodic telemetry must never wait for a RELIABLE ACK inside the motor
+  // loop.  Freshness is the contract: state topics repeat, and odom/IMU are
+  // streams.  The service response remains RELIABLE.
+  RCCHECK(rclc_publisher_init_best_effort(
       &odomPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
@@ -1571,27 +1649,26 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
       "imu/gyro_bias"));
 
-  // Reliable status publishers
-  RCCHECK(rclc_publisher_init_default(
+  RCCHECK(rclc_publisher_init_best_effort(
       &estopStatePublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
       "estop/state"));
 
-  RCCHECK(rclc_publisher_init_default(
+  RCCHECK(rclc_publisher_init_best_effort(
       &firmwareInfoPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
       "firmware/info"));
 
-  RCCHECK(rclc_publisher_init_default(
+  RCCHECK(rclc_publisher_init_best_effort(
       &driveEnabledPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Bool),
       "drive/enabled"));
 
   // x = service call count, y = last reject reason, z = latch state.
-  RCCHECK(rclc_publisher_init_default(
+  RCCHECK(rclc_publisher_init_best_effort(
       &driveDiagPublisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
@@ -1687,6 +1764,7 @@ void setup()
 
   resetOdometry();
   resetImuYaw();
+  runtimeGuardInit(&runtimeGuard);
 }
 
 // ============================================================================
@@ -1695,17 +1773,32 @@ void setup()
 
 void loop()
 {
+  runtimeGuardBeginLoop(&runtimeGuard);
+  const uint32_t loopStartedUs = micros();
+
   // Safety checks are intentionally performed before and after ROS work.
   checkSafety();
 
-  RCSOFTCHECK(rclc_executor_spin_some(&executor, RCL_MS_TO_NS(2)));
+  const uint32_t spinStartedUs = micros();
+  const rcl_ret_t spinRc =
+      rclc_executor_spin_some(&executor, RCL_MS_TO_NS(2));
+  recordRuntimePhase(RUNTIME_PHASE_SPIN, spinStartedUs);
+
+  // §56.1: an enable request whose service response was not sent must not arm
+  // the board alone.  Leave reason 8 so this fail-closed transition is not
+  // indistinguishable from boot or a request that never arrived.
+  if (spinRc != RCL_RET_OK && driveGate.state == DRIVE_ARMING) {
+    disarmDriveWithReason(REARM_DISARM_SPIN_RESPONSE);
+  }
 
   // 🔴 Review §55.1 — the quiet barrier clock starts HERE, not in the service
   // callback. rclc runs the callback and only then calls rcl_send_response, both
   // inside the spin above; by the time this line runs the response has been
   // sent. Calling it every loop is intentional — it is a no-op unless the gate
   // is in ARMING, and a gate left in ARMING never arms (fail-closed).
-  rearmGateArmBarrierStart(&driveGate, millis());
+  if (spinRc == RCL_RET_OK) {
+    rearmGateArmBarrierStart(&driveGate, millis());
+  }
 
   checkSafety();
 
@@ -1714,11 +1807,27 @@ void loop()
   updateAppliedPwmEpoch();
 
   updateMotorOutputs();
+  uint32_t phaseStartedUs = micros();
   updateOdometry();
+  recordRuntimePhase(RUNTIME_PHASE_ODOM, phaseStartedUs);
+
+  phaseStartedUs = micros();
   updateImu();
+  recordRuntimePhase(RUNTIME_PHASE_IMU, phaseStartedUs);
+
+  phaseStartedUs = micros();
   publishDiagnostics();
+  recordRuntimePhase(RUNTIME_PHASE_DIAGNOSTICS, phaseStartedUs);
+
+  phaseStartedUs = micros();
   publishFirmwareInfo();
+  recordRuntimePhase(RUNTIME_PHASE_FIRMWARE_INFO, phaseStartedUs);
+
+  phaseStartedUs = micros();
   periodicTimeSync();
+  recordRuntimePhase(RUNTIME_PHASE_TIME_SYNC, phaseStartedUs);
+
+  recordRuntimePhase(RUNTIME_PHASE_LOOP, loopStartedUs);
 
   delay(1);
 }

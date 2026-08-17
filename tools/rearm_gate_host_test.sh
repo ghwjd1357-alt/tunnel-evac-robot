@@ -99,6 +99,14 @@ expect_contains "cmd_vel 이 driveOnCommand 를 거친다" \
     '^void cmdVelCallback' 'driveOnCommand(&driveGate'
 expect_contains "서비스가 driveOnServiceRequest 를 거친다" \
     '^void driveEnableCallback' 'driveOnServiceRequest('
+expect_contains "phase overrun 이 사유 7 로 풀린다" \
+    '^bool recordRuntimePhase' 'disarmDriveWithReason(REARM_DISARM_RUNTIME_OVERRUN)'
+expect_contains "publish overrun 이 사유 7 로 풀린다" \
+    '^rcl_ret_t publishMeasured' 'disarmDriveWithReason(REARM_DISARM_RUNTIME_OVERRUN)'
+expect_contains "spin 응답 실패가 사유 8 로 풀린다" \
+    '^void loop\(\)' 'disarmDriveWithReason(REARM_DISARM_SPIN_RESPONSE)'
+expect_absent "loop 안에 사유 없는 해제가 없다" \
+    '^void loop\(\)' 'disarmDrive();'
 
 # §55.1 — 장벽 시계가 콜백 안에서 시작하지 않는다
 expect_absent "서비스 콜백에 시각이 없다" '^void driveEnableCallback' 'millis()'

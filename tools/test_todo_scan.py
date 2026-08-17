@@ -52,22 +52,26 @@ class TodoScanTest(unittest.TestCase):
                 )
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    # ⚠ 아래 세 시험은 D+1 등록 계약 N 의 **양쪽 이웃(N±1)** 을 고정한다.
+    #   2026-08-17 에 N 이 10 → 9 로 내려갔다 (구 #4 라이다 높이 종결, `773d1a7`).
+    #   계약을 바꾸면 여기 경계도 같은 커밋에서 따라 내린다 — 안 내리면 이 시험이
+    #   "9 는 실패해야 한다"고 우기며 정상 상태를 FAIL 로 만든다(08-17 에 실제로 그랬다).
     def test_d1_claim_off_by_one_fails(self):
-        result = self.run_scan("D+1", items=10, claim=9, markers=10)
+        result = self.run_scan("D+1", items=9, claim=8, markers=9)
         self.assertEqual(1, result.returncode)
         self.assertIn("개수 불일치", result.stdout)
 
     def test_d1_extra_or_missing_item_fails_both_directions(self):
-        for items, claim, markers in ((11, 11, 11), (9, 9, 9)):
+        for items, claim, markers in ((10, 10, 10), (8, 8, 8)):
             with self.subTest(items=items):
                 result = self.run_scan("D+1", items=items, claim=claim, markers=markers)
                 self.assertEqual(1, result.returncode)
                 self.assertIn("등록 계약", result.stdout)
 
     def test_action_marker_increase_and_decrease_both_fail(self):
-        for markers in (9, 11):
+        for markers in (8, 10):
             with self.subTest(markers=markers):
-                result = self.run_scan("D+1", items=10, claim=10, markers=markers)
+                result = self.run_scan("D+1", items=9, claim=9, markers=markers)
                 self.assertEqual(1, result.returncode)
                 self.assertIn("실행 표식", result.stdout)
 

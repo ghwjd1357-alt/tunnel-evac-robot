@@ -112,11 +112,18 @@ Docker 로 갔다면 `JETSON_SETUP.md §5-d` 의 두 번째 명령을 쓴다.
 ros2 topic list | grep -E "odom|imu"
 ```
 
-## 2. ★ 라이다 — 장착과 측정이 **먼저**다 (오늘의 가장 큰 미결)
+## 2. ✅ 라이다 — 높이는 **확정·동결됐다** (2026-08-14, `773d1a7`)
 
-⚠ **라이다 스캔면 높이는 아직 없다.** 5번 요청해도 안 온 이유가 **라이다 미장착**으로
-확인됐고, 08-02 에 **장착·측정을 역할 A 가 흡수**하기로 방침이 바뀌었다
-(`REAL_ROBOT_VALUES.md §4`). 즉 **오늘 우리가 달고 우리가 잰다.**
+> 📜 **역사 (2026-08-02 ~ 08-13)** — 이 절은 원래 "오늘의 가장 큰 미결"이었다.
+> 라이다 스캔면 높이가 없었고(5번 요청해도 안 온 이유 = **라이다 미장착**), 08-02 에
+> **장착·측정을 역할 A 가 흡수**하기로 방침이 바뀌었다(`REAL_ROBOT_VALUES.md §4`).
+> **그 미결은 08-14 에 닫혔다.** 아래는 그때 확정된 값이다.
+
+```
+바닥 → 스캔 평면          =  677 + 120 + 25 + 10  =  832 mm
+URDF lidar_joint z        =  832 − 53             =  779 mm     ← 53 = 바퀴축 높이
+```
+근거 = `REAL_ROBOT_VALUES §3-a-1` (층별 유도) · 동결 = `FREEZE_MANIFEST §10.26`
 
 **지켜야 할 제약** (`PITFALLS.md §7` · 합의사항 §6.1):
 
@@ -125,21 +132,28 @@ ros2 topic list | grep -E "odom|imu"
   **유령 장애물**을 그리고 경로가 막힌다. 임시 기준 = 몸통 최상면 **+0.05 m 이상**.
 - 회전 중심(정중앙 x=0, y=0)에 맞춘다 — x/y 는 이미 정중앙으로 받았다.
 
-**측정과 반영**:
+**🔴 확인만 한다 — URDF 를 열지 않는다.**
+
+`robot_real.urdf` 는 **동결 대상**이다(`FREEZE_MANIFEST §10.26`). 편집기로 여는 순간
+동결 예외 절차 밖이고, 값을 되돌리면 그날 만든 지도·bag·R4·R6 이 **전부** 잘못된 TF
+위에 선다. 확인은 파일이 아니라 **TF 로** 한다:
 
 ```bash
-# ① 바닥에서 스캔 평면까지 줄자로 잰다 (단위 m)
-# ② URDF 의 lidar_joint 에 넣을 값 = (잰 높이) − 0.053    ← 0.053 = 바퀴축 높이
-#    ⚠ base_link 의 부모가 바퀴축이라 기준면을 옮겨야 한다. IMU 때와 같은 뺄셈이다.
-nano ~/ros2_ws/src/tunnel_bringup/urdf/robot_real.urdf     # lidar_joint 의 origin xyz
-cd ~/ros2_ws && colcon build --symlink-install --packages-select tunnel_bringup
+timeout --kill-after=2s 10s ros2 run tf2_ros tf2_echo base_footprint lidar_link
+#   기대 = z 0.832   (0.053 바퀴축 + 0.779 lidar_joint)
+```
+```
+0.832 다        → ✅ 그대로 진행
+0.832 가 아니다 → 🔴 그 자리에서 멈춘다. 고쳐서 진행하지 않는다.
+                  누가 동결 파일을 건드렸는지부터 본다: git log -- src/tunnel_bringup/urdf/
 ```
 
-⚠ **`z=0` 인 채로 R5(지도 제작)를 하면 지도가 통째로 못 쓰게 된다.** 지금 URDF 의 `0` 은
-측정값이 아니라 **"아직 안 쟀다"는 표시**다(그럴듯한 숫자를 넣지 않은 이유가 이것이다).
-R3 녹화 자체는 z 가 틀려도 되지만(스캔 원본은 그대로다), **잰 김에 오늘 채운다.**
+⚠ **`z=0` 인 채로 R5(지도 제작)를 하면 지도가 통째로 못 쓰게 된다.** 스캔 평면이 몸통
+최상면 아래로 내려가 **자기 몸통 모서리를 상시 타격**하고, 지나간 자리마다 유령 장애물을
+그린다. 그래서 값이 틀리면 **고치는 게 아니라 멈추는 것**이 맞다.
 
-TODO(D+1): 확인 — 잰 높이와 URDF 에 넣은 값을 `REAL_ROBOT_VALUES.md §2` 3-a 에 기록한다.
+✅ 기록 완료 — 측정값·유도는 `REAL_ROBOT_VALUES §3-a-1`, 재개방 조건(하중 변경 ·
+`base_joint` 변경 · 마스트 변경)은 `FREEZE_MANIFEST §10.26`.
 
 라이다 기동(터미널 C) — 런치 전체를 띄우기 전에 드라이버만 먼저 본다:
 
@@ -346,20 +360,29 @@ TODO(D+1): 확인 — 결과를 `REAL_ROBOT_VALUES.md §4` 에 기록하고, 0 �
 
 TODO(D+1): 확인 — 재연결 뒤 새 `/cmd_vel` 없이 모터가 다시 돌지 않는지 결과를 기록한다.
 
-## 7. `TODO(D+1)` 전량 목록 — **10건**
+## 7. `TODO(D+1)` 전량 목록 — **9건** (2026-08-17: 10 → 9, #4 종결)
+
+> 🔴 **개수는 사람이 지키는 약속이 아니라 기계가 세는 사실이다** (`doc_check §2d`).
+> 표식을 지웠으면 이 숫자와 아래 표를 **같은 커밋에서** 내린다. 안 그러면 `doc_check` 가
+> "표식 소실" 로 FAIL 한다 — 08-17 에 실제로 이 순서로 걸렸다.
 
 | # | 무엇 | 확인 방법 | 절 |
 |---|---|---|---|
 | 1 | 첫 직진 안전 공간 | 평지·양옆 1m 이상을 눈으로 확인 | §0-a · `JETSON_SETUP §7-c` |
 | 2 | 0.12m/s 3m 실측 | `/odom.header.stamp` 두 값으로 평균속도 계산 | §0-a · `JETSON_SETUP §7-c-1` |
 | 3 | 우회전 각속도 | `angular.z=-0.12` 10초와 `/imu/yaw_deg` 변화 | §0-a · `JETSON_SETUP §7-c-2` |
-| 4 | 라이다 스캔면 높이 | 줄자 실측 → URDF `lidar_joint` | §2 |
-| 5 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
-| 6 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
-| 7 | 간격 분포(토픽별 `TOPIC_POLICY` 계약) | `tools/bag_gap_report.py` | §5-b |
-| 8 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
-| 9 | covariance 실태 | `topic echo --field …covariance` | §5-d |
-| 10 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
+| 4 | 라이다 시리얼 포트 | `ls /dev/ttyUSB*` | §2 |
+| 5 | `frame_id` 3종 | `topic echo --field … --once` | §4 |
+| 6 | 간격 분포(토픽별 `TOPIC_POLICY` 계약) | `tools/bag_gap_report.py` | §5-b |
+| 7 | `header.stamp` 단조성 | `tools/bag_gap_report.py` 가 함께 판정 (중복·역행) | §5-c |
+| 8 | covariance 실태 | `topic echo --field …covariance` | §5-d |
+| 9 | 재연결 후 자동 재가동 금지 | R0 항목 — 구동부와 함께 | §6 |
+
+**✅ 종결된 항목 (번호에서 뺐다 — 표는 1..N 연속이어야 한다)**
+
+| 언제 | 무엇 | 결과 |
+|---|---|---|
+| 2026-08-14 | 라이다 스캔면 높이 (구 #4) | `832 mm` 실측 → `lidar_joint z = 0.779` (`773d1a7`). 유도 = `REAL_ROBOT_VALUES §3-a-1` · 동결 = `FREEZE_MANIFEST §10.26`. 🔴 **URDF 를 열지 않는다** — `tf2_echo base_footprint lidar_link` 가 `0.832` 인지만 본다 (§2) |
 
 ## 근거 문서
 

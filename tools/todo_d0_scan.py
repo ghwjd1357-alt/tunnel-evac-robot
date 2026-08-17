@@ -50,9 +50,12 @@ PHASES = {
         "marker_start": re.compile(r"^## 0\. "),
         "anchor": "TODO(D+1)",
         "marker": "TODO(D+1): 확인",
-        "want_items": 10,
+        # 2026-08-17: 10 → 9. 구 #4 '라이다 스캔면 높이' 종결 (08-14 `773d1a7`,
+        #   z 0.779 · FREEZE_MANIFEST §10.26). 숫자를 내리는 것 자체가 승인 행위다 —
+        #   표식만 지우면 여기서 fail-closed 로 걸린다(08-17 에 실제로 걸렸다).
+        "want_items": 9,
         "want_sites": 1,
-        "want_markers": 10,
+        "want_markers": 9,
     },
 }
 

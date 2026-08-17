@@ -172,7 +172,7 @@ touch ~/ros2_ws/src/tunnel_sim/COLCON_IGNORE
 
 | 날짜 | 현장 (로봇) | 노트북 (병행 가능) | 게이트 |
 |---|---|---|---|
-| **08-17 (월)** | 발현 주행 + `dmesg` → 예약 41 USB 판정 → **물리 보완** → `lift_I` 설계 재시험 | 08-14 Tier A **검토 2건** → **R4** | 🔴 **R3 재판정 rc=0** |
+| **08-17 (월)** | ✅ 발현 주행+bag+dmesg 확보 → 🔴 **D0-FW 단일 loop 정지 보완 구현·독립검토** | 구 15시간 블록 H′·I·J 및 R4 일시중단 | 🔴 굽기·실차 검증 전 |
 | **08-18 (화)** | **R6 예행** — Nav2 단일 goal | 예약 40 `rotate_to_heading_min_angle` 튜닝 | 🔴 **R6 판정** |
 | **08-19 (수)** | R7 전체 미션 + **촬영** | 편집 · 역할 B 협의본 | R7 |
 | **08-20 (목)** | 재촬영 · 보완 | 편집 · 디스플레이 컨펌 | — |
@@ -2543,6 +2543,79 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     `timestamp_idx` **인덱스만** 손상 — `ros2 bag reindex` + sqlite `REINDEX` 로 복구했고
     `integrity_check ok`. 데이터는 온전했다) · `map_0814_1512`(9분 · 정상 종료).
 
+    #### 🔴 41-e — 08-17 발현 주행이 USB 가설과 별개의 펌웨어 정지를 드러냈다 (D0-FW)
+
+    **새 증거** — `drive_0817_1325`(953.42초)와
+    `dmesg_drive_0817_1320.log`를 받았다. 최대 공백은 `/odom` **6.838초**,
+    `/imu/data` **6.851초**였고, `/drive/enabled`·`/drive/diag`·`/estop/state`도 같은 사건에서
+    최대 **7.737초** 비었다. 반면 `/scan`은 계속 왔다. ROS 수신시각 공백과 메시지 header
+    stamp 공백도 수 ms 안에서 일치해, 뒤늦게 몰려온 것이 아니라 **Teensy 주기 메시지가
+    생성되지 않은 시간**이다. 🔴 단, dmesg는 13:21에 끝난 **주행 전
+    스냅샷**이고 정지는 13:30:22~29에 발생했다. 사건 시각 커널 기록은 아예
+    없으므로 USB reset·disconnect·`ttyACM` 오류 유무는 **미관측**이다.
+
+    🔴 **판정 범위를 섞지 않는다.** 현 증거는 Teensy 내부 정지와 USB/agent 링크
+    정지를 구분하지 못한다. PCB·USB 스트레인 릴리프 후보는 08-17 정지와 08-14
+    메시지 손상 모두에 대해 열려 있다. 바퀴 재장착·몸체 기울임은 사용자가 사건 시각에는
+    없었다고 확인했으므로 오늘 공백의 원인으로 쓰지 않는다.
+
+    **정지 당시 안전 상태** — 직전 `/drive/diag x=2,y=0,z=2`(**ARMED**),
+    E-stop=false였고 정지 구간 내내 `/cmd_vel wz=-1.0`이 계속 발행됐다. 6.84초
+    동안 `checkSafety()`가 돌지 않아 watchdog·E-stop 표본이 둘 다 없었고, 모터는
+    마지막 PWM을 유지할 수 있었다. 이 묶음의 시급성은 telemetry가 아니라 **감시
+    loop 전체 정지**에서 온다.
+
+    **생산 코드에서 재현한 1순위 기전** — micro-ROS 설정의
+    `RMW_UXRCE_PUBLISH_RELIABLE_TIMEOUT=1000` 아래, 단일 `loop()`가 `/odom`과 상태 4개를
+    RELIABLE로 순차 발행하고 그 뒤에 watchdog·E-stop 표본·IMU까지 모두 수행한다. 한 호출의
+    ACK 대기가 다음 호출로 누적되면 수 초 정지가 된다. 관측된 **6.85초**는 이 직렬 상한의
+    크기와 맞는다. BNO055 I2C 호출은 Wire 상한상 한 전송 50ms여서 기여할 수는 있어도 홀로
+    6.85초를 만들 근거는 없다. USB CDC write 상한 120ms·주기 time sync 100ms도 같은 이유로
+    보조 후보다.
+
+    **구현자가 주장하는 완료판정** — *"주기 발행 8개가 전부 BEST_EFFORT라 1초 ACK 대기가
+    제어 loop에 연쇄되지 않고, 8개 발행과 7개 loop 단계의 최대시간·실패가 관측되며, 복귀한
+    호출 또는 loop가 **임시 400ms** 이상이면 복귀 즉시 `y=7`·DISARMED로 래치되어
+    새 무장 없이는 재가동하지 않는다. 400ms는 첫 bench 계측용 임시값이지 실측
+    최종값이 아니다.
+    enable 서비스 응답을 처리한 executor spin이 실패하면 `y=8`·`disarm_spin`을
+    남기고 ARMING 장벽을 시작하지 않는다."*
+    ⚠ 이 주장은 **Codex 구현자 주장**이고 승인판정이 아니다. Claude가 독립검토한다.
+
+    **§3-10 전수·폐포** — 생산 publisher 초기화 **8**, 실제 publish **8**, executor spin **1**,
+    runtime I2C `getEvent` **2**, 주기 time sync **1**, 이 계약을 직접 소비하는 현장 구독
+    **12**, bag override **8**, runtime info 계약 필드 **7**을 기계로 열거했다.
+    `tools/test_firmware_runtime_guard.py`가
+    publisher 추가·누락·RELIABLE 역변이, 임시 400ms 경계 `>=`→`>`, spin 성공/실패 역전,
+    소비자 한 자리 QoS 역변이, runtime 필드 소실·배열 크기·enum 순서 역변이를 모두
+    실패시킨다. 목록을 손으로 골라 검사하지 않는다.
+
+    **현재 작업본 보완** — 주기 telemetry 8개 BEST_EFFORT 통일, 모든 publish 시간·실패 계수,
+    loop 7단계 최대시간·임시 400ms 복귀 후 사유 7 fail-closed 래치(한 loop의 첫
+    구체 원인을 보존), §56.1 spin 실패 사유 8·누계, state-bearing 진단의 stale 표본 방지,
+    현장 도구·bag 구독 QoS 폐포. `/firmware/info`는 61개 형식/인자 대조와 1536바이트 버퍼
+    상한 **1407자·여유 128자**까지 재측정했다. 해독 계약 = `REAL_ROBOT_VALUES §1-g`.
+
+    **남는 한계와 다음 게이트** — 외부 라이브러리 호출이 영원히 돌아오지 않으면 소프트웨어는
+    그 호출 안에서 E-stop을 다시 읽을 수 없다. 하드웨어 watchdog은 별도 bench 설계 없이는
+    넣지 않는다. 또한 watchdog의 기존 *정지만 하고 ARMED 유지* 관측은 H′(odom 가드 liveness)와
+    다른 조건부 설계이며, 자율 `/cmd_vel` 발행자 연결 전에 §56.1과 함께 다시 판단한다.
+    ✅ **최종 독립 재검토 §75** — 구현자와 다른 Codex 세션이 P0 0·P1 2·P2 1,
+    **현재 Tier A diff 최종 승인·커밋 가능**으로 판정했다. P1은 ① 400ms 이상 실패 spin에서
+    `y=7`이 먼저 남아 spin 실패를 가릴 수 있음 ② 현행 0~6·16~23 enum 숫자 변이를 회귀가
+    못 잡음이다. 둘 다 DISARMED를 유지해 같은 사슬 3회차 조건부 수용으로 동결한다.
+    전제 = enable 호출과 겹친 `y=7`은 spin 실패도 열어 두고, `runtime_last` 자동 판독 전
+    header 숫자를 수동 대조. 재개방 = enable 실패/timeout+overrun 동시 관측, 문서/header
+    불일치, 자동 판독 도입. 임계를 올려 우회하지 않는다.
+
+    §75 승인 뒤에도 clean build → precheck 지문 이관 → 바퀴 공중 E-stop/무장/13행 → 짧은 저속 → 같은 bag 장시간
+    순서로 올라가며, 새 `/firmware/info`의 `runtime_*` 계수를 전후 대조한다.
+    🔴 dmesg는 주행 **종료 후** `dmesg -T`까지 받아 사건 시각을 반드시 덮는다.
+    **Claude 재검토 §74** — P0 0·P1 2·P2 3, 바퀴 공중 bench만 조건부 승인 유지.
+    §74.2·74.3 보완 뒤 최종 판정은 위 §75이며, 동결 예외 대장 = `FREEZE_MANIFEST §10.28`.
+
+    오늘 전체 시간순·원자료 위치·판단 변화 = `~/Desktop/개발현황/0817_현황.md`.
+
 - **🔴 예약 40 — 주행 중 각속도가 명령의 25% 만 나온다 (2026-08-14 A-10 실측)**
 
     **등록 사유** — A-10(`a10_0814_1258`)에서 `linear.x=0.12` 에 `angular.z` 를 셋 걸었더니
@@ -2787,6 +2860,9 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 
 | 결정 | 날짜 | 근거 |
 |---|---|---|
+| 🔴 **EKF가 사용하는 세 값과 3×3 공분산 9칸을 함께 검사한다 — 재개방 발동** — `drive_0817_1325` 복귀 직후 t=306.02에 `/odom wz=-5.552rad/s`(MAX 0.50의 11배), `|wz|>1.0` 27건 중 **26건이 `/odom_guarded`**로 통과했다. §72.2 재개방 조건“미검사 `vy/wz` 이상”이 실제 발동했다. D0-FW와 섞지 않고 별도 묶음으로 보완하며 그전 R4/R6 진입 금지 | 08-17 | 검토 §72.2·§73.7-④ · `drive_0817_1325` |
+| 🔴 **가드 사망은 준비 완료 뒤에도 fail-closed로 전환한다** — 초기 gate에 `/odom_guarded` 신선도를 넣고, 실행 중 프로세스 사망·topic stale이 SLAM/Nav2 준비 완료나 계속 운용으로 조용히 이어지지 않게 한다. 이 H′는 D0-FW 뒤 재개하며 R6 전에는 닫는다 | 08-17 | 검토 §72.3 · `CURRENT_HANDOFF` |
+| 🔴 **2-hop 계약은 raw와 guarded 토픽의 소유자를 각각 검사한다** — `/odom` 구독자는 `odom_guard`, `/odom_guarded` 구독자는 EKF다. R4·D0·수동 EKF 명령이 raw `/odom`의 EKF 직접 구독을 요구하면 정상 구조가 실패하거나 IMU-only로 조용히 돈다 | 08-17 | 검토 §72.4 · `CURRENT_HANDOFF` |
 | 🔴 **`command -v` 실패를 "미설치"로 읽지 않는다 — `PATH` 문제와 구별되지 않는다** — 예약 27 은 D+0 검사의 `nvcc --version` 실패 하나로 *"이 Jetson 에 CUDA 가 없다"* 로 등록됐고, 그 위에 *"YOLO 가 CPU 추론으로 떨어져 역할 B 성능 전제가 통째로 바뀐다"* 는 결론이 6일간 정본 3곳에 남았다. 실제로는 **CUDA 12.6 툴킷이 08-06 부터 있었고 `PATH` 에만 없었다.** 진짜 결함은 전혀 다른 층(`LD_LIBRARY_PATH` 에 `site-packages/nvidia/...` 를 통째로 넣어 pip 의 cuBLAS 12.9 가 시스템 12.6 을 가림)이었다. ⚠ **에러 메시지가 바뀌는 것은 고쳐진 증거가 아니라 실패 지점이 옮겨간 증거일 수 있다.** → 부재 판정은 **패키지 관리자에게 묻는다**(`dpkg -l` · `apt policy`), 실행 파일 탐색으로 하지 않는다 | 08-11 (기록 08-17) | `MASTER_PLAN §7` 예약 27-b · `~/Desktop/JETSON_GPU_수리기록_역할B_인계_0811.md` |
 | ✅ **플랜 B 미발동 — '구동부 지연' 행을 발동하지 않는다** — 기준일 `2026-08-15` 의 조건은 *"그날까지 R2 3m 직진 3% 이내 통과 선언"* 이었고, 08-14 재굽기 이후 시행 `r2_line_0814_1231` 이 줄자 `3,075 mm` 에 `odom/줄자 = 0.997`(**오차 0.3%**)로 기준의 **10배 여유**로 통과했다(회전 참고 `0.993`). 시뮬 고도화 전환·시연 백업 전환은 하지 않는다. 🔴 **절차 위반 1건을 같이 남긴다 — 근거는 기한 하루 전에 섰지만 선언 기록을 08-17 까지 미뤘다.** 절차가 요구한 것은 통과가 아니라 **기록**이고, 그 사이 문서만 보는 사람에게는 *"판정을 안 했다"* 와 구별되지 않았다. ⚠ **아크릴 미장착 잠정값**이다(예약 42) — 붙이면 이 판정도 다시 본다 | 08-15 (기록 08-17) | `MASTER_PLAN §6` 판정 결과 절 · `~/Desktop/개발현황/0814_현황.md` |
 | 🔴 **`ros2 bag record` 의 구독 QoS 를 순서에 맡기지 않는다 — `/cmd_vel` 은 override 로 VOLATILE 에 고정한다** — rosbag2 는 토픽을 **발견하는 순간의 발행자**만 보고 구독 QoS 를 정하고(`rosbag2_transport/qos.hpp:44` `adapt_request_to_offers`) 그 구독은 **한 번만** 만들어진다. 08-14 런북이 `bag record` → `ros2 topic pub`(**TRANSIENT_LOCAL**) → `teleop`(**VOLATILE**) 순서였고, TRANSIENT_LOCAL 구독자는 VOLATILE 발행자와 **호환되지 않아** 지도 3세션의 명령이 **에러 없이 0건**이 됐다. 🔴 **08-14 에 적은 "QoS 불일치(BEST_EFFORT 발행자 + RELIABLE 구독자)" 는 축도 방향도 틀렸다** — 축은 durability 였고, 원인은 발행자가 약한 게 아니라 **구독자가 너무 엄한 것**이었다. → 구독을 **느슨한 쪽**(VOLATILE)에 고정하면 두 종류 발행자를 다 받는다. ⚠ 전제조건 = 모든 `/cmd_vel` 발행자가 RELIABLE. 🔴 재개방 = BEST_EFFORT 발행자 등장 | 08-17 | `MASTER_PLAN §7` 예약 43-b · `tools/bag_qos_overrides.yaml` · `tools/qos_record_repro.sh`(① 0/60 → ② 60/60) |

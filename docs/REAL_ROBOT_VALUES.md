@@ -245,25 +245,29 @@ costmap·footprint·TF 가 전부 어긋났을 것이다.
 - **완화 수단**: EKF 에서 IMU `angular_velocity.z` 가중을 높이고 odom yaw 신뢰도를 낮춘다
   (3차 회신 §11 이 먼저 요청한 방향이고 `ekf_real.yaml` 이 이미 그 구조다)
 
-### ★★ §1-d. 펌웨어 소스에서 확정된 값 (08-02 신설 — **최종 정본**)
+### ★★ §1-d. 펌웨어 소스에서 확정된 값 (08-17 D0-FW 갱신 — **최종 정본**)
 
-> 출처 = `~/Desktop/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino`
-> (sha256 `13f929cb…2106`). **회신 PDF 와 다르면 이쪽이 맞다.**
+> 출처 = 저장소 `firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino`.
+> **현재 작업본은 §75 최종 독립검토에서 P0 0·bench 조건부 승인을 받았고 아직 보드에 굽지 않았다.** 회신 PDF·옛 수령본과
+> 다르면 검토가 끝난 저장소 소스와 실제 보드의 `build`를 각각 확인한다.
 
 **ⓐ QoS — 회신 PDF 가 틀렸다**
 
 | 토픽 | Reliability | 근거 (소스 함수) |
 |---|---|---|
-| `/odom` | **RELIABLE** | `rclc_publisher_init_default` |
+| `/odom` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
 | `/imu/data` · `/imu/yaw_deg` · `/imu/gyro_bias` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
-| `/estop/state` · `/firmware/info` | **RELIABLE** | `rclc_publisher_init_default` |
+| `/estop/state` · `/firmware/info` · `/drive/enabled` · `/drive/diag` | **BEST_EFFORT** | `rclc_publisher_init_best_effort` |
 
-⚠ 소스 주석은 이 블록 전체를 `// BEST_EFFORT / VOLATILE sensor publishers` 라고 적어 두었으나
-`init_default` 는 rclc 에서 **RELIABLE** 이다. **주석이 아니라 함수 이름이 사실이다.**
+🔴 **08-17 이전 이력** — `/odom`·상태 4개는 `init_default`라 RELIABLE이었다. micro-ROS의
+RELIABLE 발행 대기 상한은 이 환경에서 한 호출당 1000ms이고, 08-17 bag에서 같은 단일 loop의
+`/odom`·`/imu/data`·상태 토픽이 최대 **6.85초 함께 비었다.** 그래서 주기 telemetry 8개를
+전부 BEST_EFFORT로 통일했다. `/drive/enable` **서비스 응답**은 RELIABLE 계약을 유지한다.
 
-★ **예약 19 ① 의 결론은 바뀌지 않는다.** 구독자가 BEST_EFFORT 면 양쪽 모두와 매칭되고,
-`robot_localization` 은 이미 BEST_EFFORT 로 구독한다(08-02 실측). **고장 조합은 하나뿐이다:**
-`pub BEST_EFFORT + sub RELIABLE`. → `d0_check.sh` 검사 [4][5] 를 이 규칙으로 정정했다.
+★ DDS 호환 규칙은 그대로다. 구독자가 BEST_EFFORT면 RELIABLE·BEST_EFFORT 발행자 모두와
+매칭되고, `robot_localization`은 이미 BEST_EFFORT로 구독한다. **고장 조합은 하나뿐이다:**
+`pub BEST_EFFORT + sub RELIABLE`. 현장 회귀 도구 5파일의 구독 12곳과 bag override 8토픽도
+BEST_EFFORT로 맞췄고, `tools/test_firmware_runtime_guard.py`가 그 폐포를 검사한다.
 
 **ⓑ 🔴 바퀴 명령 하한 0.02 m/s — Nav2 직결 (신규)**
 
@@ -589,7 +593,7 @@ VELOCITY_FILTER_ALPHA = 0.10;   // 20ms 주기 → 시정수 ≈ 0.2초
 > **정본 = `firmware/teensy_integrated_base_v1_4/rearm_gate.h`**(전이) **+ `drive_wiring.h`**
 > (전이에 딸린 모터 정지). 둘 다 Arduino 를 안 쓰는 순수 헤더라 PC 에서 그대로 컴파일된다.
 > 아래 그림은 그 파일들의 요약이고, **갈리면 파일이 이긴다.**
-> 전수 = `bash tools/rearm_gate_host_test.sh` (동작 **검사 922건** + 구조 **7건**).
+> 전수 = `bash tools/rearm_gate_host_test.sh` (동작 **검사 989건** + 구조 **11건**).
 
 ```
               부팅 / E-stop 눌림 / 계약 위반
@@ -713,10 +717,10 @@ E-stop 이 다시 눌리면 **어느 상태에서든** 즉시 `[DISARMED]` 다.
 |---|---|---|---|
 | `/drive/enabled` | `std_msgs/Bool` | `data` | `state == ARMED` 하나뿐. **주행 가능 여부의 단일 판정값** |
 | `/drive/diag` | `geometry_msgs/Vector3` | `x` = `service_calls` | 🔴 서비스 핸들러가 불린 누계(**거절 포함**). 호출했는데 안 오르면 **서비스가 안 온 것**, 오르는데 상태가 안 바뀌면 **로직이 거절한 것** |
-| | | `y` = `last_event` | **0~6 — 아래 표가 정본이다.** 0=없음 1=E-stop 2=zero 0.5초 미충족 3=이미 ARMED/ARMING/PENDING **4=E-stop 이 풀었다 5=NaN/Inf 가 풀었다 6=장벽 위반 비영이 풀었다** |
+| | | `y` = `last_event` | **0~8 — 아래 표가 정본이다.** 0=없음 1=E-stop 2=zero 0.5초 미충족 3=이미 ARMED/ARMING/PENDING **4=E-stop 이 풀었다 5=NaN/Inf 가 풀었다 6=장벽 위반 비영이 풀었다 7=runtime overrun 이 풀었다 8=enable 응답 spin 실패가 풀었다** |
 | | | `z` = `state` | **0=DISARMED 1=READY 2=ARMED 3=PENDING 4=ARMING** |
 
-**⓶-b 🔴 `y` 값 표 — 0~6 이 한 표다 (08-13 신설 · 검토 §63.2)**
+**⓶-b 🔴 `y` 값 표 — 0~8 이 한 표다 (08-13 신설 · 08-17 §74.2 갱신)**
 
 `y` 는 한 칸이라 **가장 최근 사건 하나**만 담는다. 값에 따라 **주어가 다르다**:
 
@@ -729,18 +733,22 @@ E-stop 이 다시 눌리면 **어느 상태에서든** 즉시 `[DISARMED]` 다.
 | **4** | **해제 — E-stop 이 풀었다** | 펌웨어 | 🔴 **무장이 실제로 풀린 순간에만** |
 | **5** | **해제 — NaN/Inf `/cmd_vel` 이 풀었다 (§54.3)** | 펌웨어 | 〃 |
 | **6** | **해제 — ARMED 아닌 상태의 비영 = 장벽 위반 (§54.2)** | 펌웨어 | 〃 |
+| **7** | **해제 — runtime phase/publish 가 임시 시간 상한을 넘음** | 펌웨어 | 🔴 **무장이 실제로 풀린 순간에만** |
+| **8** | **해제 — enable 서비스 응답을 담은 executor spin 실패** | 펌웨어 | 🔴 **ARMING이 실제로 풀린 순간에만** |
 
 ⚠ **0~3 의 숫자·의미는 08-13 에 바뀌지 않았다.** `JETSON_SETUP §7-c-E` 의 13행 표는 그대로 유효하다.
 
-🔴 **4~6 은 "전이한 순간에만" 쓴다 — 이것이 계약이다 (§63.1).** 이미 DISARMED 인데
+🔴 **4~8 은 "전이한 순간에만" 쓴다 — 이것이 계약이다 (§63.1·§73.4·§74.2).** 이미 DISARMED 인데
 계속 들어오는 비영 명령은 **푼 것이 아니라 풀린 결과**이므로 이 칸을 못 덮는다.
 구판은 덮었고, `/cmd_vel` 10Hz · `/drive/diag` 1Hz 라서 E-stop 이 남긴 `4` 는
 **밖에서 한 번도 안 보였다.** 원인을 밝히려고 넣은 칸이 원인을 지우고 있었다.
 
 ⚠ **`y` 로 누계를 세지 않는다.** "이번 주행에서 몇 번 풀렸나"는 `/firmware/info` 의
-`disarm_estop` · `disarm_nonfinite` · `disarm_nonzero` 로만 답이 나온다 (전이 1회 = 1 증가).
+`disarm_estop` · `disarm_nonfinite` · `disarm_nonzero` · `disarm_runtime` · `disarm_spin`으로만 답이
+나온다 (전이 1회 = 1 증가).
 
-✅ **08-13 검토 §64.2 승인.** `y` 한 칸에 주어가 둘인 것(0~3 서비스 / 4~6 펌웨어)은
+✅ **08-13 검토 §64.2 승인.** `y` 한 칸에 주어가 둘인 것(0~3 서비스 / 당시 4~6,
+08-17 확장 7 펌웨어)은
 필드 이름이 `last_event` 이고 값 공간이 안 겹치며 이 표가 주어·시점을 명시하므로 수용됐다.
 서비스 호출이 뒤에 오면 `y` 가 **더 최근 사건**으로 바뀌는 것은 계약대로이고, 해제 이력은
 사유별 단조 계수가 보존한다. **칸 분리·별도 토픽은 지금 필요 없다.**
@@ -805,7 +813,7 @@ fail-closed"* 라고 적혀 있었다. **거짓이다.** `rearmGateArmBarrierSta
 
 ```
 1. 코드 수정            rearm_gate.h(전이) + drive_wiring.h(정지) + .ino(배선)
-2. 🔴 host harness       bash tools/rearm_gate_host_test.sh — 동작 922 + 구조 7
+2. 🔴 host harness       bash tools/rearm_gate_host_test.sh — 동작 989 + 구조 11
 3. 🔴 변이 시험          위 harness 가 허수가 아님을 확인 (⓹ 아래 표 — 통과보다 이게 증거다)
 4. 무변경 재빌드 검증    FIRMWARE_REBUILD §4 — 링크 성공 · 메모리 · 환경 지문
 5. 🔴 firmware_precheck  아직 구판 지문이라 FAIL 이 정상 — 판정 근거로 쓰지 않는다
@@ -897,6 +905,76 @@ fail-closed"* 라고 적혀 있었다. **거짓이다.** `rearmGateArmBarrierSta
 | 부정 18 | 위 실패 뒤 **빈 성공 spin** + 500ms tick | 여전히 `[DISARMED]` — 되살아나지 않는다 |
 | 역회귀 9 | 정상 `spin=OK` → `[PENDING]` → +499ms 거절 → +500ms 새 명령 | 주행 |
 | M8 (변이) | 실패 spin 에서도 barrier 시작 (= 현재 코드) | **rc=1 이어야 한다** |
+
+### ★★ §1-g. D0-FW runtime 계측·해독 계약 (2026-08-17 · 검토 §73 보완)
+
+현재 펌웨어 후보는 `rearm-latch-pi-runtime-guard-1.6.1`이다. 🔴 아직 굽지
+않았고, 아래 기대범위의 **실측값은 빈칸**이다.
+
+| 필드 | 뜻 | 현장 판독 |
+|---|---|---|
+| `runtime_overruns` | 최소 한 계측이 경계를 넘은 **loop 수** | 사건 수가 아니다. 한 loop 안의 publish·phase 여러 초과도 1로 세므 |
+| `runtime_last=<code>,<us>` | 가장 최근 overrun의 첫 구체 원인·실행시간 | 아래 코드표로 해독 |
+| `publish_failures` | `rcl_publish` 비정상 반환 누계 | overrun과 다른 축. 한 번이라도 늘면 통신 원인 재분류 |
+| `disarm_runtime` | runtime overrun이 **실제 무장을 풀어서** 발생한 전이 누계 | `/drive/diag y=7` 과 같이 본다 |
+| `disarm_spin` | enable 응답을 담은 spin 실패가 **ARMING을 실제로 풀어서** 발생한 전이 누계 | `/drive/diag y=8` 과 같이 본다 |
+
+🔴 **runtime 관측 필드 7개는 생산 회귀가 존재·개수·enum 순서를 강제한다.**
+format과 인자를 같이 지우거나 배열 순서만 바꾸어도
+`tools/test_firmware_runtime_guard.py` 가 실패해야 한다(검토 §74.3).
+⚠ **검토 §75.3 조건부 수용** — 현행 header의 숫자 wire code `0~6·16~23`은 아래 표와
+일치하지만, 숫자 자체를 바꾸는 변이는 아직 생산 회귀가 고정하지 못한다. 자동 판독을 붙이기
+전에는 header enum 숫자를 수동 대조하며, 문서와 불일치하거나 자동 판독을 시작하면 재개방한다.
+
+`runtime_last` 코드:
+
+| 코드 | 단계 | 코드 | publish |
+|---:|---|---:|---|
+| 0 | executor spin | 16 | odom |
+| 1 | odom 단계 | 17 | IMU |
+| 2 | IMU 단계 | 18 | IMU yaw |
+| 3 | diagnostics 단계 | 19 | gyro bias |
+| 4 | firmware info 단계 | 20 | E-stop state |
+| 5 | time sync 단계 | 21 | drive enabled |
+| 6 | 전체 loop | 22 | drive diag |
+| — | — | 23 | firmware info |
+
+`phase_max_us` 순서 = `spin, odom, imu, diagnostics, firmware_info, time_sync, loop`.
+🔴 마지막 `loop`는 `delay(1)`과 판 사이 틈을 제외한 **한 판의 작업 시간**이다.
+`publish_max_us` 순서 = `odom, imu, imu_yaw, gyro_bias, estop, drive_enabled, drive_diag,
+firmware_info`.
+
+⚠ **검토 §75.2 조건부 수용** — enable 응답 spin 실패와 400ms overrun이 동시에 성립하면
+현행 순서에서는 runtime 사유 7이 먼저 DISARMED로 전환해 사유 8·`disarm_spin`이 남지 않을
+수 있다. 모터 정지는 유지된다. 따라서 enable 호출과 겹친 `y=7/disarm_runtime`은 spin 응답
+실패를 배제하지 못하며, 동시 관측 시 재개방한다. 임계를 올려 이 모호성을 숨기지 않는다.
+
+**§75 판정은 P0 0이며 현재 Tier A diff는 최종 승인·커밋 가능하다.** 범위는 승인 지문·clean
+compile 뒤 모터 전력 0V·바퀴 공중·물리 E-stop 담당자의 bench까지이며, 실차 결함 종결은 아니다.
+
+| 계측 | 첫 bench 기대범위 | 재개방 |
+|---|---|---|
+| `phase_max_us` 7개 | **미실측** | 임시 경계 400,000us 근접/초과 |
+| `publish_max_us` 8개 | **미실측** | 특정 publish 지연이 반복 최대를 소유 |
+| `runtime_overruns` | 첫 시행 시작·끝 차이 **0 기대** | 1 이상 증가하면 임계를 높이지 말고 원인 분류 |
+
+🔴 `RUNTIME_STALL_LIMIT_US=400000`은 **첫 bench 계측용 임시값**이다. 기존
+320ms 산술은 USB CDC write 120ms를 loop당 1회로만 세었지만, 생산 코드에서는
+odom 1 + IMU 2 + diagnostics 4 + firmware info 1 = **한 판 최대 8회 publish**가
+겹칠 수 있다. 따라서 400ms가 증명된 정상 상한 위라고 단정하지 않는다. 실차 정상
+분포를 받기 전에 최종 안전 임계로 승격하지 않는다. 임계를 나중에 낮추거나
+높일 때는 실측 분포·watchdog 선행 조건·재개방 조건을 같이 갱신한다.
+
+§73 판정 정본 앵커:
+
+- **사건 시각 커널 기록은 미관측**이다. 주행 전 dmesg 스냅샷으로 USB를
+  기각하지 않는다.
+- **runtime 임시 경계 400ms는 실측 전 후보**이며 첫 bench 분포로 재판정한다.
+- **runtime overrun은 `/drive/diag y=7`**과 `disarm_runtime`으로 보존한다.
+- **spin 응답 실패 해제는 `/drive/diag y=8`**과 `disarm_spin`으로 보존한다.
+- **runtime 계수 해독표가 현장 계약**이며 이 절 없이 숫자만 판정하지 않는다.
+- **§73 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다.**
+- **§74 판정은 P0 0이며 바퀴 공중 bench만 조건부 승인한다.**
 
 ## 2. 실차 반영 지점 (★ 개정 — 시뮬 파일 수정 아님, `tunnel_bringup` 신규 작성)
 
@@ -1024,7 +1102,8 @@ VID/PID 만으로 걸면 엉뚱한 장치에 `/dev/rplidar` 가 붙는다.
 
 - [x] **`frame_id` 3종** — `"odom"` / `"base_footprint"` / `"imu_link"`. 합의서와 **일치**.
       3차에 걸쳐 아무도 묻지 않았던 항목이 소스 3줄로 닫혔다.
-- [x] **QoS** — ⚠ **회신 PDF 가 틀렸다.** §1-d 표 참조. `/odom` 은 **RELIABLE** 이다.
+- [x] **QoS** — 회신 PDF와 08-02 수령본의 역사 계약은 폐기됐다. 현재 계약은 §1-d 표 참조:
+      주기 telemetry 8개 전부 **BEST_EFFORT**, 서비스 응답은 RELIABLE이다.
 - [x] **covariance** — `twist.covariance[0] = 0.02` **존재한다.** "`linear.x` 누락"은 우리 오판이었다.
 - [x] **timestamp** — `publishOdometry/Imu` 호출 **직전** stamp = 센서 계산 직후. 수신시각이 아니다.
 - [x] **NaN·Inf 방어** — `isfinite()` 검사 후 `stopAllMotors()` + `cmdVelReceived=false`.
