@@ -43,17 +43,44 @@ GPS 불가 지하터널에서 재난(화재·연기·붕괴) 시, 로봇이 위�
 | 출력 | `/cmd_vel` | Twist | Nav2 → Teensy (`linear.x`·`angular.z`만) |
 | 출력 | `/map`, `/tf` | — | SLAM |
 
-### 4.1 `/detections` V1 계약 초안 (★ 역할 B 공동 합의 전)
+### 4.1 `/detections` V1 계약 (08-17 재합의 4왕복 반영 — schema·실패 표현·자세 판정 확정)
 
-- **역할 A 내부안**: YOLO(역할 B) 측이 depth 결합까지 담당해 camera-frame 3D position 제공.
-  역할 B의 확인·동의는 아직 받지 않았으며 V1 공동 합의에서 확정한다.
-- V1 필드 골격 초안 = header(stamp=촬영시각, frame=camera optical frame) · class_name · confidence ·
-  bbox · position(m). 세부 타입·주기·QoS·실패 표현과 함께 **전부 역할 B 확인 전**이다.
-- `.msg` 필드 추가 = **타입 변경 = 양측 동시 리빌드 필요** → 공동 합의 뒤 V1 최소 계약을 고정하고,
-  확장은 V2 별도 메시지로 한다 (07-19 개정).
+🔴 **상태가 바뀌었다.** 08-13 재합의 요청 → 역할 B 1·2·3차 회신 · 역할 A 2·3·4차 회신으로
+**schema·실패 표현·class 열거·자세 판정까지 확정**됐다. 남은 것은 역할 B 회신 대기 4건과
+실측 종속 항목뿐이다. 계약 정본 = `~/Desktop/YOLO_탐지연동_합의사항.md §15`
+(구 `역할B_detection_토픽계약_전달.md` 는 대체됨).
+
+- **책임 경계(변동 없음)**: YOLO(역할 B) 측이 depth 결합까지 담당해
+  **camera-frame 3D position 제공**. 역할 A는 그것을 검증해 map 으로 옮긴다.
+- **`.msg` 2종 확정** (`tunnel_interfaces`) — 07-19 골격 그대로다. 필드 추가 = 타입 변경 =
+  양측 동시 리빌드이므로, 확장은 V2 별도 메시지로 한다.
+
+```text
+Detection3D      : string class_name / float32 confidence /
+                   sensor_msgs/RegionOfInterest bbox / geometry_msgs/Point position
+Detection3DArray : std_msgs/Header header / Detection3D[] detections
+```
+
+- **`class_name` = 닫힌 열거 5종 · 소문자 고정** — `person_fallen` · `person_ok` ·
+  `person_unknown` · `fire` · `smoke`. header stamp = color 촬영시각, frame = camera optical
+  frame. QoS = RELIABLE / VOLATILE / KEEP_LAST 5, 10Hz, 0.5초 stale.
+- 🔴 **`car`·`human` 은 열거 검사 *이전에* drop 하고 `/diagnostics` 카운터로만 남긴다.**
+  검사에 태우면 정상 상황(터널의 차·사람)이 매번 위반 경보가 되고, 그러면 사람이 경보를
+  꺼서 **열거 검사 자체가 없는 것과 같아진다.**
+- 🔴 **부분 실패 금지** — 인지 모델이 2개(Fire-Smoke + pose)여도 **한 프레임의 결과는
+  하나**다. 한쪽만 성공한 프레임은 발행하지 않고 `/diagnostics` ERROR 로 남긴다.
+  빈 배열(= 정상 미탐지)과 미발행(= 실패)을 섞지 않는다.
+- 🔴 **중력 보정은 V1 계약에서 제외** — 자세 판정 기준축은 **이미지 y축**이다.
+  근거·재개방 조건 = `PITFALLS §13`. 이 결정을 뒤집으려면 `ekf_real.yaml` 이 먼저 바뀐다.
+- 자세 판정 규칙(관찰창 10프레임/3.0초 · `valid>=4` · 임계 60° · 히스테리시스 0.3/0.6)의
+  정본 블록은 역할 B 3차 회신 부록이다. **Perception Adapter 는 그 블록을 그대로 읽어 만든다.**
 - map 좌표 생성·검증(timestamp·frame·반복관측·오탐 억제)은 역할 A **Perception Adapter** 책임.
-- 계약 정본 = `~/Desktop/YOLO_탐지연동_합의사항.md` (구 `역할B_detection_토픽계약_전달.md` 는 대체됨).
-- 수신은 **funnel 구조** (콜백 1개 → 내부 dict) — 필드 추가 시 콜백 한 곳만 수정.
+  수신은 **funnel 구조** (콜백 1개 → 내부 dict) — 필드 추가 시 콜백 한 곳만 수정.
+- 🔴 **역할 A가 병목이다** — `tunnel_interfaces` 패키지 커밋·태그·40자 SHA 미전달이
+  역할 B의 깡통 퍼블리셔 연결시험을 막고 있다 (`MASTER_PLAN §7` 예약 45).
+- **역할 B 회신 대기 4건** — T1 `confirmed` 상태 수명(`valid<4` 는 리셋 사유 아님) ·
+  T2 지속 실패 시 `/diagnostics` STALE 승격 · T3 G3 실측표 정본화 ·
+  T4 `human_dropped` 와 `person_*` 발행 수 동반 노출.
 
 ## 5. 하드웨어 확정값
 
