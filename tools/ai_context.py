@@ -232,6 +232,9 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "tools/test_firmware_runtime_guard.py",
         # 08-13 밤: odom 상수를 지면 실측으로 검증한다(예약 32-e) · 배선 6행 실기 도구.
         "tools/test_odom_constants.py", "tools/rearm_field_wiring.py",
+        # 검토 §77.2: dmesg 판정기는 파일 위치가 tools/ 여도 계약이 펌웨어 현장 증거다.
+        # 짝 회귀까지 같은 프로필로 묶어 커버리지 판정과 원시 증거 해석을 함께 회수한다.
+        "tools/dmesg_coverage_check.py", "tools/test_dmesg_coverage.py",
     )),
     ("docs", ("docs/*.md",)),
 )

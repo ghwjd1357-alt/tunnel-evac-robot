@@ -728,5 +728,25 @@
     "id": "0813-d0-fw-162-review-zero-new-p0-76",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§76 판정은 P0 0이며 커밋 유지·현 보드 운용만 승인하고 승인 지문 이관은 보류한다"
+  },
+  {
+    "id": "0813-dmesg-event-time-is-not-capture-boundary-77",
+    "path": "tools/dmesg_coverage_check.py",
+    "anchor": "dmesg 사건 시각과 스냅샷 취득 시각은 같은 경계가 아니다"
+  },
+  {
+    "id": "0813-loop-gap-maximum-cannot-correlate-seven-events-77",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "`loop_gap_max_us` 누적 최대 하나로 7사건을 분류하지 않는다"
+  },
+  {
+    "id": "0813-gentle-curve-ratio-used-spin-track-width-77",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "완만한 좌향의 요구 회전수 비는 제자리 회전용 `ODOM_WHEEL_BASE`로 확정하지 않는다"
+  },
+  {
+    "id": "0813-d0-fw-76-fix-review-zero-new-p0-77",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§77 판정은 P0 0이며 두 커밋 유지·현 보드 운용만 조건부 수용하고 승인 지문 이관은 보류한다"
   }
 ]
