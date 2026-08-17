@@ -54,7 +54,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription, LogInfo,
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
+                            IncludeLaunchDescription, LogInfo,
                             OpaqueFunction, Shutdown)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -190,6 +191,17 @@ def launch_setup(context, *_):
                    '-b', LaunchConfiguration('serial_baud')],
     )
 
+    # 🔴 /odom → (가드) → /odom_guarded → EKF. 가드가 EKF 보다 먼저 선다.
+    #   `/odom` 이 가끔 부분만 쓰인 메시지를 내고 그것 하나가 EKF 를 영구 NaN 으로
+    #   만든다(08-14 지도 두 세션이 같은 이유로 무너졌다). 근거·전제조건·재개방 조건
+    #   = `MASTER_PLAN §7` 예약 41. ⚠ 끄는 스위치를 두지 않는다 — 안 뜨면
+    #   `/odom_guarded` 가 조용히 비어 EKF 가 odom 없이 돈다.
+    odom_guard = ExecuteProcess(
+        cmd=['python3', '-u', LaunchConfiguration('odom_guard')],
+        name='odom_guard',
+        output='screen',
+    )
+
     ekf = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -291,6 +303,7 @@ def launch_setup(context, *_):
         robot_state_publisher,
         lidar,
         micro_ros_agent,
+        odom_guard,
         ekf,
         gate_sensors,
         when_ready(gate_sensors, [slam, gate_localized], '위치추정(slam_toolbox)'),
@@ -336,6 +349,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'serial_dev', default_value='/dev/teensy_drive',
             description='Teensy 시리얼 장치 (TEENSY 합의사항 §4.5 udev 링크)'),
+        DeclareLaunchArgument(
+            'odom_guard', default_value=os.path.expanduser(
+                '~/ros2_ws/tools/odom_guard.py'),
+            description='odom 가드 스크립트 경로 (저장소 위치가 다르면 넘겨서 바꾼다)'),
         DeclareLaunchArgument(
             'serial_baud', default_value='115200',
             description='micro-ROS 전송 속도. 08-02 확정 = 115200 (구동부 3차 회신 §1, '

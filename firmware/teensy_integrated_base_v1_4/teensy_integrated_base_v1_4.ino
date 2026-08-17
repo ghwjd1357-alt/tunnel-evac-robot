@@ -41,7 +41,9 @@
 // 🔴 2026-08-12 — 정체 문자열 정정 (docs/FIRMWARE_REBUILD.md §4 항목 1 의 부채).
 // 08-06 실물 관측에서 version·source·git_sha 셋 다 실제와 달랐고, 그래서 정체 판별에
 // 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
-static const char FW_VERSION[] = "rearm-latch-pi-continuous-low-speed-1.4.0";
+// 🔴 1.5.0 (2026-08-13) = ① E-stop 디바운스 ② odom 재교정(ODOM_WHEEL_RADIUS·ODOM_WHEEL_BASE)
+//    ③ appliedPwm 관측. 버전을 올려야 bag 만 보고 어느 보드인지 가른다.
+static const char FW_VERSION[] = "rearm-latch-pi-odomcal-appliedpwm-1.5.0";
 // ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
 // 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
 // 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
@@ -132,11 +134,71 @@ static const bool ESTOP_ACTIVE_LOW = false;
 // ============================================================================
 
 static const double TOTAL_PPR = 2641.1;
-static const double WHEEL_RADIUS = 0.05698;  // corrected rolling radius [m]
-static const double WHEEL_BASE = 0.62;       // left-right wheel-center distance [m]
 
+// 🔴 이 로봇에는 "바퀴 사이 거리"가 **세 개** 있다. 셋은 다른 물건이고 절대 합치지
+//    않는다 — 합치면 어느 하나를 고칠 때 나머지 둘이 조용히 따라 움직인다.
+//      물리 0.49  = 줄자로 잰 실제 바퀴 중심 간격. URDF 가 쓴다. 여기 없다.
+//      명령 0.62  = cmd_vel -> 바퀴 목표. 스키드 슬립 보정이 이미 먹은 값 (CMD_WHEEL_BASE)
+//      odom 0.829 = 엔코더 -> yaw. 회전 시 옆문지름까지 먹은 값 (ODOM_WHEEL_BASE)
+//
+// 🔴 타이어에는 **반지름이 셋** 있다. odom 이 쓰는 것은 마지막 하나뿐이다.
+//      자유   0.065  = 무부하 카탈로그. 여기 없다.
+//      하중   0.045  = 바닥->축 중심(축 높이). URDF 가 쓴다. 여기 없다.
+//      구름   0.05698 = 한 바퀴에 나아가는 거리 / 2PI.  ** 이 파일이 쓰는 것 **
+//    타이어가 눌려도 벨트 둘레는 안 줄어든다 — 접지면만 납작해진다. 그래서 구름 반지름은
+//    하중 반지름보다 **항상 크고**, 하중이 변해도 거의 안 변한다.
+//    ⚠ 하중 반지름의 변화율을 구름 반지름에 적용하면 틀린다. 08-13 에 실제로 그렇게 했다.
+
+// 🔴 2026-08-13 밤 — 32-d 재교정(0.04603)을 **되돌린다** (예약 32-e).
+// 오후에 만든 0.04603 은 줄자 오독 위에 서 있었다: r2_line_0813_1516 의 줄자가 3105mm 로
+// 적혔는데, 같은 명령으로 33.7 초를 달린 로봇은 3.84m 를 간다(밤 시행이 24.9 초에 3.065m).
+// 굽고 나서 지면에서 다시 재자 odom/줄자 = 0.807 · 0.811 로 **보정의 정확한 역수**가 나왔다.
+//
+// 확정 근거 = C10 (합의서가 08-02 에 요청하고 미수령이던 항목. 08-13 밤에 처음 쟀다):
+//   r2_roll_0813_2143 : 바퀴 표시 11 회전 · 줄자 3900mm
+//     -> 구름 반지름 55.6 (좌 안쪽) / 56.4 (중심선) / 57.2 (우 바깥) mm
+//     -> 세 값이 판재 이전 56.98 을 감싼다. 46.03 은 범위 밖이다.
+//   엔코더는 정직했다 — 눈으로 센 11.00 바퀴 vs 엔코더 10.93 바퀴 (일치 0.9938).
+//   회전 거동은 오후와 밤이 동일했다 (1.337 x 0.7476 = 0.9995 vs 실측 0.991/0.999).
+// ⚠ 이름이 ODOM_ 인 것이 의도다. 이 값은 **odom 발행에만** 든다.
+// 정본 = docs/MASTER_PLAN.md §7 예약 32-e · docs/REAL_ROBOT_VALUES.md §1-b-0 · PITFALLS §12.
+static const double ODOM_WHEEL_RADIUS = 0.05698;  // rolling radius, C10-measured [m]
+
+// 명령 경로(cmd_vel -> 바퀴 목표)가 쓰는 윤거. 스키드 슬립 보정이 들어간 값이고
+// 08-13 묶음에서 **바꾸지 않는다** — 이 묶음의 목적은 odom 정직화이지 조종 특성 변경이
+// 아니다. 명령 경로를 같이 옮기면 원인 분리가 깨진다.
+// 🔴 검토 §65.3 — 이름을 CMD_ 로 바꿨다. 일반명 WHEEL_BASE 는 "그냥 윤거"로 읽혀
+//    도구·정본이 이 값을 odom 보정 계수로 베껴 갔다(REAL_ROBOT_VALUES §1-c).
+static const double CMD_WHEEL_BASE = 0.62;   // command-path track width [m]
+
+// 🔴 2026-08-13 밤 정정 — odom yaw 전용 유효 윤거 (예약 32-e. 구값 0.670 은 기각된
+// 반지름 0.04603 위에서 유도됐다).
+// 회전 시험이 확정하는 것은 **비 하나**뿐이다 — odom yaw 는 r/base 에 비례하므로 둘이
+// 같이 틀리면 상쇄된다. 그래서 회전만으로는 base 를 못 정한다:
+//   밤 회전 2 시행이 확정한 비  = 0.04603 / 0.670 = 0.068701
+//     r2_spin_0813_2134 : odom 263.6° vs IMU 265.9°  -> 0.991
+//     r2_spin_0813_2130 : odom 1303.6° vs IMU 1305.2° -> 0.999 (3.6 바퀴)
+//   C10 이 확정한 r             = 0.05698
+//   -> base = 0.05698 / 0.068701 = 0.829
+// 스키드 스티어는 회전할 때 네 바퀴를 옆으로 문지르므로 odom 이 보는 유효 윤거가
+// 기하 윤거(URDF 0.49)보다 크다.
+// ⚠ 명령용 CMD_WHEEL_BASE 와 **일부러 분리**했다. 하나로 합치면 같은 angular.z 에 대해
+//   바퀴 명령이 커져 조종 특성이 같이 바뀐다 — 그건 별개 묶음이다.
+// 🔴 이 값은 **제자리 회전**에 맞춘 값이다. 완만한 곡선에서는 odom 이 yaw 를 약 16%
+//    과소평가한다(제자리 0.991 vs 곡선 0.838) — ICR 이 선회 반경에 따라 옮겨간다.
+//    전제조건·재개방 = docs/REAL_ROBOT_VALUES.md §1-c.
+static const double ODOM_WHEEL_BASE = 0.829;
+
+// odom 이 쓰는 눈금. 엔코더 1 카운트가 지면에서 몇 m 인가.
 static const double DISTANCE_PER_COUNT =
-    (2.0 * PI * WHEEL_RADIUS) / TOTAL_PPR;
+    (2.0 * PI * ODOM_WHEEL_RADIUS) / TOTAL_PPR;
+
+// 🔴 2026-08-13 밤 — CONTROL_WHEEL_RADIUS / CONTROL_FEEDBACK_SCALE 을 **제거했다**
+// (예약 32-e). 검토 §65.1 이 만든 분리는 옳았다: 반지름이 틀린 동안 제어를 부모판
+// 눈금에 묶어 둔 덕분에, 상수를 되돌리는 지금 **제어 경로가 수치적으로 불변**이다.
+//   전:  측정속도(r=0.04603) x 1.23789
+//   후:  측정속도(r=0.05698)              <- 같은 값
+// 반지름이 제자리로 오면서 배율이 1.0(항등)이 되어 분리가 스스로 불필요해졌다.
 
 // cmd_vel and wheel-speed limits.
 static const double MAX_LINEAR_CMD = 0.12;   // [m/s]
@@ -326,6 +388,27 @@ geometry_msgs__msg__Vector3 driveDiagMessage;
 
 int desiredPwm[4] = {0, 0, 0, 0};
 int appliedPwm[4] = {0, 0, 0, 0};
+
+// 🔴 2026-08-13 신설 — 관측 전용 (예약 33 의 선행 조건).
+// 게인·FF 를 조정하려면 "제어기가 실제로 몇 PWM 을 냈는가"를 밖에서 봐야 한다. 지금은
+// 그 값이 보드 안에만 있어 회귀에 **명령에서 계산한 명목 FF 값**을 쓰다가 검토 §60.1·
+// §61.1 이 두 번 불승인한 전례가 있다.
+// ⚠ 제어에 쓰이지 않는다. 읽기만 하고 /firmware/info 로 나간다.
+// ⚠ /firmware/info 는 5초 주기라 이건 **스냅샷**이다. 그래서 최대 크기를 따로 들고
+//    간다 — 포화(FEEDFORWARD_MAX_PWM 145 · MAX_CONTROL_PWM 160) 도달 여부는 스냅샷으로
+//    못 보고 최대값으로만 보인다.
+//
+// 🔴 검토 §65.2 보완 — **부팅 이후 최대가 아니라 "이번 무장 epoch 안의 최대"** 다.
+// 부모판은 부팅 뒤 단조증가라, 한 번 160 에 닿으면 다음 시행이 80 이었는지 160 이었는지
+// 영원히 구분하지 못했다("시작=끝=160, 차이 0"). 포화 관측이 첫 고출력 시행에서 죽는다.
+// 그래서 DISARMED/READY/... -> ARMED 전이에서 0 으로 리셋하고 epoch 를 1 올린다.
+//   읽는 법 = applied_pwm_epoch 가 같은 두 표본 사이에서만 applied_pwm_max 를 비교한다.
+//             epoch 가 바뀌었으면 앞 시행의 최대와는 아무 관계가 없다.
+// ⚠ rearm_gate.h 상태기계는 건드리지 않는다 (§64 에서 막 승인된 계약). 여기서는 상태를
+//   **관측만** 한다 — 전이 검출이 게이트 밖에 있으므로 게이트 회귀 967+7 이 그대로 유효하다.
+int appliedPwmMaxMagnitude = 0;
+uint32_t appliedPwmEpoch = 0;
+uint8_t appliedPwmEpochPrevState = 0;  // DRIVE_DISARMED
 
 double targetWheelVelocity[4] = {0.0, 0.0, 0.0, 0.0};
 double measuredWheelVelocity[4] = {0.0, 0.0, 0.0, 0.0};
@@ -583,8 +666,8 @@ void applySkidSteerCommand(double linearX, double angularZ)
   linearX = clampDouble(linearX, -MAX_LINEAR_CMD, MAX_LINEAR_CMD);
   angularZ = clampDouble(angularZ, -MAX_ANGULAR_CMD, MAX_ANGULAR_CMD);
 
-  double leftWheelCommand = linearX - angularZ * WHEEL_BASE * 0.5;
-  double rightWheelCommand = linearX + angularZ * WHEEL_BASE * 0.5;
+  double leftWheelCommand = linearX - angularZ * CMD_WHEEL_BASE * 0.5;
+  double rightWheelCommand = linearX + angularZ * CMD_WHEEL_BASE * 0.5;
 
   const double maximumMagnitude =
       max(fabs(leftWheelCommand), fabs(rightWheelCommand));
@@ -626,6 +709,9 @@ void updateWheelControllers(double dt)
     // This prevents a large overspeed correction from commanding reverse PWM.
     const double direction = (signedTarget >= 0.0) ? 1.0 : -1.0;
     const double targetMagnitude = fabs(signedTarget);
+    // 🔴 ODOM_WHEEL_RADIUS 가 C10 실측(0.05698)으로 돌아오면서 이 값이 곧 부모판 눈금이다
+    //    (예약 32-e). §65.1 이 넣었던 CONTROL_FEEDBACK_SCALE 곱셈은 배율 1.0 이 되어 제거됐다.
+    //    ⚠ 반지름을 다시 만지면 이 자리가 제어에 직결된다는 사실은 그대로다 — §65.1 을 읽어라.
     const double measuredAlongCommand =
         direction * filteredWheelVelocity[motor];
     const double error = targetMagnitude - measuredAlongCommand;
@@ -727,6 +813,22 @@ int movePwmTowardTarget(int currentPwm, int targetPwm)
   return currentPwm;
 }
 
+// 🔴 검토 §65.2 — applied_pwm_max 의 시행 경계(epoch)를 만든다.
+// ARMED 로 **들어가는 순간**에만 리셋한다. ARMED 안에서는 단조증가를 유지해야 시행 중
+// 포화가 안 지워진다. rearm_gate.h 는 읽기만 한다 — 상태기계 계약은 그대로다.
+void updateAppliedPwmEpoch()
+{
+  const uint8_t nowState = static_cast<uint8_t>(driveGate.state);
+
+  if (nowState == static_cast<uint8_t>(DRIVE_ARMED) &&
+      appliedPwmEpochPrevState != static_cast<uint8_t>(DRIVE_ARMED)) {
+    appliedPwmMaxMagnitude = 0;
+    ++appliedPwmEpoch;
+  }
+
+  appliedPwmEpochPrevState = nowState;
+}
+
 void updateMotorOutputs()
 {
   // 🔴 Review §54.1 — the invariant is enforced at the output stage, not only on
@@ -766,6 +868,12 @@ void updateMotorOutputs()
     } else {
       appliedPwm[motor] = movePwmTowardTarget(
           appliedPwm[motor], desiredPwm[motor]);
+    }
+
+    // 관측 전용 — 제어에 쓰이지 않는다 (예약 33).
+    const int magnitude = abs(appliedPwm[motor]);
+    if (magnitude > appliedPwmMaxMagnitude) {
+      appliedPwmMaxMagnitude = magnitude;
     }
 
     writeMotorPwm(motor, appliedPwm[motor]);
@@ -910,7 +1018,8 @@ void updateOdometry()
   const double deltaLeft = 0.5 * (deltaFL + deltaRL);
   const double deltaRight = 0.5 * (deltaFR + deltaRR);
   const double deltaDistance = 0.5 * (deltaLeft + deltaRight);
-  const double deltaYaw = (deltaRight - deltaLeft) / WHEEL_BASE;
+  // 🔴 odom 은 ODOM_WHEEL_BASE 를 쓴다 (명령용 CMD_WHEEL_BASE 와 분리 — §7 예약 32-d).
+  const double deltaYaw = (deltaRight - deltaLeft) / ODOM_WHEEL_BASE;
 
   const double midpointYaw = odomYaw + 0.5 * deltaYaw;
   odomX += deltaDistance * cos(midpointYaw);
@@ -927,7 +1036,7 @@ void updateOdometry()
   odomLinearVelocity =
       0.5 * (filteredLeftVelocity + filteredRightVelocity);
   odomAngularVelocity =
-      (filteredRightVelocity - filteredLeftVelocity) / WHEEL_BASE;
+      (filteredRightVelocity - filteredLeftVelocity) / ODOM_WHEEL_BASE;
 
   // PI/PID control uses the same measured micros() dt as odometry.
   updateWheelControllers(dt);
@@ -1245,13 +1354,33 @@ void publishFirmwareInfo()
   }
   lastFirmwareInfoMs = nowMs;
 
-  char infoBuffer[1024];
-  snprintf(
+  // 🔴 검토 §65.5 — 길이를 손으로 세지 마라. 내가 "최악 845자"라고 세어 적었고 검토가
+  //   38개 인자를 전수해 813/890/925 로 정정했다. 그래서 **재는 도구**를 만들었다:
+  //       python3 tools/firmware_info_length_check.py
+  //   그 도구는 이 파일에서 format·인자·버퍼 크기를 직접 파싱해 host gcc 로 잰다.
+  //   여기 적힌 수를 믿지 말고 도구를 돌려라. 이 주석이 낡으면 도구가 이긴다.
+  //     실측(1536 버퍼) : 운용 표본 약 857자 / 현재 소스 상한 1072자 / 여유 463자
+  //     🔴 검토 §67.4 — 앞 판은 이 줄을 "타입 이론 최악 1157 / 여유 378" 이라 적었다.
+  //        %f 를 -999999.999999 로 잡은 시나리오였지 타입 경계가 아니다. 지금은
+  //        tools/firmware_info_length_check.py 가 %f 를 소스 상수 실값으로 풀어 잰다.
+  //
+  // ⚠ 1024 였으면 이론 최악 여유가 얼마 안 남는다. version 문자열 한 번, 라이브러리
+  //   이름 하나면 넘는다. 그래서 1536 으로 올렸다 — 스택 지역변수이고 RAM1 여유가
+  //   297KB 라 대가가 없다. 실제 발행 길이는 안 변한다.
+  // ⚠ 그래도 snprintf 는 넘치면 조용히 자르고 성공한 척한다. 반환값을 보고 **꼬리에
+  //   표식을 남긴다** — 읽는 쪽이 "|TRUNCATED" 를 보면 그 표본을 계약 위반으로 버린다.
+  char infoBuffer[1536];
+  const int infoLength = snprintf(
       infoBuffer,
       sizeof(infoBuffer),
       "version=%s; git_sha=%s; git_short=%s; build=%s %s; source=%s; "
       "arduino_macro=%s; teensyduino_macro=%s; transport=serial; baud=115200; "
-      "wheel_radius=%.5f; control=%s; kp=%.3f; ki=%.3f; kd=%.3f; "
+      // 🔴 검토 §65.3 — 키 이름이 의미를 들고 나간다. 구판의 일반명 wheel_radius 는
+      //    읽는 쪽(d0_check·encoder·watchdog)이 "그냥 반지름"으로 베껴 가서, 재교정
+      //    뒤에도 판재 이전 값을 정답으로 붙들고 있었다. 이제 네 값이 각자 나온다.
+      "odom_wheel_radius=%.5f; "
+      "cmd_wheel_base=%.3f; odom_wheel_base=%.3f; "
+      "control=%s; kp=%.3f; ki=%.3f; kd=%.3f; "
       "low_speed_mode=continuous_start_boost; min_speed=%.3f; "
       "start_boost_ms=%lu; hold_pwm=%d,%d,%d,%d; encoder_polarity=%d,%d,%d,%d; "
       "estop_debounce_ms=%lu; estop_raw_edges=%lu; estop_max_high_ms=%lu; "
@@ -1259,6 +1388,12 @@ void publishFirmwareInfo()
       //    아래 rejected 쌍만이 "필터가 먹은 글리치"다 = 30ms 판정의 근거 (§63.1).
       "estop_rejected=%lu; estop_rejected_max_ms=%lu; "
       "disarm_estop=%lu; disarm_nonfinite=%lu; disarm_nonzero=%lu; "
+      // 🔴 2026-08-13 신설 (예약 33 선행). applied_pwm 은 **5초 주기 스냅샷**이라
+      //    시행 중 파형을 못 본다. 포화 판정은 applied_pwm_max 로 한다 —
+      //    145(FF 상한)·160(MAX_CONTROL_PWM) 에 닿았는지가 그 한 숫자에 있다.
+      // 🔴 검토 §65.2 보완 — max 는 **이번 epoch(= 이번 무장) 안의 최대**다. 절대값을
+      //    그대로 읽는다. epoch 가 다른 두 표본의 max 는 비교하지 않는다.
+      "applied_pwm=%d,%d,%d,%d; applied_pwm_max=%d; applied_pwm_epoch=%lu; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1268,7 +1403,9 @@ void publishFirmwareInfo()
       FW_SOURCE_PATH,
       FW_ARDUINO_VERSION,
       FW_TEENSYDUINO_VERSION,
-      WHEEL_RADIUS,
+      ODOM_WHEEL_RADIUS,
+      CMD_WHEEL_BASE,
+      ODOM_WHEEL_BASE,
       USE_PID_D_TERM ? "PID" : "PI",
       WHEEL_KP,
       WHEEL_KI,
@@ -1291,7 +1428,21 @@ void publishFirmwareInfo()
       static_cast<unsigned long>(driveGate.disarmEstopCount),
       static_cast<unsigned long>(driveGate.disarmNonfiniteCount),
       static_cast<unsigned long>(driveGate.disarmNonzeroCount),
+      appliedPwm[FL],
+      appliedPwm[RL],
+      appliedPwm[FR],
+      appliedPwm[RR],
+      appliedPwmMaxMagnitude,
+      static_cast<unsigned long>(appliedPwmEpoch),
       FW_LIBRARY_LIST);
+
+  if (infoLength < 0 ||
+      static_cast<size_t>(infoLength) >= sizeof(infoBuffer)) {
+    static const char kTruncatedMark[] = "|TRUNCATED";
+    memcpy(infoBuffer + sizeof(infoBuffer) - sizeof(kTruncatedMark),
+           kTruncatedMark,
+           sizeof(kTruncatedMark));
+  }
 
   rosidl_runtime_c__String__assign(&firmwareInfoMessage.data, infoBuffer);
   RCSOFTCHECK(rcl_publish(&firmwareInfoPublisher, &firmwareInfoMessage, nullptr));
@@ -1557,6 +1708,11 @@ void loop()
   rearmGateArmBarrierStart(&driveGate, millis());
 
   checkSafety();
+
+  // 🔴 검토 §65.2 — 출력보다 **먼저** 본다. 무장 직후 첫 PWM 이 새 epoch 에 들어가야
+  //    하고, checkSafety() 의 어느 조기 return 도 이 관측을 건너뛰면 안 된다.
+  updateAppliedPwmEpoch();
+
   updateMotorOutputs();
   updateOdometry();
   updateImu();

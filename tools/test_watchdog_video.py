@@ -358,7 +358,12 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(wr.MOTION_RATE_MM_S, wv.MOTION_RATE_MM_S)
         self.assertEqual(wr.MOTION_WINDOW_MS, wv.MOTION_WINDOW_MS)
         self.assertEqual(wr.REQUIRED_TAIL_MS, wv.REQUIRED_TAIL_MS)
-        self.assertEqual(0.05698, wv.WHEEL_RADIUS_M)      # `.ino:128`
+        # 🔴 08-13 (검토 §65.3) — `.ino` 에서 읽어 대조한다. 숫자를 여기 적으면
+        #    펌웨어가 바뀌어도 이 시험이 초록으로 남는 자기확인이 된다.
+        from tools.firmware_constants import firmware_double
+        self.assertEqual(firmware_double('ODOM_WHEEL_RADIUS'), wv.WHEEL_RADIUS_M)
+        # 판재 이전 profile 은 옛 값 그대로 — 08-11·08-12 증거의 재현에 쓴다.
+        self.assertEqual(0.05698, wv.PRE_PLATE_WHEEL_RADIUS_M)
         self.assertEqual(600, wv.PROPOSED_TOTAL_MS)       # 결정 1-ⓐ 초안
         self.assertEqual(0.5, wv.LEGACY_TOTAL_RATIO)      # 구 §7-c-0 조건 1
 
@@ -527,6 +532,79 @@ class CliContractTest(unittest.TestCase):
                          series_fn=lambda *a, **k: short)
         self.assertEqual(1, rc)
         self.assertIn('조기 EOF', buf.getvalue())
+
+
+class HistoricalProfileTest(unittest.TestCase):
+    """검토 §66.1 — 판재 이전 자료는 판재 이전 반지름으로만 그때의 수가 나온다.
+
+    필수 부정·역회귀: 기본(판재 이후) profile 로 재면 **불일치해야** 하고, 역사
+    profile 에서는 **일치해야** 한다. 한쪽만 보면 "아무 profile 이나 같은 수를
+    낸다" 와 구별이 안 된다.
+    """
+
+    def test_45_the_two_profiles_currently_hold_the_same_radius(self):
+        """🔴 08-13 밤 — 판재는 **구름** 반지름을 안 바꿨다(예약 32-e · PITFALLS §12).
+
+        앞 판은 두 profile 이 `1/0.80783` 배로 갈린다고 고정했다. 그 전제가 기각됐다 —
+        판재는 하중 반지름(축 높이)만 15% 줄였고 구름 반지름은 1% 안에서 그대로다.
+        기계는 남기되 **값이 같다는 사실 자체**를 여기서 못 박는다.
+        """
+        self.assertEqual(wv.PRE_PLATE_WHEEL_RADIUS_M, wv.WHEEL_RADIUS_M)
+        self.assertEqual(wv.PROFILE_RADIUS_M['pre-plate'],
+                         wv.PRE_PLATE_WHEEL_RADIUS_M)
+        self.assertEqual(wv.PROFILE_RADIUS_M['post-plate'], wv.WHEEL_RADIUS_M)
+
+    def test_46_recorded_presets_declare_the_era_they_were_shot_in(self):
+        """🔴 `--pre-plate` 를 잊는 길이 있으면 안 된다 — preset 이 자기 시대를 안다."""
+        for name in ('0807-1522', '0811-1938'):
+            with self.subTest(preset=name):
+                self.assertEqual('pre-plate', wv.PRESETS[name]['profile'])
+
+    def test_47_a_forgotten_flag_still_reproduces_the_recorded_number(self):
+        """플래그 없이 preset 만 줘도 판재 이전 반지름이 걸린다."""
+        cfg = dict(wv.PRESETS['0807-1522'])
+        self.assertEqual('pre-plate', wv.resolve_profile(cfg, False))
+        self.assertNotIn('profile', cfg, 'profile 은 기하 인자와 섞이면 안 된다')
+
+    def test_48_a_flag_that_contradicts_the_preset_is_undecidable(self):
+        """🔴 모순은 조용히 한쪽이 이기지 않는다 — 판정 불능이다."""
+        with self.assertRaises(wv.UsageError):
+            wv.resolve_profile({'profile': 'post-plate'}, True)
+
+    def test_49_new_data_without_a_preset_keeps_the_current_radius(self):
+        """판재 **이후** 자료는 기본 profile 을 유지한다 — 역사 값이 새 자료를 안 먹는다."""
+        self.assertEqual('post-plate', wv.resolve_profile({}, False))
+        self.assertEqual('pre-plate', wv.resolve_profile({}, True))
+
+    def test_50_a_profile_split_would_break_the_recorded_evidence(self):
+        """🔴 필수 부정 — profile 기계가 **작동한다**는 것을 보인다.
+
+        지금은 두 값이 같아 항등이라, "값이 갈리면 역사 수치가 안 맞는다" 를 직접
+        보일 수가 없다. 그래서 **가상의 분리**를 주입해 환산이 실제로 갈리는지 본다 —
+        반지름이 진짜로 바뀌는 날 이 기계가 도는지가 이 시험의 대상이다.
+        """
+        deg = wv.mm_s_to_deg_per_frame(wv.RECORDED['drift_mm_s'], FPS)
+        historical = wv.deg_per_frame_to_mm_s(deg, FPS)
+        self.assertAlmostEqual(wv.RECORDED['drift_mm_s'], historical, places=9)
+        try:                                    # 가상 분리: 반지름이 0.8 배가 된 미래
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M * 0.8
+            future = wv.deg_per_frame_to_mm_s(deg, FPS)
+        finally:
+            wv.ACTIVE_WHEEL_RADIUS_M = wv.WHEEL_RADIUS_M
+        self.assertNotAlmostEqual(wv.RECORDED['drift_mm_s'], future, places=3)
+        self.assertAlmostEqual(0.8, future / historical, places=9)
+
+    def test_51_the_active_profile_is_printed_with_its_name(self):
+        """현장에서 화면만 보고 어느 시대로 쟀는지 알 수 있어야 한다."""
+        buf, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(err):
+            wv.main(['watchdog_video.py', 'x.mov', '--t0-frame', '670',
+                     '--preset', '0807-1522', '--fps', str(FPS)],
+                    series_fn=lambda *a, **k: series())
+        out = buf.getvalue()
+        self.assertIn('pre-plate', out)
+        self.assertIn('%.5f' % wv.PRE_PLATE_WHEEL_RADIUS_M, out)
+        self.assertIn('preset', out)
 
 
 if __name__ == '__main__':

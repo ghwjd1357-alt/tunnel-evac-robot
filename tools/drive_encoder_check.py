@@ -33,8 +33,12 @@
   - 순서 = 좌전 → 좌후 → 우전 → 우후 (기대: 앞 둘 음수, 뒤 둘 양수)
 
 사용법:
-    python3 tools/drive_encoder_check.py <bag>
+    python3 tools/drive_encoder_check.py <bag> [--pre-plate]
     종료코드 0 = 네 구간 전부 기대 부호 / 1 = 부호 이상·구간 수 불일치 / 2 = 입력 오류
+
+    `--pre-plate` = 08-13 상판 판재를 얹기 **전** 에 찍은 bag 을 그때의 상수
+    (윤거 0.62 · 반지름 0.05698)로 환산한다. 옛 증거를 다시 볼 때만 쓴다.
+    🔴 부호 판정에는 영향이 없다 — 회전수 숫자만 바뀐다.
 
 정본 = `docs/JETSON_SETUP.md §7-c-R1` · 함정 = `docs/PITFALLS.md §11`.
 짝 도구 = `tools/drive_ground_report.py`(지면 주행 실측).
@@ -43,10 +47,27 @@ import math
 import sys
 
 # ── 정본 상수 ────────────────────────────────────────────────────────────
-# 🔴 펌웨어 `.ino` 와 **같은 값**이어야 한다. 다르면 이 도구의 환산이 펌웨어와 다른
-# 물건을 재게 된다. 바꿀 일이 생기면 `.ino` 를 먼저 고치고 여기를 따라 옮긴다.
-WHEEL_BASE_M = 0.62
-WHEEL_RADIUS_M = 0.05698
+# 🔴 이 도구는 `/odom` 의 yaw 를 되짚어 "그 바퀴가 몇 바퀴 굴렀나" 를 낸다. 그러니
+# 여기 들어갈 값은 **odom 계열**이다 — 명령 경로의 0.62 도, 제어 피드백의 0.05698 도
+# 아니다. 08-13 검토 §65.3 이 이 자리를 짚었다: 구판은 두 계열을 구분하지 않고
+# "펌웨어와 같은 값" 이라고만 써 두어, 펌웨어가 갈라진 뒤 조용히 약 25% 틀린 바퀴
+# 회전수를 보고했다.
+#
+#   물리 0.49  = 줄자로 잰 실제 간격 (URDF 몫). 여기 안 쓴다.
+#   명령 0.62  = cmd_vel -> 바퀴 목표 (`.ino` CMD_WHEEL_BASE). 여기 안 쓴다.
+#   odom 0.670 = 엔코더 -> yaw (`.ino` ODOM_WHEEL_BASE). 🔴 이 도구가 쓰는 값.
+#
+# 바꿀 일이 생기면 `.ino` 를 먼저 고치고 여기를 따라 옮긴다. 보드가 실제로 뭘 들고
+# 있는지는 `/firmware/info` 의 `odom_wheel_base=` · `odom_wheel_radius=` 로 대조한다.
+ODOM_WHEEL_BASE_M = 0.829
+ODOM_WHEEL_RADIUS_M = 0.05698
+
+# 🔴 판재 이전(08-12 까지) 증거를 다시 환산할 때 쓰는 옛 값. **현재값이 아니다.**
+# 검토 §65.3 "역사 실측 문장을 새 값으로 일괄 덮어쓰지 않는다" 에 따른 자리다.
+# `--pre-plate` 로 고른다.
+PRE_PLATE_WHEEL_BASE_M = 0.62
+# 🔴 08-13 밤 — 구름 반지름은 판재 전후가 같다(예약 32-e). 윤거만 갈린다.
+PRE_PLATE_WHEEL_RADIUS_M = ODOM_WHEEL_RADIUS_M
 
 # 굴림 구간을 가르는 기준. 촬영 규격의 "3초 이상 정지"보다 넉넉히 짧게 잡아 사람이
 # 조금 빨리 움직여도 구간이 붙지 않게 한다.
@@ -115,8 +136,17 @@ def segments(rows, quiet_s=QUIET_S):
     return groups
 
 
-def analyze(rows, groups):
-    """순수 함수 — bag I/O 없이 판정한다. 회귀는 여기에 합성 열을 넣는다."""
+def analyze(rows, groups, wheel_base_m=None, wheel_radius_m=None):
+    """순수 함수 — bag I/O 없이 판정한다. 회귀는 여기에 합성 열을 넣는다.
+
+    상수는 인자로 받는다 (검토 §65.3). 모듈 상수를 직접 읽으면 회귀가 그 값을
+    정답으로 굳혀, 펌웨어가 바뀐 뒤에도 스스로에게 초록을 준다.
+    """
+    if wheel_base_m is None:
+        wheel_base_m = ODOM_WHEEL_BASE_M
+    if wheel_radius_m is None:
+        wheel_radius_m = ODOM_WHEEL_RADIUS_M
+
     if len(rows) < 2:
         return {'ok': False, 'reason': f'/odom 표본이 {len(rows)}개뿐이다'}
     if len(groups) != 4:
@@ -131,13 +161,13 @@ def analyze(rows, groups):
         ddist = math.hypot(b[1] - a[1], b[2] - a[2])
         dyaw = wrap_deg(b[3] - a[3])
         # 한 바퀴만 굴렸다는 전제에서 그 바퀴가 실제로 간 거리
-        d_wheel = abs(math.radians(dyaw)) * WHEEL_BASE_M / 0.5
+        d_wheel = abs(math.radians(dyaw)) * wheel_base_m / 0.5
         out.append({
             'dur_s': dur,
             'ddist_mm': ddist * 1000.0,
             'dyaw_deg': dyaw,
             'wheel_mm': d_wheel * 1000.0,
-            'turns': d_wheel / (2 * math.pi * WHEEL_RADIUS_M),
+            'turns': d_wheel / (2 * math.pi * wheel_radius_m),
         })
 
     verdicts, bad = [], []
@@ -183,11 +213,22 @@ def report(v):
 
 
 def main(argv):
-    if len(argv) != 2:
+    args = [a for a in argv[1:] if not a.startswith('--')]
+    flags = [a for a in argv[1:] if a.startswith('--')]
+    unknown = [f for f in flags if f != '--pre-plate']
+    if len(args) != 1 or unknown:
+        if unknown:
+            print(f'모르는 옵션: {" ".join(unknown)}', file=sys.stderr)
         print(__doc__.split('사용법:')[1].strip(), file=sys.stderr)
         return 2
+
+    # 🔴 판재 이전 bag 은 그때의 상수로 환산해야 그때 본 수가 재현된다 (검토 §65.3).
+    pre_plate = '--pre-plate' in flags
+    base = PRE_PLATE_WHEEL_BASE_M if pre_plate else ODOM_WHEEL_BASE_M
+    radius = PRE_PLATE_WHEEL_RADIUS_M if pre_plate else ODOM_WHEEL_RADIUS_M
+
     try:
-        rows = load(argv[1])
+        rows = load(args[0])
     except UsageError as exc:
         print(f'입력 오류 — {exc}', file=sys.stderr)
         return 2
@@ -195,9 +236,11 @@ def main(argv):
         print(f'판정 불가 — bag 을 읽지 못했다: {exc}', file=sys.stderr)
         return 2
 
-    print('엔코더 바퀴별 분해:', argv[1].rstrip('/').split('/')[-1])
+    print('엔코더 바퀴별 분해:', args[0].rstrip('/').split('/')[-1])
     print(f'  /odom {len(rows)}표본')
-    v = analyze(rows, segments(rows))
+    print(f'  환산 상수 = odom 윤거 {base:.3f} m · odom 반지름 {radius:.5f} m'
+          + ('  🔴 판재 이전(--pre-plate)' if pre_plate else ''))
+    v = analyze(rows, segments(rows), base, radius)
     report(v)
     return 0 if v['ok'] else 1
 

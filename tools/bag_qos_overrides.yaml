@@ -1,0 +1,52 @@
+# bag_qos_overrides.yaml — `ros2 bag record` 의 구독 QoS 를 토픽별로 고정한다.
+# =====================================================================
+# [왜 있나 — 예약 43 ② · 08-14 에 지도 3세션의 명령이 통째로 사라졌다]
+#   `ros2 bag record -a` 는 토픽을 **발견하는 그 순간의 발행자들**을 보고 구독 QoS 를
+#   정한다(`rosbag2_transport/qos.hpp:44` `adapt_request_to_offers`). 그리고 그 구독은
+#   **한 번만** 만들어진다 — 나중에 뜨는 발행자는 협상에 끼지 못한다.
+#
+#   08-14 런북의 순서가 정확히 그 함정이었다:
+#     ① `ros2 bag record -a`              가 먼저 뜬다
+#     ② `ros2 topic pub /cmd_vel "{}"`    ← 🔴 `topic pub` 은 **TRANSIENT_LOCAL** 로 발행한다
+#        → rosbag2 가 그것만 보고 **TRANSIENT_LOCAL 구독**을 만든다
+#     ③ `teleop_twist_keyboard`           ← rclpy 기본값이라 **VOLATILE**
+#        → 🔴 TRANSIENT_LOCAL 구독자는 VOLATILE 발행자와 **호환되지 않는다.**
+#          DDS 가 매칭조차 안 하므로 **에러 없이 조용히 0건**이 된다.
+#
+#   실제로 지도 3세션(`map_0814_1350`·`1512`·`1611`)의 비영 `/cmd_vel` 이 전부 0건이었고,
+#   teleop 이 발견 시점 발행자였던 `alt_F_1808` 만 6,882건이 담겼다.
+#   ⚠ **기록만 깨졌고 주행은 안 깨졌다** — Teensy 쪽 구독은 teleop 과 정상 매칭했다.
+#
+# [왜 이 값인가]
+#   durability: volatile  — 🔴 **구독을 느슨하게 만드는 쪽이 정답이다.** VOLATILE 구독자는
+#     VOLATILE 발행자와 TRANSIENT_LOCAL 발행자를 **둘 다** 받는다(제안이 요청보다 엄하면 호환).
+#     반대로 하면(구독을 TRANSIENT_LOCAL 로) 지금 겪은 그 사고가 그대로 난다.
+#   reliability: reliable — 명령은 **증거**라 유실을 허용하지 않는다. 알려진 `/cmd_vel`
+#     발행자(teleop · `topic pub` · Nav2 `controller_server`)는 전부 RELIABLE 이다.
+#   history: keep_all     — 기록 중 큐가 차서 버리는 일을 만들지 않는다.
+#
+#   ⚠ **전제조건**: `/cmd_vel` 의 모든 발행자가 RELIABLE 이다.
+#   🔴 **재개방 조건**: BEST_EFFORT 로 `/cmd_vel` 을 내는 발행자가 생기면 **이 설정이 그것을
+#     조용히 놓친다.** 그때는 이 파일을 다시 판단한다 — 늘리기 전에 아래 현장 확인을 먼저 본다.
+#
+# [쓰는 법]
+#   ros2 bag record -a -x "/map|/map_updates" -o "$BAG" \
+#       --qos-profile-overrides-path ~/ros2_ws/tools/bag_qos_overrides.yaml
+#
+# [🔴 현장 확인 — 이걸 안 하면 또 조용히 빈다]
+#   teleop 을 켠 **뒤에**:
+#     ros2 topic info /cmd_vel -v
+#   구독자 목록에 rosbag2 가 있고 그 **Durability 가 VOLATILE** 이어야 한다.
+#   ⚠ bag 안에 적히는 `offered_qos_profiles` 는 **발행자**의 값이라 TRANSIENT_LOCAL 로
+#     남는다 — 그건 정상이다. 그 값으로 실패를 판정하지 않는다.
+#
+# [증명]
+#   `tools/qos_record_repro.sh` 가 로봇 없이 결함과 이 보완을 둘 다 재현한다(도메인 77 격리).
+#   2026-08-17 실행: 보완 없음 = VOLATILE 발행자분 **0/60**, 이 파일 적용 = **60/60**.
+#   근거 = `MASTER_PLAN §7` 예약 43-b.
+
+/cmd_vel:
+  history: keep_all
+  depth: 0
+  reliability: reliable
+  durability: volatile

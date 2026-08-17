@@ -34,10 +34,12 @@ real_mapping.launch.py — 실터널 지도 제작 전용 (R5).
    확인: grep -rn "TODO: " src/tunnel_bringup/
 """
 
+import os
+
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, LogInfo
 from launch.conditions import IfCondition
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -72,6 +74,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'serial_dev', default_value='/dev/teensy_drive',
             description='Teensy 시리얼 장치 (TEENSY 합의사항 §4.5 udev 링크)'),
+        # 🔴 2026-08-14 신설 (동결 예외 6회차) — `/odom` 의 찢어진 메시지를 거른다.
+        #   EKF 는 `/odom` 이 아니라 `/odom_guarded` 를 읽는다(`ekf_real.yaml`).
+        #   ⚠ 이 노드가 안 뜨면 `/odom_guarded` 가 조용히 비어 EKF 가 odom 없이 돈다.
+        #     그래서 조건부(IfCondition)로 만들지 않았다 — 끄는 스위치를 두지 않는다.
+        #   근거·전제조건·재개방 조건 = `MASTER_PLAN §7` 예약 41.
+        DeclareLaunchArgument(
+            'odom_guard', default_value=os.path.expanduser(
+                '~/ros2_ws/tools/odom_guard.py'),
+            description='odom 가드 스크립트 경로 (저장소 위치가 다르면 넘겨서 바꾼다)'),
         DeclareLaunchArgument(
             'serial_baud', default_value='115200',
             description='micro-ROS 전송 속도. 08-02 확정 = 115200 (구동부 3차 회신 §1, '
@@ -123,6 +134,13 @@ def generate_launch_description():
                    '-b', LaunchConfiguration('serial_baud')],
     )
 
+    # 🔴 /odom → (가드) → /odom_guarded → EKF. 가드가 EKF 보다 먼저 선다.
+    odom_guard = ExecuteProcess(
+        cmd=['python3', '-u', LaunchConfiguration('odom_guard')],
+        name='odom_guard',
+        output='screen',
+    )
+
     ekf = Node(
         package='robot_localization',
         executable='ekf_node',
@@ -160,6 +178,7 @@ def generate_launch_description():
         robot_state_publisher,
         lidar,
         micro_ros_agent,
+        odom_guard,
         ekf,
         gate_sensors,
         when_ready(gate_sensors, [slam, ready], '지도 제작(slam_toolbox)'),

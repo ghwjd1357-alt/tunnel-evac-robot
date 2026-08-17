@@ -218,8 +218,10 @@ while IFS= read -r ref; do
     raw=$(printf '%s' "$ref" | grep -oP '§ *\K\S+')
     [ -z "$raw" ] && continue
     raw="${raw%%~*}"                       # 범위 표기(§18.3~18.4)는 앞부분으로 검사
-    # 지원 형식: N / N.N / N-X (X = 숫자 또는 영문). 그 외는 조용히 넘기지 않고 FAIL.
-    if ! printf '%s' "$raw" | grep -qP '^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z]+)?$'; then
+    # 지원 형식: N / N.N / N-X / N-X-Y (X,Y = 숫자 또는 영문). 그 외는 FAIL.
+    # 🔴 08-13 확장 — 하위 절이 두 단 깊어졌다(`§1-b-1`, `§4-f-4`). 구판 규칙은 대시
+    #   **한 번**만 허용해 정상 참조를 "지원하지 않는 절 형식" 으로 떨궜다.
+    if ! printf '%s' "$raw" | grep -qP '^[0-9]+(\.[0-9]+)*(-[0-9A-Za-z]+)*$'; then
         SECBAD="$SECBAD [$ref ← 지원하지 않는 절 형식]"; continue
     fi
     # §2-B 처럼 하이픈까지가 실제 제목인 경우와, §2-2(=§2 의 2번 항목)처럼
@@ -237,10 +239,58 @@ done < <(grep -rhoP '`[^`]+`' "${SRC[@]}" 2>/dev/null | tr -d '`' \
 [ -z "$SECBAD" ] && ok "§ 절 참조 전부 유효 ($SECN 건)" \
                  || bad "대상 문서에 없는 절 참조:$SECBAD"
 
+# ── 6-c. 🔴 알려진 P0/P1 수 ↔ inventory (08-13 밤 신설 · 검토 §69.4) ────────
+# 앞 판은 `TEST_GATES` 가 `114건` 이라 쓰고 실행 정본은 117 이어도 통과했다.
+# 문서의 개수 주장은 **기계가 세는 값과 같아야** 한다 — 사람이 손으로 맞추면 또 갈린다.
+KNOWN_N=$(python3 -c "import json;print(len(json.load(open('tools/ai_known_p0_p1.json'))))" 2>/dev/null)
+if [ -z "$KNOWN_N" ]; then
+    bad "ai_known_p0_p1.json 을 못 읽었다 — finding 수를 대조할 수 없다"
+else
+    # 🔴 검토 §70.3 — 앞 판은 `알려진 **N건**` 한 형태만 봤다. 활성 `AI_CONTEXT.md` 는
+    #   `**105개**` · `독립적으로 105개인지` 처럼 다른 표기를 써서 **전부 빠져나갔다**.
+    #   개수 주장은 표기가 아니라 **의미**로 잡아야 한다 — P0/P1 문맥의 수를 전부 모은다.
+    KNOWN_CLAIMS=$(grep -ohP '(알려진|P0/P1)[^\n]{0,80}?\*\*\K[0-9]+(?=(건|개)\*\*)' \
+                       "${SRC[@]}" 2>/dev/null | sort -u
+                   grep -ohP 'P0/P1[^\n]{0,120}?독립적으로 \K[0-9]+(?=개)' \
+                       "${SRC[@]}" 2>/dev/null | sort -u
+                   grep -ohP '결함 코퍼스 \K[0-9]+(?=/)' "${SRC[@]}" 2>/dev/null | sort -u)
+    KNOWN_CLAIMS=$(printf '%s\n' $KNOWN_CLAIMS | sort -u)
+    KNOWN_BAD=""
+    for claimed in $KNOWN_CLAIMS; do
+        [ "$claimed" = "$KNOWN_N" ] || KNOWN_BAD="$KNOWN_BAD $claimed"
+    done
+    if [ -z "$KNOWN_CLAIMS" ]; then
+        bad "문서가 알려진 P0/P1 수를 한 번도 주장하지 않는다 (자리 소실)"
+    elif [ -n "$KNOWN_BAD" ]; then
+        bad "알려진 P0/P1 수 불일치 — inventory $KNOWN_N vs 문서$KNOWN_BAD"
+    else
+        ok "알려진 P0/P1 $KNOWN_N 건 = 문서 주장 전부"
+    fi
+fi
+
+# ── 6-d. 🔴 §7-c-E 행 수 단일성 (08-13 밤 신설 · 검토 §69.4) ────────────────
+# 핸드오프 완료조건은 `배선 6행` 인데 완료판정은 `13/13` 이었다 — **같은 문서 안에서**
+# 계약이 갈렸고 `--strict` 가 놓쳤다. 굽기 직전 안전 게이트라 갈리면 안 된다.
+#   ⚠ 역사 서술(`08-12 에 닫은 것 — §7-c-E 13/13`)은 오탐이 아니다. 그래서 **현재 묶음
+#     계약을 적는 두 절**(완료조건·완료 판정)만 본다.
+HANDOFF="docs/CURRENT_HANDOFF.md"
+ROWS_ACTIVE=$(awk '/^## 완료조건/,/^## 🔴 이번 묶음의 함정/' "$HANDOFF" | grep -c '§7-c-E2\|배선 6행')
+ROWS_VERDICT=$(awk '/^## 완료 판정/,/^## 완료 후 다음 단계/' "$HANDOFF" | grep -c '§7-c-E2\|배선 6행')
+ROWS_STALE=$(awk '/^## 완료조건/,/^## 완료 후 다음 단계/' "$HANDOFF" \
+             | grep -c '§7-c-E\*\* 13/13\|`§7-c-E` 13/13\|13행 전량 수행')
+if [ "$ROWS_ACTIVE" -ge 1 ] && [ "$ROWS_VERDICT" -ge 1 ] && [ "$ROWS_STALE" -eq 0 ]; then
+    ok "§7-c-E 행 수 계약 단일 (완료조건·완료 판정 둘 다 축소판 6행)"
+else
+    bad "§7-c-E 행 수 계약이 갈렸다 — 완료조건 $ROWS_ACTIVE · 완료판정 $ROWS_VERDICT · 구판표현 $ROWS_STALE"
+fi
+
 # ── 7. Desktop 역사 문서 참조 (이름 변경·이동 감지) ──────────────────────
 MISSD=""
+# 🔴 08-13 — 검색 자리가 `개발현황/` 하나뿐이라는 전제가 틀렸다. 날짜별 현황은 거기 있지만
+#   정찰·작업가이드 같은 1차 기록은 **Desktop 루트**에 쓰인다(`0813_복도정찰.md`). 한 자리만
+#   보면 실재하는 문서를 "없다"고 부른다 — 이름 변경 감지라는 목적에 두 자리 다 필요하다.
 for f in $(grep -rhoP '[0-9]{4}_[가-힣A-Za-z_]+\.md' "${SRC[@]}" 2>/dev/null | sort -u); do
-    [ -f "$DESK/$f" ] || MISSD="$MISSD $f"
+    [ -f "$DESK/$f" ] || [ -f "$HOME/Desktop/$f" ] || MISSD="$MISSD $f"
 done
 [ -z "$MISSD" ] && ok "Desktop 역사 문서 참조 유효" || bad "Desktop 에 없는 문서:$MISSD"
 

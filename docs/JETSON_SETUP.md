@@ -269,6 +269,37 @@ grep -A3 -B1 "'serial_baud':" "$D0_SHOW_ARGS"
 필요한 절만 읽는다(`head` 로 파이프를 먼저 닫으면 정상 `ros2` 가 `BrokenPipeError` 를 낸다). 여기서
 `serial_baud` 기본값이 **115200** 으로 보이면 08-02 확정값이 제대로 들어간 것이다.
 
+### 4-d. 노트북에서 고친 것을 Jetson 에 반영하고 **확인**하는 법 (2026-08-14 신설)
+
+노트북 빌드물은 aarch64 에서 못 쓴다(`§3-a`). 반영은 **항상 소스를 받아 다시 빌드**다.
+🔴 그리고 **파일을 고친 것과 시스템이 그 값을 읽는 것은 다르다** — 세 자리를 순서대로 본다.
+(08-14 라이다 오프셋 반영에서 실제로 이 순서로 잡았다.)
+
+```bash
+# ① 받아서 다시 빌드 — 바뀐 패키지만
+cd ~/ros2_ws && git pull
+colcon build --symlink-install --packages-select tunnel_bringup
+source install/setup.bash
+
+# ② 설치본이 새 값인가 — 노드 없이 즉시 확인
+grep -A2 'lidar_joint' install/tunnel_bringup/share/tunnel_bringup/urdf/robot_real.urdf
+
+# ③ 시스템이 그 값을 쓰는가 — TF 가 판정한다
+#    T1) TF 를 쏘는 노드. 이 URDF 는 조인트가 전부 fixed 라 /joint_states 없이 뜬다
+ros2 run robot_state_publisher robot_state_publisher \
+  install/tunnel_bringup/share/tunnel_bringup/urdf/robot_real.urdf
+#    T2)
+ros2 run tf2_ros tf2_echo base_link lidar_link
+```
+
+- ⚠ `tf2_echo` 가 `Invalid frame ID "base_link"` 를 반복하면 **값이 틀린 게 아니라 TF 를
+  쏘는 노드가 없는 것**이다. `tf2_echo` 는 듣기만 한다(08-14 에 여기서 한 번 멈췄다).
+- ⚠ 확인이 끝나면 `robot_state_publisher` 를 **내린다.** `real_bringup`·`real_mapping` 런치가
+  자기 것을 띄우므로, 둘이 같은 TF 를 쏘면 충돌한다.
+- ⚠ `--symlink-install` 이라 ②는 소스로 가는 링크여야 한다. 여기서 **옛 값이 보이면**
+  빌드가 사본을 복사한 것이고, 노드를 띄워도 옛 값이 나온다.
+- 🔴 `src/**` 를 고치는 것 자체가 **동결 예외**다 — 절차·기록 자리 = `FREEZE_MANIFEST.md §10`.
+
 ## 5. `micro_ros_agent` 확보 — 2안 (S6-2)
 
 ### 5-a. 왜 이 절이 따로 있나
@@ -439,10 +470,23 @@ timeout --kill-after=2s 10s ros2 topic echo /firmware/info --field data --full-l
 `kp=30.000`, `ki=5.000`, `kd=0.000`, 라이브러리 목록 5개가 소스 전제와 일치했다.
 
 ⚠ **굽기 전 보드에서 `version=…-1.3.0` 이 나오는 것이 정상이다**(위 두 상태 표).
-🔴 **다음 굽기 뒤에는 `…-1.4.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
+🔴 **다음 굽기 뒤에는 `…-1.5.0` 이 정상**이고 `1.3.0` 이면 안 구워진 것이다.
 `FW_GIT_SHA` 는 양쪽 다 0 이라 **이 필드로 커밋을 판별할 수 없다.**
-대신 `wheel_radius=0.05698` · `kp=30.000` · `ki=5.000` 이 소스와 일치하는지 본다
-(`d0_check.sh` 검사 [7] 이 이걸 자동으로 한다).
+
+🔴 **08-13 부터 정체 키가 갈라졌다** (검토 §65.1·§65.3 → §66.1). 구판은 `wheel_radius`
+한 개였고 그 하나가 odom 과 제어에 같이 들어가 있었다. 지금은 계열마다 다른 이름이다:
+
+| 필드 | 무엇의 눈금인가 |
+|---|---|
+| `odom_wheel_radius` | `/odom` 발행 전용 — 지면이 동의한 거리 |
+| `control_wheel_radius` | PI 피드백 전용 — **제어 튜닝이 측정된 옛 눈금** |
+| `cmd_wheel_base` | `cmd_vel` → 바퀴 목표 |
+| `odom_wheel_base` | odom yaw 적분 전용 |
+
+🔴 **여기에 값을 베껴 적지 않는다** — 그게 이 문서가 08-13 까지 `0.05698` 로 남아
+있던 이유다(§66.1). 판정은 `bash tools/d0_check.sh` 검사 [7] 이 한다. 그 검사는
+기대값을 `.ino` 에서 직접 읽어 대조하고 **화면에 자기 기대값을 같이 찍는다.**
+현장에서는 **화면에 찍힌 값**을 근거로 읽는다.
 
 ### 5-e. ★★ 기동 순서와 부팅 대기 — **08-02 소스로 확정. 순서를 바꾸면 안 붙는다**
 
@@ -515,7 +559,9 @@ ros2 topic list | grep -E "odom|imu"
 
 에 `/odom`·`/imu/data` 가 보이면 성공이다. 안 보이면 **위 ③ LED 를 먼저 본 뒤** §8.
 
-## 6. udev 규칙 — `/dev/teensy_drive`
+## 6. udev 규칙 — `/dev/teensy_drive` · `/dev/rplidar`
+
+### 6-a. `/dev/teensy_drive`
 
 장치 번호(`/dev/ttyACM0`)는 꽂는 순서에 따라 바뀐다. 고정 이름을 붙인다.
 규칙 파일과 **실측 방법**은 `tools/udev/99-teensy-drive.rules` 안에 다 적어 뒀다.
@@ -539,6 +585,36 @@ ls -l /dev/teensy_drive
 TODO(D+0): 확인 완료 (2026-08-03) — `/dev/ttyACM0`, `idVendor=16c0`,
 `idProduct=0483`, `ID_SERIAL_SHORT=20379630`. 위 ①의 실제 Jetson 출력으로 확정했고,
 재삽입 뒤 `/dev/teensy_drive -> ttyACM0` 및 `DEVLINKS` 반영을 확인했다.
+
+### 6-b. `/dev/rplidar` (2026-08-14 신설)
+
+RPLIDAR C1 도 같은 이유로 고정 이름을 붙인다. 절차는 `§6-a` 와 같고 규칙 파일이
+**`tools/udev/99-rplidar.rules`** 다 — 기대 실측값·주의는 **그 파일 주석이 정본**이다.
+🔴 `10c4:ea60` 은 CP210x 를 쓰는 **모든** 장치가 공유하므로 **시리얼까지 함께 잠근다.**
+
+✅ **2026-08-14 설치 확인** — `ID_VENDOR_ID=10c4` · `ID_MODEL_ID=ea60` ·
+`ID_SERIAL_SHORT=78824f27dc6ff011a04a8c301045c30f` 실측 일치 → `/dev/rplidar -> ttyUSB0`.
+
+⚠ **`udevadm trigger` 만으로는 이미 꽂혀 있는 tty 에 안 걸리는 경우가 있다**(08-14 실측 —
+링크가 안 생겨 한 번 막혔다). 그때 규칙이 틀렸다고 단정하지 말고 **매칭 여부부터 판정한다**:
+
+```bash
+# ① 규칙이 매칭되는가 — 이것이 판정이다
+sudo udevadm test $(udevadm info -q path -n /dev/ttyUSB0) 2>&1 | grep -iE 'rplidar|SYMLINK'
+#    LINK 'rplidar' 가 보이면 규칙은 맞다. 적용만 안 된 것이다
+
+# ② 그 장치에만 다시 적용 (USB 를 안 뽑고)
+sudo udevadm trigger --action=add /sys$(udevadm info -q path -n /dev/ttyUSB0)
+ls -l /dev/rplidar
+#    그래도 안 되면 USB 를 뽑았다 다시 꽂는다 — 이게 가장 확실하다
+
+# ③ ①에서 아무것도 안 보이면 값이 다른 것이다. sysfs 실측과 대조한다
+udevadm info -a -n /dev/ttyUSB0 | grep -E 'ATTRS\{serial\}|ATTRS\{idVendor\}|ATTRS\{idProduct\}' | head -3
+```
+
+⚠ 런치는 포트를 **인자로** 받는다 — `lidar_port:=/dev/rplidar`. 소스에 박으면 동결 예외가
+필요해서 **일부러 안 박았다**(규칙 파일 주석). 그래서 `real_bringup.launch.py:329` ·
+`real_mapping.launch.py:65` 의 `TODO: udev 고정 링크로 교체` 는 **닫지 않고 남겨 둔 것**이다.
 
 ## 7. 연결 판정 — `tools/d0_check.sh`
 
@@ -579,7 +655,7 @@ bash tools/d0_check.sh
 | 4 | `/odom` QoS | 발행자 **RELIABLE**(소스 v1.4) · `ekf_filter_node` 가 **실제로 구독 중** · 조합 호환 |
 | 5 | `/imu/data` QoS | 발행자 **BEST_EFFORT**(소스 v1.4) · 위와 동일 |
 | 6 | 전진 부호 | 바퀴를 손으로 앞으로 굴리면 `linear.x > 0` |
-| 7 | 펌웨어 정체 | `/firmware/info` 의 `wheel_radius=0.05698` · `kp=30 ki=5` |
+| 7 | 펌웨어 정체 | `/firmware/info` 의 정체 키가 **`.ino` 와 일치** — 기대값은 스크립트가 소스에서 읽어 화면에 같이 찍는다(§5-d). 🔴 08-13 부터 `wheel_radius` 한 개가 아니라 `odom_wheel_radius`·`control_wheel_radius`·`cmd_wheel_base`·`odom_wheel_base` 넷이다 |
 | 8 | E-stop 배선 | 버튼을 **누르면** `/estop/state` 가 `true` 로 바뀐다 |
 | — | 재확인 | 종료 직전에 `ekf_filter_node` 가 **아직 살아 있는가**(마지막 `topic info` 가 **rc 0 으로 완주**했을 때만 판독) |
 
@@ -765,8 +841,11 @@ bag 3회(`~/Desktop/d0_evidence/d0_watchdog_0807_15{19,21,22}`, 노트북 보존
 영상 = `~/Desktop/d0_evidence/video/IMG_3461.mov` (iPhone 14 Pro · 3840×2160 HEVC ·
 **실측 `59.9955 fps`**(`r_frame_rate=60/1`, 슬로모션 아님) · 1327 프레임 / 22.118초).
 🔴 **촬영 시각 `2026-08-07 15:22:58 KST` 라 bag `d0_watchdog_0807_1522` 와 같은 시행**이고,
-화면 로그에도 그 bag 경로가 찍혀 있다. 재계산 = `python3 tools/watchdog_video.py <영상>
---t0-frame 670 --preset 0807-1522 --bag-ms 516.2` (그래프 = 같은 디렉터리 `wd_result.png`).
+화면 로그에도 그 bag 경로가 찍혀 있다. 🔴 **판재 이전 시행**이라 반지름 profile 이
+`pre-plate` 여야 그때의 수가 재현된다(검토 §65.3·§66.1 — preset 이 스스로 선언하므로
+플래그를 잊어도 옳게 나오지만, 읽는 사람이 시대를 알도록 명시한다).
+재계산 = `python3 tools/watchdog_video.py <영상> --t0-frame 670 --preset 0807-1522
+--pre-plate --bag-ms 516.2` (그래프 = 같은 디렉터리 `wd_result.png`).
 
 | 항목 | 값 |
 |---|---|
@@ -834,7 +913,7 @@ zero 발행기를 껐다.
 | 교차 차이 | bag `516.0` − 영상 `450.1` = **+65.9 ms** | — |
 
 재계산 = `python3 tools/watchdog_video.py <영상> --t0-frame 473 --preset 0811-1938
---bag-ms 516.0` · `python3 tools/watchdog_report.py <bag>`.
+--pre-plate --bag-ms 516.0` (🔴 **판재 이전** profile — §66.1) · `python3 tools/watchdog_report.py <bag>`.
 
 - ✅ **1-b(`≤600ms`) 실측 충족** — `516.0 ms`. 08-07 의 `516.2 ms` 와 **0.2ms** 차이라,
   안전 경로 배선이 바뀌어도 총 정지가 같은 자리에 있음을 **이 시행이 직접** 보였다.
@@ -1032,6 +1111,33 @@ ros2 topic type /drive/diag       # → geometry_msgs/msg/Vector3
 
 ⚠ **`x`(서비스 호출수)를 매번 본다.** 굽기를 1회로 합친 대가를 이 숫자가 갚는다 —
 호출했는데 `x` 가 그대로면 **로직이 아니라 서비스 전달**이 문제다(`§5` 버전 정합).
+
+#### 🔴 7-c-E2. 축소판 — **배선 6 행**만 밟는 조건과 범위 (2026-08-13 밤 신설)
+
+13 행을 매 굽기마다 다 밟으면 40 분이 든다. 그런데 13 행은 성질이 둘로 갈린다:
+
+| 분류 | 행 | 누가 보는가 |
+|---|---|---|
+| 상태기계·서비스 | 부정 2·3 · 전환 1·2·3 · 부정 5 · 해제 | `rearm_gate_host_test.sh` 가 **동작 967 + 구조 7** 로 결정론적으로 닫는다. 실기는 같은 것을 더 나쁜 해상도로 볼 뿐이다 |
+| **배선** | 부정 1·4·7·8 · 역회귀 1·2 | 🔴 **실기로만 볼 수 있다** — 모터가 실제로 서는가/도는가 |
+
+→ 축소판 = `python3 -u tools/rearm_field_wiring.py` (배선 6 행 · 약 8 분).
+무장 4 단계를 스크립트가 밟고 `z`·`enabled` 를 자동으로 읽는다. 사람은 E-stop 조작과
+"바퀴가 돌았나" 판정만 한다.
+
+🔴 **축소가 성립하는 조건은 하나다** — 굽는 diff 가 **상태기계·정지 배선·PWM 출력단을
+안 건드릴 것**. 그래서 도구가 시작할 때 `rearm_gate.h`·`drive_wiring.h` 의 **내용
+sha256** 을 확인하고, 다르면 **거부하고 13 행 전량으로 돌려보낸다.** 간소화가 조용히
+계약을 줄이는 일을 이 검사 하나로 막는다.
+
+⚠ **08-13 밤의 교훈 — 왜 6 행을 굳이 다시 밟나.** 그날 13 행을 "전항목 통과" 로 기록했는데
+**왼쪽 모터 드라이버 배선이 빠져 있었다.** "선다" 를 보는 행들은 왼쪽에 대해 자동으로
+참이었고, "돈다" 를 보는 역회귀 1 은 왼쪽에서 **충족되지 않았다.** 그래서 축소판은
+"바퀴가 돌았나" 가 아니라 **"네 바퀴 다 돌았나"** 를 묻는다.
+
+🔴 **전제조건** — 이 축소는 `MASTER_PLAN §7` 예약 32-e 처럼 **상수만 바뀐 굽기**를 위한
+것이다. **재개방** = ⓐ 두 헤더 중 하나라도 바뀌면 13 행 전량 ⓑ 배선을 다시 만졌으면
+6 행을 다시 밟는다 ⓒ 축소판이 한 행이라도 FAIL 이면 13 행 전량으로 확대한다.
 
 #### 7-c-E 결과 — 🔴 **2026-08-11 13행 전항목 통과** (펌웨어 `build=Aug 11 2026 15:13:20`)
 
@@ -1264,7 +1370,7 @@ rsync -av --exclude build --exclude install --exclude log --exclude .git \
 
 | # | 무엇 | 확인 방법 | 절 | D+0 결과 (2026-08-03) |
 |---|---|---|---|---|
-| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. 🔴 L4T R36.5.0(JetPack 6.2.2 계열)이며 `nvidia-jetpack` 메타패키지·`nvcc`는 **없음** — D+0 비차단이지만 **CUDA 없이는 YOLO 추론이 CPU로 떨어져 역할 B 성능 전제가 통째로 바뀐다.** 소유자·트리거·완료판정은 `MASTER_PLAN.md §7` **예약 27** |
+| 1 | ROS 2 Humble 설치 여부 | `ls /opt/ros` | §1 | ✅ Ubuntu 22.04.5 Jammy·arm64, `/opt/ros/humble` 존재. L4T R36.5.0(JetPack 6.2.2 계열). ⚠ **08-05 에 여기 적었던 "`nvidia-jetpack`·`nvcc` 없음"은 08-11 에 해소됐다** — `nvcc` 는 **`PATH` 미등록 오진**이었고(CUDA 12.6 툴킷은 08-06 설치본이 있었다), `nvidia-jetpack` 은 **08-11 에 설치**했다(6.2.3+b81 · 65개). 🔴 **이 칸의 구값을 인용하지 말 것.** 정본 = `MASTER_PLAN.md §7` **예약 27** |
 | 2 | 인터넷 연결 | `ping -c 2 packages.ros.org` | §1 | ✅ IPv6 2/2 수신·손실 0%, 평균 175ms |
 | 3 | private 저장소 인증 수단 — **D+0 착수 전 게이트** | Jetson에서 실제 clone + 40자 HEAD 대조 | §3 | ✅ HTTPS+fine-grained PAT clone, HEAD `ff0555f899fcc86ff342a3a9ed30742dd1e8b5cf` |
 | 4 | `colcon build` 소요 시간 | 실제로 재고 적는다 | §4-c | ✅ Jetson에서 4패키지 종료 0, 28초. `sllidar_ros2` 외부 SDK의 C++ 경고뿐이며 `show-args` 종료 0·`serial_baud=115200` 확인 |

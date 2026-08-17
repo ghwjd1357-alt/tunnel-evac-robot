@@ -31,8 +31,24 @@
 import math
 import sys
 
-# 🔴 펌웨어 `.ino` 와 같은 값. 다르면 펌웨어와 다른 물건을 재게 된다.
-WHEEL_BASE_M = 0.62
+# 🔴 08-13 삭제 (검토 §65.3). 여기 있던 `WHEEL_BASE_M = 0.62` 는 **아무 데서도 안 쓰였다**.
+# 그런데 `test_drive_checks` 가 "펌웨어와 같은 값" 이라며 이 죽은 상수를 정답으로 고정해,
+# 펌웨어가 명령용 0.62 / odom 용 0.670 으로 갈라진 뒤에도 초록으로 남았다.
+# 이 도구는 윤거를 안 쓴다 — 줄자와 `/odom` 거리만 본다. 그래서 상수를 지웠다.
+
+# 🔴 08-13 신설 (PITFALLS §12) — **명령-실측 일관성 screen**.
+#   ⚠ 08-13 밤 정정(검토 §68.5) — 이것은 **줄자 타당성의 증명이 아니다.** 관측
+#     1.02~1.11 을 감싸게 손으로 고른 넓은 경보라, 명령 대비 14% 저속이나 29% 과속은
+#     통과하고 줄자와 속도제어가 **함께** 틀린 경우도 못 가른다. 반대로 진짜 구동 고장으로
+#     0.84 가 나오면 줄자가 정확해도 경보가 난다.
+#   → 이 통과를 **줄자가 옳다는 근거로 승격하지 않는다.** 상수 채택은 계속 독립 물리
+#     근거(C10 등)가 담당한다. 이 screen 의 유일한 일은 **성급한 상수 변경을 멈추는 것**이다.
+#   `줄자 / 주행시간` 이 명령 속도에서 이만큼 벗어나면 **줄자를 먼저 의심한다.**
+#   08-13 오후에 줄자가 3105mm 로 적혔는데 같은 명령으로 33.7초를 달린 로봇은 3.84m 를
+#   간다(밤 시행이 24.9초에 3.065m). 그 한 값이 odom/줄자 = 1.238 을 만들었고, 거기서
+#   반지름 상수가 나왔고, 그 위에 하루치 펌웨어·정본·검토 3회차가 쌓였다.
+#   이 검사 한 줄이 있었으면 그 자리에서 멈췄다.
+TAPE_PLAUSIBLE_BAND = (0.85, 1.30)
 # 명령이 끊긴 뒤 watchdog 이 세울 때까지를 포함해 보는 꼬리. `§7-c-0` 실측 총 정지가
 # 약 516ms 이므로 1.5s 면 정지까지 확실히 담는다.
 COAST_TAIL_S = 1.5
@@ -155,7 +171,21 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
     path = sum(math.hypot(seg[i][1] - seg[i - 1][1], seg[i][2] - seg[i - 1][2])
                for i in range(1, len(seg)))
     dur_seg = (seg[-1][0] - seg[0][0]) / 1e9
-    dyaw = math.degrees((seg[-1][3] - yaw0 + math.pi) % (2 * math.pi) - math.pi)
+    # 🔴 표본 사이 증분을 각각 ±180° 로 접어 **누적**한다. 양끝점 차이만 접으면
+    #   360° 의 배수가 통째로 사라진다 — `/odom` 의 yaw 는 쿼터니언에서 나온
+    #   atan2 라 언제나 (−180°, 180°] 안이기 때문이다.
+    #   실증 2026-08-14 R2 회전: 실제 436°(눈) · IMU 433.6° 인데 이 자리가 73° 를
+    #   냈다. 그대로 읽었으면 "324~396° 밖 = 즉시 실패·중단"(전제 ⓔ)에 걸려 남은
+    #   현장 일정을 통째로 세웠을 것이다. 접힘은 **작게** 나오므로 회전 시행에서
+    #   항상 안전한 쪽이 아니라 **거짓 실패** 쪽으로 틀린다.
+    #   ⚠ 이 누적이 옳으려면 표본 간격이 반 바퀴보다 짧아야 한다. `/odom` 은 50Hz
+    #     (ODOM_PERIOD_US=20000) 이므로 180° 를 넘으려면 25 rad/s 가 필요한데
+    #     MAX_ANGULAR_CMD=0.5 라 물리적으로 불가능하다. 그래도 가정이므로 아래
+    #     `dyaw_alias_risk` 로 관측해 내보낸다 — 숨은 전제를 숫자로 만든다.
+    steps = [(seg[i][3] - seg[i - 1][3] + math.pi) % (2 * math.pi) - math.pi
+             for i in range(1, len(seg))]
+    dyaw = math.degrees(sum(steps))
+    max_step = max((abs(s) for s in steps), default=0.0)
 
     # 정상구간도 같은 시작점에서 센다. 🔴 끝은 **명령 종료**다 — 관성 꼬리를 평균에
     # 넣으면 순항속도가 실제보다 낮게 나온다(08-12 에 그 실수를 한 번 했다).
@@ -177,6 +207,9 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         'lat_mm': lat * 1000.0,
         'lat_pct': abs(lat) / max(abs(fwd), 1e-9) * 100.0,
         'dyaw_deg': dyaw,
+        # 표본 한 칸의 최대 회전량 ÷ 반 바퀴. 1.0 에 가까우면 누적 언랩의 전제가
+        # 흔들린다(표본이 너무 성기거나 회전이 너무 빠르다). 실측은 0.01 수준이다.
+        'dyaw_alias_risk': max_step / math.pi,
         'avg_mps': path / dur_seg if dur_seg > 0 else float('nan'),
         'cruise_mps': (sum(cruise) / len(cruise)) if cruise else None,
     }
@@ -186,12 +219,23 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         post = [d for t, d in imu if t >= t1]
         if pre and post:
             v['imu_dyaw_deg'] = post[-1] - pre[-1]
+            # 판정을 print 안에 두면 회귀가 못 잡는다 — 여기서 값으로 낸다.
+            gap = abs(v['imu_dyaw_deg'] - v['dyaw_deg'])
+            v['imu_gap_deg'] = gap
+            v['imu_gap_rel'] = gap / max(abs(v['imu_dyaw_deg']), 1e-9)
+            v['imu_agrees'] = gap < 1.0 or v['imu_gap_rel'] < 0.02
 
     # 🔴 줄자가 있으면 그것이 정본이다 — odom 은 여기서 **검증받는 쪽**이다.
     if tape_mm is not None:
         v['tape_mm'] = tape_mm
         v['odom_over'] = path * 1000.0 / tape_mm if tape_mm > 0 else float('nan')
         v['true_mps'] = (tape_mm / 1000.0) / dur_seg if dur_seg > 0 else float('nan')
+        # 🔴 줄자 타당성 — 상수를 바꾸기 전에 반드시 통과해야 하는 관문 (PITFALLS §12).
+        cmd = abs(v.get('cmd_linear') or 0.0)
+        if cmd > 1e-9 and v['true_mps'] == v['true_mps']:
+            v['tape_vs_cmd'] = v['true_mps'] / cmd
+            v['tape_plausible'] = (TAPE_PLAUSIBLE_BAND[0] <= v['tape_vs_cmd']
+                                   <= TAPE_PLAUSIBLE_BAND[1])
         # 🔴 08-12 신설 — 평균속도와 순항속도는 **약점이 서로 반대**다.
         #   · 평균(`true_mps`) 은 줄자에 앵커돼 스케일은 믿을 수 있지만, 창에 출발
         #     가속과 관성 꼬리가 같이 들어가 **아래로 희석된다**. 짧은 주행일수록 심하다
@@ -200,9 +244,18 @@ def analyze(cmds, odoms, imu=None, tape_mm=None):
         #     스케일을 스스로 검증하지 못한다.
         # 두 약점은 곱하면 상쇄된다: 순항 × (줄자/odom) = 외부에 앵커된 순항속도.
         # ⚠ 그래도 `cruise_mps` 는 EMA(α=0.10) 파생이라, 순항이 짧으면 이 값도 덜 앉는다.
+        #
+        # 🔴 08-13 버그 수정. 이 줄은 `odom_over` 를 **곱하고** 있었는데
+        #    `odom_over = odom/줄자` 이므로 곱하면 `순항 × (odom/줄자)` — 위 주석이
+        #    말하는 것의 정확히 역수다. odom 이 부풀어 있을수록 보정값이 더 부풀었다.
+        #    실해: 08-13 직진에서 실제 0.0976 m/s 를 **0.1495 m/s** 로 보고했다.
+        #    (= 같은 시행의 평균속도보다 1.62배 빠른 값. 물리적으로 불가능한 수였는데도
+        #      부호가 그럴듯해 보여 한 번 지나갔다.)
+        #    0.12 상한 판정에 쓰는 수라 방향이 **위험한 쪽**이다 — 실제로는 안 넘었는데
+        #    넘었다고 읽거나, 보정 계수가 반대면 넘었는데 안 넘었다고 읽는다.
         if v.get('cruise_mps') is not None and v['odom_over'] == v['odom_over'] \
                 and v['odom_over'] > 0:
-            v['cruise_true_mps'] = v['cruise_mps'] * v['odom_over']
+            v['cruise_true_mps'] = v['cruise_mps'] / v['odom_over']
         else:
             v['cruise_true_mps'] = None
     return v
@@ -227,11 +280,21 @@ def report(v, name=''):
     print(f'  전진 성분           = {v["fwd_mm"]:9.1f} mm')
     print(f'  🔴 횡편차           = {v["lat_mm"]:9.1f} mm   ({v["lat_pct"]:.2f}% of 전진)')
     print(f'  yaw 변화(엔코더)    = {v["dyaw_deg"]:9.2f} °')
+    if v['dyaw_alias_risk'] > 0.5:
+        print(f'     🔴 표본 한 칸이 반 바퀴의 {v["dyaw_alias_risk"]:.0%} 까지 돈다 — '
+              f'누적 언랩의 전제가 깨진다. 이 yaw 는 판정에 쓰지 않는다')
     if 'imu_dyaw_deg' in v:
         d = v['imu_dyaw_deg']
         gap = abs(d - v['dyaw_deg'])
-        flag = '✅ 교차 일치' if gap < 1.0 else '🔴 두 관측자가 어긋난다'
-        print(f'  yaw 변화(IMU 독립)  = {d:9.2f} °   차이 {gap:.2f}° {flag}')
+        # 🔴 문턱은 절대·상대 둘 다여야 한다. 구판은 고정 1.0° 뿐이라 큰 회전에서
+        #   항상 "어긋난다"를 찍었다 — 2026-08-14 R2 회전은 433° 에 차이 6.4°,
+        #   즉 **1.5%** 인데 불일치로 나왔다. 두 독립 센서에 0.23% 일치를 요구한
+        #   셈이다. 반대로 상대만 쓰면 작은 회전에서 무한대가 되어 못 쓴다.
+        #   ⚠ 절대 차이는 그대로 찍는다 — 예약 35(엔코더 Δyaw − IMU Δyaw)가
+        #     이 수치를 절대값으로 추적한다.
+        rel = v['imu_gap_rel']
+        flag = '✅ 교차 일치' if v['imu_agrees'] else '🔴 두 관측자가 어긋난다'
+        print(f'  yaw 변화(IMU 독립)  = {d:9.2f} °   차이 {gap:.2f}° ({rel:.2%}) {flag}')
     print()
     print(f'  평균속도(경로장)    = {v["avg_mps"]:9.4f} m/s'
           f'   ⚠ 가감속 포함 — 정상속도가 아니다')
@@ -254,6 +317,30 @@ def report(v, name=''):
             print('     🔴 odom 과 줄자가 5% 넘게 어긋난다 — 오도메트리 스케일을 의심한다')
         else:
             print('     ✅ 오도메트리 스케일 정상(5% 이내)')
+
+        # 🔴 08-13 신설 (PITFALLS §12) — 어긋남을 상수로 흡수하기 **전에** 줄자를 본다.
+        if v.get('tape_plausible') is False:
+            print()
+            print('     🔴🔴 명령-실측 일관성 실패 — 이 값으로 상수를 바꾸지 마라')
+            print(f'        줄자 {v["tape_mm"]:.0f} mm / {v["dur_seg"]:.2f} s '
+                  f'= {v["true_mps"]:.4f} m/s = 명령의 {v["tape_vs_cmd"]:.2f} 배')
+            print(f'        일관 범위 {TAPE_PLAUSIBLE_BAND[0]:.2f}~'
+                  f'{TAPE_PLAUSIBLE_BAND[1]:.2f} 배를 벗어났다.')
+            print('        → 로봇이 그만큼 느렸거나(고장), **줄자를 잘못 쟀거나**다.')
+            print('        🔴 08-13 에 정확히 이 자리에서 줄자가 틀렸고, 그것을 '
+                  '반지름 상수로 흡수해')
+            print('           하루치 펌웨어·정본·검토 3회차가 그 위에 쌓였다.')
+            print('        🔴 상수 재교정은 **독립 근거 두 개**를 요구한다 — '
+                  '줄자 하나로 바꾸지 않는다.')
+            print('        ⚠ 이 검사는 고장 검출선이 아니라 **넓은 일관성 경보**다 '
+                  '(검토 §68.5).')
+            print('           구름 반지름의 독립 근거 = 바퀴 회전수(C10). '
+                  'PITFALLS §12 · 예약 32-e')
+        elif v.get('tape_plausible') is True:
+            print(f'     ✅ 명령-실측 일관성 통과 — 명령의 {v["tape_vs_cmd"]:.2f} 배 '
+                  f'(일관 {TAPE_PLAUSIBLE_BAND[0]:.2f}~{TAPE_PLAUSIBLE_BAND[1]:.2f})')
+            print('        ⚠ 통과는 **줄자가 옳다는 근거가 아니다** — 성급한 상수 '
+                  '변경을 멈추는 경보일 뿐이다 (검토 §68.5).')
     print()
     print('  🔴 실제 이동 거리의 정본은 줄자다 — odom·twist 는 같은 엔코더 파생이라')
     print('     서로를 검증하지 못한다. 표시하고 재는 것이 유일한 외부 관측이다.')

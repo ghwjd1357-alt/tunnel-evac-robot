@@ -28,6 +28,9 @@
 #   bash tools/d0_check.sh --no-estop   # 검사 8(E-stop)만 생략
 #   bash tools/d0_check.sh --no-manual  # 사람이 필요한 6·8 을 함께 생략
 #   bash tools/d0_check.sh --secs 15    # **관측 창** 길이(기본 8초, 허용 3~120)
+#   bash tools/d0_check.sh --expect-build 'Aug 14 2026 09:12:33'
+#       🔴 굽기 직후 컴파일 기록의 build 문자열. 주면 stale build 를 기계로 잡는다.
+#       안 주면 검사 7 의 build 행은 **미판정**이다 (검토 §69.2).
 #   ⚠ 무엇을 생략하든 '전량 통과'가 아니다 — 종료 2.
 #   ⚠ `--secs` 는 **관측 창만** 바꾼다. 스냅샷(`echo --once`·`topic info`) 상한은 별도
 #     상수(SNAP_ECHO_SECS·SNAP_INFO_SECS·FW_INFO_SECS)이고 이유는 그 정의부에 있다.
@@ -115,6 +118,11 @@
 #   `hard_timeout` 하나뿐이라 아래에 4줄로 다시 정의한다 (중복이지만 안전 경계가 우선).
 # ============================================================================
 set -u
+
+# 🔴 08-13 (검토 §65.3) — 펌웨어 정체 검사가 기대값을 `.ino` 에서 읽으려면 저장소
+#   뿌리를 알아야 한다. 실행 위치와 무관하게 스크립트 자기 위치에서 잡는다.
+D0_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+D0_EXPECT_BUILD="${D0_EXPECT_BUILD:-}"
 
 ODOM_TOPIC="/odom"
 IMU_TOPIC="/imu/data"
@@ -254,6 +262,11 @@ while [ $# -gt 0 ]; do
     --secs)
       [ $# -ge 2 ] || { echo "--secs 에 값이 없다 (예: --secs 8)"; exit 3; }
       HZ_SECS="$2"; shift 2 ;;
+    # 🔴 검토 §69.2 — 굽기 직후 컴파일 기록의 build 문자열을 넘겨 **기계로 대조**한다.
+    #   없으면 검사 7 의 build 행이 `ok` 가 아니라 **미판정(warn)** 으로 나간다.
+    --expect-build)
+      [ $# -ge 2 ] || { echo "--expect-build 에 값이 없다 (예: 'Aug 14 2026 09:12:33')"; exit 3; }
+      D0_EXPECT_BUILD="$2"; shift 2 ;;
     -h|--help) sed -n '2,60p' "$0"; exit 3 ;;
     *) echo "알 수 없는 인자: $1  (사용법은 --help)"; exit 3 ;;
   esac
@@ -709,15 +722,72 @@ hard_timeout "$FW_INFO_SECS" ros2 topic echo /firmware/info --field data --full-
 clock_end $? "$FW_INFO_SECS" "$FWOUT"
 if [ "$CLK_RC" = "0" ] && [ -s "$FWOUT" ]; then
   sed 's/^/       /' "$FWOUT" | head -6
-  if grep -q "wheel_radius=0.05698" "$FWOUT"; then
-    ok "wheel_radius=0.05698 — 소스 v1.4 와 일치"
+  # 🔴 08-13 (검토 §65.3) — 기대값을 여기 적지 않고 **`.ino` 에서 읽어** 대조한다.
+  #   구판은 `wheel_radius=0.05698` 을 스크립트 안에 박아 두어, 08-13 재교정 뒤
+  #   정상 펌웨어를 "다른 펌웨어" 로 거절하게 돼 있었다. 정체 검사가 소스를 거절하면
+  #   그건 검사가 아니라 장애물이다.
+  #   ⚠ 굽기 **전**에는 이 검사가 NG 로 나오는 것이 정상이다 — 보드에 아직 옛 펌웨어가
+  #     들어 있다는 사실을 정확히 말하는 것이다.
+  # 🔴 08-13 밤 2차 — 기대 **키 목록**도 손으로 안 든다. 앞 판은 네 키를 튜플로 박아
+  #   두었는데, 같은 날 `CONTROL_WHEEL_RADIUS` 를 지우자(예약 32-e) 목록이 `.ino` 와
+  #   어긋나 검사가 통째로 멈췄다 — 값을 베낀 것(§65.3)과 같은 병이 **목록**에서 재발.
+  #   이제 `/firmware/info` 의 format·인자에서 `이름=%.Nf` 짝을 직접 읽는다.
+  FW_KEYS=$(PYTHONPATH="$D0_ROOT/tools" python3 -c \
+    'import sys; from firmware_constants import firmware_identity_keys
+try:
+    print("\n".join(firmware_identity_keys()))
+except Exception as exc:
+    print(exc, file=sys.stderr); sys.exit(1)' 2>/dev/null)
+  if [ -z "$FW_KEYS" ]; then
+    ng '.ino 에서 기대 상수를 못 읽었다 — 정체 검사를 못 한다 (도구를 먼저 고쳐라)'
   else
-    ng "wheel_radius 가 소스(0.05698)와 다르다 — **다른 펌웨어가 구워져 있다**"
-  fi
-  if grep -q "kp=30.000; ki=5.000" "$FWOUT"; then
-    ok "제어 게인 Kp=30 · Ki=5 — 소스 v1.4 와 일치"
-  else
-    warn "제어 게인이 소스(Kp=30, Ki=5)와 다르다 — 시험 데이터의 전제가 달라진다"
+    # 🔴 잘린 표본을 정상으로 받지 않는다 (검토 §65.5 의 |TRUNCATED 표식).
+    if grep -q "|TRUNCATED" "$FWOUT"; then
+      ng "/firmware/info 가 버퍼를 넘어 **잘렸다** — 이 표본으로는 아무것도 판정 못 한다"
+    fi
+    while IFS= read -r expect; do
+      [ -z "$expect" ] && continue
+      if grep -qF "$expect" "$FWOUT"; then
+        ok "$expect — 소스와 일치"
+      else
+        case "$expect" in
+          kp=*) warn "제어 게인이 소스($expect)와 다르다 — 시험 데이터의 전제가 달라진다" ;;
+          *)    ng "$expect 가 아니다 — **다른 펌웨어가 구워져 있다**" ;;
+        esac
+      fi
+    done <<< "$FW_KEYS"
+
+    # 🔴 검토 §68.2 — 정본은 **`build` 문자열이 굽힘 판별의 유일한 기준**이라고 말하는데
+    #   앞 판 검사 7 은 실수 필드만 보고 `build` 를 아예 안 봤다. 화면을 사람이 읽는
+    #   절차와 자동 검사를 같은 "정체 검사" 로 부르면 안 된다.
+    #   ⚠ 여기서 "오늘 굽었나" 는 판정하지 않는다 — 이 스크립트는 언제 구웠는지 모른다.
+    #     관측한 사실(`build` 값)을 **출력에 남겨** 사람이 절차서와 대조하게 한다.
+    # 🔴 검토 §71.2 — 앞 판은 정상 prefix 만 `grep -o` 했다. `build=Aug 14 2026 09:12:33garbage;`
+    #   에서 추출값이 정상 기대값과 **같아져** 통과했다. 필드는 **세미콜론 경계까지** 통째로
+    #   집는다. 중복 build 도 개수로 잡는다.
+    FW_BUILD_N=$(grep -o 'build=[^;]*;' "$FWOUT" | wc -l)
+    FW_BUILD=$(grep -o 'build=[^;]*;' "$FWOUT" | head -1)
+    FW_BUILD="${FW_BUILD%;}"
+    if [ -z "$FW_BUILD" ]; then
+      ng "/firmware/info 에 build= 가 없다 — **굽힘 판별의 정본이 없는 표본**이다"
+    elif [ "$FW_BUILD_N" != "1" ]; then
+      ng "build 필드가 $FW_BUILD_N 개다 — 표본이 섞였거나 잘렸다. 정체 판정 불가"
+    elif [ -n "$D0_EXPECT_BUILD" ]; then
+      # 🔴 검토 §69.2 — 굽기 직후 컴파일 기록의 기대 문자열과 **기계로 대조**한다.
+      if [ "$FW_BUILD" = "build=$D0_EXPECT_BUILD" ]; then
+        ok "$FW_BUILD — 기대와 일치"
+      else
+        ng "$FW_BUILD 가 기대 build=$D0_EXPECT_BUILD 와 다르다 — **구판이 올라가 있다**"
+      fi
+    else
+      # 🔴 검토 §70.2 — 앞 판은 `warn` 만 불렀다. `warn` 은 FAIL 도 SKIPPED 도 안 올려서
+      #   화면엔 "미판정" 이라 쓰면서 종합부는 rc=0 "D+0 판정 통과" 를 냈다 — **미판정을
+      #   자동 완료조건에 그대로 넣은 것**이다. `skip` 은 SKIPPED 를 올려 rc=2 로 끝난다.
+      #   ⚠ 빈 문자열(`--expect-build ''`)도 같은 경로로 온다.
+      skip "build 기계 대조 — 기대값이 없어 stale build 를 못 가른다 ($FW_BUILD)"
+      warn "     굽기 직후라면 --expect-build '<컴파일 시각>' 으로 기계 대조한다"
+      warn "     🔴 이 검사가 생략된 채로는 'D+0 통과' 라고 기록하지 않는다"
+    fi
   fi
 else
   # ★ 08-05 검토 §39.2 — 구판은 `"(5초 주기 × 12초 대기했다)"` 라고 적고 실제로는 0.4초 만에
@@ -840,8 +910,17 @@ elif [ "$SKIPPED" != "0" ]; then
   echo "   건너뛴 검사를 채우기 전에는 'D+0 통과' 라고 기록하지 않는다."
   exit 2
 else
-  echo "✅ D+0 판정 통과 — 다음은 docs/D1_FIRST_STEP.md (R3 rosbag)."
-  echo "   ⚠ 단, 여기 통과는 **주기의 상한을 증명하지 않는다**(관측 창이 짧다)."
-  echo "     최대 간격의 정본 판정은 R3 rosbag 의 간격 히스토그램이다."
+  # 🔴 08-13 — 구판은 여기서 "다음은 D1_FIRST_STEP.md (R3 rosbag)" 이라고 못 박았다.
+  #   이 스크립트는 **연결이 성립하는가**만 본다. 사다리 어디에 서 있는지는 모른다.
+  #   실제로 08-13 저녁, 굽기 직후의 이 줄이 §7-c-E·§5-G6·R2 셋을 건너뛰고 R3 로 가라고
+  #   가리켰다 — 그 시점 계약은 정반대였다(굽기 → R2 → R3). 도구가 모르는 것을 단정하면
+  #   그 단정이 사람의 순서를 이긴다. → **다음 단계는 핸드오프가 말한다.**
+  echo "✅ D+0 판정 통과 — **연결·정체·QoS·배선**이 성립한다."
+  echo "   🔴 다음 단계는 이 스크립트가 정하지 않는다 — docs/CURRENT_HANDOFF.md 의"
+  echo "      완료조건이 정본이다. 사다리 순서(R0→R1→R2→R3)를 건너뛰지 않는다."
+  echo "      🔴 펌웨어를 새로 구웠다면 §7-c-E 13행 · §5-G6 10/10 이 R1·R2 앞에 있다."
+  echo "   ⚠ 여기 통과는 **주기의 상한을 증명하지 않는다**(관측 창이 짧다)."
+  echo "     최대 간격의 정본 판정은 R3 rosbag 의 간격 히스토그램이다"
+  echo "     (docs/D1_FIRST_STEP.md — 사다리가 거기까지 왔을 때)."
   exit 0
 fi
