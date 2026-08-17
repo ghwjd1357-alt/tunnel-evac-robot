@@ -87,7 +87,6 @@ Gazebo 플러그인의 가짜 `/scan`·`/odom`·`/imu`는 실물과 **타입·�
 `docs/AI_CONTEXT.md`(AI 입력 라우팅·품질/토큰 측정 계약) ·
 **`docs/FREEZE_MANIFEST.md`**(동결 증거 — 해시·게이트 수치·조건부 위험·검토 결과. 07-24 신설) ·
 **`docs/ELECTRICAL_BASELINE.md`**(전기계통 현황·시험환경 최소 안전선·E-stop 재설계 근거. 08-04 신설) ·
-**`docs/ELECTRICAL_WIRING.md`**(현재 실차 전원·E-stop·Teensy 핀·센서·USB 배선 상세도. 08-17 신설) ·
 **`docs/FIRMWARE_REBUILD.md`**(Teensy 펌웨어 재빌드 환경·platform.txt 패치·재현성 기준점. 08-05 신설) ·
 `docs/legacy/CLAUDE_pre-restructure_0720.md`(개편 전 CLAUDE.md 백업, git `8042464`와 동일).
 

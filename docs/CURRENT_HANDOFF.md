@@ -244,4 +244,3 @@ R4 를 통과해도 **R3 를 건너뛴 것은 그대로 남는다.**
 - 동결 예외 = `FREEZE_MANIFEST §10.26`(라이다)·**§10.27**(가드) · 전기 = `ELECTRICAL_BASELINE §7`,`§13`
 - 지도·저장 함정 = `PITFALLS §7` · 줄자·각도 함정 = `§12` · 반지름 3종 = `REAL_ROBOT_VALUES §1-b-0`
 - 실행 순서 = `JETSON_SETUP §4-d`,`§6-b`,`§7-c-E2`,`§9` · 현장 런북 = `~/Desktop/0814_지도제작_런북.md`
-- 배선 상세 구현 주장 = `ELECTRICAL_WIRING.md`에 전원·E-stop·핀·센서·USB를 대조하고 미확인을 분리했다. **구현자 Codex / 최종 검토자 Claude(미실시)**.
