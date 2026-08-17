@@ -6,8 +6,14 @@
           상하 반전(PGM 은 row0=위, OccupancyGrid 는 row0=y최소),
           런렝스 압축 (f=자유 o=벽 u=미탐사 + 반복수 10진)
    ⚠ 손으로 합성한 가짜 지도가 아니다. 실제 SLAM 저장본 그대로다.
-   ⚠ 205(미탐사)는 -1 로 둔다. yaml 의 free_thresh=0.25 로 map_server 를 태우면
-     205 가 '자유'로 해석되므로, 실차에서 화면 색이 다르면 이 지점을 먼저 의심할 것.
+   ⚠ 205(미탐사)는 -1 로 둔다 — 이것이 런타임과 일치하는 해석이다. (2026-08-17 확인)
+     · 우리 스택은 map_server/amcl 을 띄우지 않는다 (nav2_params*.yaml 의 yaml_filename: "").
+       /map 은 slam_toolbox 가 posegraph(twin_localization)에서 직접 발행하며 미탐사를 -1 로 낸다.
+       .pgm/.yaml 은 저장 스냅샷일 뿐 런타임 입력이 아니라 free_thresh 가 적용될 자리가 없다.
+     · Nav2 는 track_unknown_space: true + allow_unknown: false 라
+       미탐사 셀을 '통행 불가'로 본다 (벽의 옅은 틈을 뚫는 것을 막으려는 의도된 설정).
+     ※ 이전 주석에 "free_thresh=0.25 면 map_server 가 205 를 자유로 해석한다"고 적혀 있었으나,
+       산수는 맞아도 우리는 그 경로를 타지 않는다. 오해 방지를 위해 정정함.
    ════════════════════════════════════════════════════════════════ */
 window.MOCK_MAP_TWIN = {
   name: 'twin_map_loc (쌍굴)',

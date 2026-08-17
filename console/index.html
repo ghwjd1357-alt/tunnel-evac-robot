@@ -114,8 +114,8 @@ body.display #bigState{display:flex;flex-direction:column;align-items:center;
   border-bottom:1px solid var(--line)}
 body.display #bigSub{display:block;margin-top:8px;font-size:15px;font-weight:400;
   letter-spacing:.02em;color:var(--fg-dim)}
-body.display #mapCanvas{height:calc(100vh - 152px);border:0;border-top:1px solid var(--line-soft);
-  cursor:default}
+body.display #mapCanvas{height:calc(100vh - 152px);max-height:calc(100vw / 2.49);
+  display:block;margin:0 auto;border:0;border-top:1px solid var(--line-soft);cursor:default}
 </style>
 </head>
 <body>
@@ -189,7 +189,8 @@ body.display #mapCanvas{height:calc(100vh - 152px);border:0;border-top:1px solid
       <div><i id="h-imu">●</i> /imu/data <b id="a-imu">—</b></div>
       <div><i id="h-nav">●</i> NAV2 <b id="a-nav">목표 없음</b></div>
       <div><i id="h-rtt">●</i> RTT <b id="a-rtt">—</b></div>
-      <div><i style="color:var(--fg-faint)">●</i> BATTERY <b style="color:var(--fg-faint)">대기</b></div>
+      <!-- 배터리 칸 삭제 (2026-08-17): /battery_state 는 구동부 계약에 없고 발행 코드도 없다.
+           영영 안 채워지는 칸은 화면을 고장난 것처럼 보이게 한다. 계약이 생기면 그때 추가. -->
     </div>
   </div>
 
@@ -215,15 +216,32 @@ body.display #mapCanvas{height:calc(100vh - 152px);border:0;border-top:1px solid
 if (new URLSearchParams(location.search).has('display')) document.body.classList.add('display');
 
 /* ★ T3: 대피자에게 보이는 문구. FSM 이름(PATROL 등)은 현장에서 의미가 없다.
-   🔴 문구 최종 결정권은 손민우 — 여기 표만 고치면 된다. */
+
+   🔴 문구 승인 상태 (2026-08-17 역할 A 회신 기준)
+     ✅ 확정  : PATROL · APPROACH · GATHER · GUIDE · ESCAPED
+     🔴 임시  : SEARCH_BACK · FAULT  — **잠정 승인 (조건부)**
+       · 전제조건   : 이 "🔴 임시" 표시를 지우지 말 것. 표시가 사라지면 잠정 승인도 무효다.
+       · 재개방 조건: MASTER_PLAN §4 최종 시나리오 확정 회의(안건 ⑦·⑧) 결과가 나오는
+                      즉시 그날 이 표를 갱신한다.
+       → ⑦(놓쳤을 때 재탐색/관제문의/단독탈출) ⑧(화재·사람 동시 위험 시 우선순위)이
+         미확정이므로, 화면 문구를 확정하는 것은 그 정책을 먼저 정하는 것과 같다.
+       → 다만 '비워두기'는 택하지 않았다. 재난 화면에서 빈 칸·무의미한 상태명은
+         그 자체가 위험이다. 두 칸 모두 '어느 정책으로 결정되든 안전한 쪽' 문구를 임시로 넣었다.
+
+   🔴 이 표를 고칠 때의 원칙 — 화면은 '로봇이 무엇을 하는지'가 아니라
+      '사람이 무엇을 해야 하는지'를 말한다.
+      (예: SEARCH_BACK 초안 "로봇이 되돌아가고 있습니다" 는, 직전 GUIDE 에서
+       "로봇을 따라오세요" 라고 시킨 사람을 화재 쪽으로 되돌려보내는 경로를 연다.) */
 const STATE_TEXT = {
-  PATROL:      { big: '평시 순찰 중',       sub: '이상 없음',                    color: '#4f9ee8' },
-  APPROACH:    { big: '화재 감지',           sub: '로봇이 집결지로 이동 중입니다', color: '#d0a215' },
-  GATHER:      { big: '집결지 대기',         sub: '로봇 주변으로 모여 주세요',     color: '#d0a215' },
-  GUIDE:       { big: '로봇을 따라오세요',   sub: '출구로 유도 중입니다',          color: '#3fb950' },
-  SEARCH_BACK: { big: '대피자 확인 중',      sub: '로봇이 되돌아가고 있습니다',    color: '#e4523c' },
-  ESCAPED:     { big: '대피 완료',           sub: '안전구역에 도착했습니다',       color: '#3fb950' },
-  FAULT:       { big: '로봇 정지',           sub: '관제실 지시를 따르세요',        color: '#e4523c' },
+  PATROL:      { big: '평시 순찰 중',       sub: '이상 없음',                     color: '#4f9ee8' },  // 확정
+  APPROACH:    { big: '화재 감지',           sub: '모이는 곳으로 이동 중입니다',   color: '#d0a215' },  // 확정("집결지"=내부용어라 수정)
+  GATHER:      { big: '집결지 대기',         sub: '로봇 주변으로 모여 주세요',     color: '#d0a215' },  // 확정
+  GUIDE:       { big: '로봇을 따라오세요',   sub: '출구로 유도 중입니다',          color: '#3fb950' },  // 확정
+  ESCAPED:     { big: '대피 완료',           sub: '안전구역에 도착했습니다',       color: '#3fb950' },  // 확정
+  // 🔴 임시 — 로봇이 화재 쪽으로 역행하는 상태. 사람은 따라오면 안 된다.
+  SEARCH_BACK: { big: '여기서 기다려 주세요', sub: '로봇이 뒤쪽을 확인하고 있습니다', color: '#e4523c' },
+  // 🔴 임시 — 관제실 지시가 대피자에게 닿는 수단이 미확정이라, 지시를 기다리게 하지 않는다.
+  FAULT:       { big: '로봇 정지',           sub: '이 로봇을 기다리지 말고 대피로를 따라 이동하세요', color: '#e4523c' },
 };
 function paintBigState(s) {
   const t = STATE_TEXT[s];
@@ -386,7 +404,11 @@ let robot = null, planPts = [], fireXY = null;
 /* ★ T1: 경로 신선도 — Nav2 는 목표가 끝나면 /plan 발행을 "그냥 멈춘다".
    지우는 주체가 없으면 마지막 경로가 화면에 영원히 남는다(디스플레이는 계속 켜두는 물건).
    §5.5 의 헬스 신선도와 같은 사상: 마지막 수신 시각만 들고 있다가 오래되면 버린다.
-   🔴 타임아웃 값: Nav2 재발행이 약 1Hz 라 1~2초로 잡으면 정상 주행 중에 깜빡인다. */
+   🔴 타임아웃 값 근거 (2026-08-17 역할 A 확인):
+      우리 Nav2 설정에는 planner_frequency 가 없다 → 주기적 재계획이 아니라
+      BT(behavior tree)가 요구할 때만 계획한다. 즉 /plan 발행 간격은 고정이 아니라 가변이다.
+      3500ms 는 '재계획 간격이 가변이라 넉넉히 잡은 여유값'이다. (1Hz 가정이 아니다)
+      값을 올리는 조건은 하나 — 정상 주행 중 경로가 한 번이라도 깜빡이면 그때 올린다. */
 let lastPlanAt = 0;
 const PLAN_TIMEOUT_MS = 3500;
 
@@ -480,6 +502,21 @@ function p2m(px, py) {
     mapInfo.origin.position.x + ((px - view.ox) / view.scale) * mapInfo.resolution,
     mapInfo.origin.position.y + (mapInfo.height - (py - view.oy) / view.scale) * mapInfo.resolution,
   ];
+}
+
+/* ★ 표식 크기 — '지도상 몇 m 로 보이게 할지' 로 지정한다.
+   🔴 예전엔 픽셀 고정이라 창을 줄이면 지도만 작아져 로봇이 갑자기 거대해 보였다.
+      이제 축척(view.scale)을 따라가므로 창 크기·모드가 바뀌어도 비율이 그대로다.
+   참고: 터널 폭 5.7m, 실제 로봇은 약 0.5m 급. 아래 값은 '보이라고 키운 기호' 크기다.
+      1.6 = 통로의 약 28%. 더 키우려면 2.0~2.5, 실물에 가깝게 하려면 0.6.
+   최소 픽셀값은 지도를 아주 축소했을 때 점처럼 사라지지 않게 하는 하한선. */
+const MARKER_M  = { robot: 1.6, fire: 1.6 };   // 지도상 크기(m) — 터널 폭 5.7m 대비 약 28%
+const MARKER_MIN = { robot: 18,  fire: 16  };  // 최소 표시 크기(px)
+
+// 아이콘 좌표계 기준 폭(로봇 18units) / 높이(불꽃 24units) → 그릴 배율
+function markerScale(kind, units) {
+  const px = MARKER_M[kind] / mapInfo.resolution * view.scale;
+  return Math.max(px, MARKER_MIN[kind]) / units;
 }
 
 /* ★ 현장 표식 — 캔버스에 직접 그린다 (이미지 파일·이모지 무의존).
@@ -648,19 +685,26 @@ function drawMap() {
     const [px, py] = m2p(fireXY.x, fireXY.y);
     mctx.save(); mctx.translate(px, py);
     mctx.beginPath();                                    // 위험 반경(가늘게)
-    mctx.arc(0, 0, 16 * K, 0, Math.PI * 2);
+    const sf = markerScale('fire', 24);
+    mctx.arc(0, 0, 21 * sf, 0, Math.PI * 2);
     mctx.strokeStyle = 'rgba(224,64,43,.45)'; mctx.lineWidth = 1 * K;
     mctx.setLineDash([4 * K, 4 * K]); mctx.stroke(); mctx.setLineDash([]);
-    mctx.scale(K * 0.62, K * 0.62); mctx.translate(0, -6);
+    mctx.scale(sf, sf); mctx.translate(0, -6);
     drawFire(mctx);
     mctx.restore();
   }
   // 로봇 (진행방향 삼각형 — 캔버스 y 반전이라 화면각 = -yaw)
   if (robot) {
     const [px, py] = m2p(robot.x, robot.y);
-    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw); mctx.scale(K * 0.9, K * 0.9);
+    const sr = markerScale('robot', 18);
+    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw); mctx.scale(sr, sr);
     drawRobot(mctx);
     mctx.restore();
+    if (MARKER_M.robot > 1.0) {                // 기호가 실물보다 크면 '진짜 위치'를 점으로 같이 찍는다
+      mctx.beginPath(); mctx.arc(px, py, 1.6 * K, 0, Math.PI * 2);
+      mctx.fillStyle = '#12161a'; mctx.fill();
+      mctx.lineWidth = 1; mctx.strokeStyle = 'rgba(255,255,255,.75)'; mctx.stroke();
+    }
   }
 
   // ★ T2: 경로 라벨 — 지도 위에 직접(멀리서 읽혀야 한다) + 지도 아래 텍스트에도 반영
@@ -681,7 +725,10 @@ function drawMap() {
 setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
 
 // 지도 클릭 → 화재 좌표 입력칸에 반영 (발행은 버튼으로 — 오클릭 방지)
+// 🔴 디스플레이 모드에서는 아예 받지 않는다 (2026-08-17 역할 A 요청).
+//    대피자가 만질 수 있는 화면에서 좌표 입력 경로가 살아 있으면 안 된다.
 mapCanvas.addEventListener('click', ev => {
+  if (document.body.classList.contains('display')) return;
   if (!mapInfo) return;
   const r = mapCanvas.getBoundingClientRect();
   const [x, y] = p2m(ev.clientX - r.left, ev.clientY - r.top);   // ★ T3: 그리기와 같은 view 사용
