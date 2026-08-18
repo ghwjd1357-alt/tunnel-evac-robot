@@ -43,6 +43,16 @@ PUBLISHERS = {
     "firmwareInfoPublisher": "RUNTIME_PUBLISH_FIRMWARE_INFO",
     "driveEnabledPublisher": "RUNTIME_PUBLISH_DRIVE_ENABLED",
     "driveDiagPublisher": "RUNTIME_PUBLISH_DRIVE_DIAG",
+    # 🔴 08-18 1.6.3 예약 41-g 3판 — 생존 표본이 주기 publisher 를 8 → **9** 로
+    # 만든다. 이 줄이 8 로 남으면 pulse 가 계측 밖이라는 뜻이라 FAIL 이다
+    # (MASTER_PLAN §7 41-g "그 증가 자체를 기대값으로 회귀에 넣는다").
+    "firmwarePulsePublisher": "RUNTIME_PUBLISH_PULSE",
+}
+
+# 사건 publisher 는 **비주기**라 위 전수에 넣지 않고 따로 센다. 넣으면 계약의
+# "8 → 9" 가 10 이 된다. 발행 실패는 pulse 의 evt_seq 회계로 host 가 본다.
+EVENT_PUBLISHERS = {
+    "firmwareEventPublisher": "best_effort",
 }
 
 PUBLISHER_QOS = {
@@ -54,6 +64,9 @@ PUBLISHER_QOS = {
     "firmwareInfoPublisher": "default",
     "driveEnabledPublisher": "best_effort",
     "driveDiagPublisher": "best_effort",
+    # 🔴 BEST_EFFORT 여야 한다. RELIABLE 이면 감시 loop 에 ACK 대기를 다시 넣어
+    # 1.6.1 → 1.6.2 회귀를 되풀이한다.
+    "firmwarePulsePublisher": "best_effort",
 }
 
 LARGE_PUBLISHERS = {
@@ -70,6 +83,13 @@ TELEMETRY_TOPICS = {
     "/firmware/info",
     "/drive/enabled",
     "/drive/diag",
+    # 08-18 1.6.3 — 관측되지 않으면 계약이 아니다. bag override 전수도 8 → 9.
+    "/firmware/pulse",
+}
+
+# 사건 스트림도 기록해야 하지만 주기 telemetry 전수와는 따로 센다.
+EVENT_TOPICS = {
+    "/firmware/event",
 }
 
 FIELD_CONSUMERS = {
@@ -107,12 +127,20 @@ def publish_contract(source):
 
 def assert_publisher_contract(testcase, source):
     initializers = publisher_contract(source)
-    testcase.assertEqual(len(initializers), len(PUBLISHERS), initializers)
+    # 주기 publisher 와 비주기 사건 publisher 를 **갈라서** 센다. 합쳐 세면
+    # 계약의 "주기 8 → 9" 가 10 으로 보여 무엇이 늘었는지 알 수 없게 된다.
+    periodic = [(k, n) for k, n in initializers if n not in EVENT_PUBLISHERS]
+    events = [(k, n) for k, n in initializers if n in EVENT_PUBLISHERS]
+
+    testcase.assertEqual(len(periodic), len(PUBLISHERS), initializers)
     testcase.assertEqual(
-        {name for _, name in initializers}, set(PUBLISHERS), initializers)
+        {name for _, name in periodic}, set(PUBLISHERS), initializers)
     testcase.assertEqual(
-        {name: kind for kind, name in initializers}, PUBLISHER_QOS,
+        {name: kind for kind, name in periodic}, PUBLISHER_QOS,
         initializers)
+    testcase.assertEqual(len(events), len(EVENT_PUBLISHERS), initializers)
+    testcase.assertEqual(
+        {name: kind for kind, name in events}, EVENT_PUBLISHERS, initializers)
 
     timeout_match = re.search(
         r"static\s+const\s+int\s+LARGE_PUBLISH_TIMEOUT_MS\s*=\s*(\d+)\s*;",
@@ -133,8 +161,18 @@ def assert_publisher_contract(testcase, source):
     measured, raw_matches = publish_contract(source)
     testcase.assertEqual(len(raw_matches), len(PUBLISHERS), raw_matches)
     testcase.assertEqual(measured, PUBLISHERS)
-    # Wrapper 안의 한 호출 외에 측정되지 않는 rcl_publish 우회가 없어야 한다.
-    testcase.assertEqual(source.count("rcl_publish("), 1)
+
+    # 측정되지 않는 rcl_publish 우회가 없어야 한다. 🔴 08-18 부터 허용되는 자리는
+    # **정확히 둘**이다: publishMeasured 안의 한 호출 + drainLinkEvents 의 사건 발행.
+    # 개수만 2 로 늘리면 아무 데나 세 번째가 생겨도 안 잡히므로 자리까지 못박는다.
+    testcase.assertEqual(source.count("rcl_publish("), 2)
+    wrapper = extract_function(source, "publishMeasured")
+    drain = extract_function(source, "drainLinkEvents")
+    testcase.assertEqual(wrapper.count("rcl_publish("), 1)
+    testcase.assertEqual(drain.count("rcl_publish("), 1)
+    testcase.assertIn("&firmwareEventPublisher", drain)
+    # 사건 발행은 publishMeasured 를 거치지 않는다 — 거치면 slot 이 9 → 10 이 된다.
+    testcase.assertNotIn("publishMeasured(", drain)
 
 
 def assert_spin_response_contract(testcase, source):

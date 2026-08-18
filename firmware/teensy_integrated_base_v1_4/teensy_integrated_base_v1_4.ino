@@ -28,6 +28,7 @@
 #include "drive_wiring.h"
 #include "estop_debounce.h"
 #include "runtime_guard.h"
+#include "link_stall_probe.h"
 
 // ============================================================================
 // Firmware identity
@@ -44,7 +45,12 @@
 // 쓸 수 있는 필드가 build(컴파일 시각)와 매크로 2개뿐이었다. 아래 둘을 사실로 맞춘다.
 // 🔴 1.5.0 (2026-08-13) = ① E-stop 디바운스 ② odom 재교정(ODOM_WHEEL_RADIUS·ODOM_WHEEL_BASE)
 //    ③ appliedPwm 관측. 버전을 올려야 bag 만 보고 어느 보드인지 가른다.
-static const char FW_VERSION[] = "rearm-latch-pi-runtime-guard-1.6.2";
+// 🔴 1.6.3 (2026-08-18) = 예약 41-g 사건 계측. 사건 ring + 생존 표본 /firmware/pulse +
+//    사건 스트림 /firmware/event. publish slot 8 → 9. 안전 경로(rearm_gate·drive_wiring)
+//    는 손대지 않았다 — 이번 판은 계측 추가뿐이다.
+//    버전을 올리지 않으면 보드가 "나는 1.6.2 다" 라고 방송하면서 1.6.3 코드를 돌린다.
+//    그러면 오늘 bag 과 기록이 전부 1.6.3 인데 보드만 1.6.2 라 나중에 못 가른다.
+static const char FW_VERSION[] = "rearm-latch-pi-link-probe-1.6.3";
 // ⚠ git_sha 는 아직 0 이다 — 소스에 자기 커밋 해시를 적으면 그 편집이 다시 해시를 바꾸는
 // 순환이라, 채우려면 빌드 시 주입(-DFW_GIT_SHA=...)이 필요하다. 이번 묶음의 최소 변경
 // 범위 밖이므로 손대지 않고, 이 주석이 "왜 0 인지"를 대신 기록한다.
@@ -371,6 +377,14 @@ rcl_publisher_t firmwareInfoPublisher;
 rcl_publisher_t driveEnabledPublisher;
 rcl_publisher_t driveDiagPublisher;
 
+// 예약 41-g 3판 — 생존 표본(주기)과 사건(비주기)은 **다른 publisher** 다.
+// 🔴 micro-ROS 정적 상한 RMW_UXRCE_MAX_PUBLISHERS = 10 이고, 이 둘을 더하면
+//    정확히 10/10 이라 **여유가 0** 이다. 새 telemetry 토픽을 더 만들려면
+//    libmicroros.a 재생성이 필요한데 그건 vendor drop 이라 이 저장소에서 못 한다
+//    (firmware/VENDOR_DROP.md). 전제와 재개방 조건 = CURRENT_HANDOFF 금지 범위.
+rcl_publisher_t firmwarePulsePublisher;
+rcl_publisher_t firmwareEventPublisher;
+
 // Only one service slot exists (RMW_UXRCE_MAX_SERVICES is exactly 1), so the
 // diagnostic counters ride a publisher instead of a second service.
 rcl_service_t driveEnableService;
@@ -389,6 +403,17 @@ std_msgs__msg__Bool estopStateMessage;
 std_msgs__msg__String firmwareInfoMessage;
 std_msgs__msg__Bool driveEnabledMessage;
 geometry_msgs__msg__Vector3 driveDiagMessage;
+std_msgs__msg__String firmwarePulseMessage;
+std_msgs__msg__String firmwareEventMessage;
+
+// 예약 41-g 계측 상태. 시각은 전부 여기서 만들어 헤더에 인자로 넘긴다 —
+// link_stall_probe.h 는 Arduino 를 안 쓰는 순수 헤더라 스스로 시계를 못 읽는다.
+LinkStallProbe linkProbe;
+LinkClock linkClock;
+
+// 지금 어느 phase 안에 있는지. publish 실패 사건이 어느 단계에서 났는지 남기려면
+// publishMeasured 가 이 값을 알아야 한다.
+uint8_t currentRuntimePhase = RUNTIME_PHASE_LOOP;
 
 // ============================================================================
 // Runtime state
@@ -924,6 +949,20 @@ bool recordRuntimePhase(uint8_t phase, uint32_t startedUs)
   return withinBudget;
 }
 
+// 예약 41-g — 사건에 찍는 벽시계. 동기가 선 적이 있으면 TIME_SYNC 시각을,
+// 아니면 uptime 을 쓴다. 🔴 어느 쪽인지는 pulse 의 sync_ok 가 들고 나가므로
+// 읽는 쪽이 fallback 을 진짜 시각으로 오해하지 않는다.
+uint64_t currentEpochMs()
+{
+  if (linkProbe.syncEverOk) {
+    const int64_t epochMs = rmw_uros_epoch_millis();
+    if (epochMs > 0) {
+      return static_cast<uint64_t>(epochMs);
+    }
+  }
+  return static_cast<uint64_t>(millis());
+}
+
 rcl_ret_t publishMeasured(rcl_publisher_t* publisher,
                           const void* message,
                           uint8_t site)
@@ -931,6 +970,12 @@ rcl_ret_t publishMeasured(rcl_publisher_t* publisher,
   const uint32_t startedUs = micros();
   const rcl_ret_t rc = rcl_publish(publisher, message, nullptr);
   const uint32_t elapsedUs = micros() - startedUs;
+
+  // 🔴 예약 41-g — 발행 결과를 사건 계측에 넘긴다. 성공이면 그 slot 의 burst 를
+  //    끊고, 실패면 발행 층 사건 한 건이다. pulse slot 은 헤더가 막는다(재귀 금지).
+  linkProbePublishResult(&linkProbe, site, rc == RCL_RET_OK, currentRuntimePhase,
+                         linkClockExtend(&linkClock, micros()), currentEpochMs());
+
   const bool withinBudget = runtimeGuardRecordPublish(
       &runtimeGuard, site, elapsedUs, rc == RCL_RET_OK);
   if (!withinBudget) {
@@ -1424,7 +1469,14 @@ void publishFirmwareInfo()
   //   297KB 라 대가가 없다. 실제 발행 길이는 안 변한다.
   // ⚠ 그래도 snprintf 는 넘치면 조용히 자르고 성공한 척한다. 반환값을 보고 **꼬리에
   //   표식을 남긴다** — 읽는 쪽이 "|TRUNCATED" 를 보면 그 표본을 계약 위반으로 버린다.
-  char infoBuffer[1536];
+  // 🔴 08-18 1.6.3(예약 41-g): publish slot 이 8 → 9 가 되면서 상한이 1407 → 1418
+  //    이 됐고, 여유가 128 자 미만으로 떨어져 firmware_info_length_check.py 가
+  //    rc=1 을 냈다(MIN_HEADROOM=128). 그래서 1536 → 1664 로 올린다.
+  //    ⚠ 이건 "info 에 ring 을 싣는" 것이 아니다 — 계약이 금지한 건 그쪽이고,
+  //      여기 늘어난 것은 계약이 요구한 **publish_max_us 9번째 칸** 하나다.
+  //      생존 표본은 여전히 /firmware/pulse 로 따로 나간다.
+  //    스택 지역변수이고 RAM1 여유가 297KB 라 대가가 없다. 실제 발행 길이는 안 변한다.
+  char infoBuffer[1664];
   const int infoLength = snprintf(
       infoBuffer,
       sizeof(infoBuffer),
@@ -1452,7 +1504,7 @@ void publishFirmwareInfo()
       "applied_pwm=%d,%d,%d,%d; applied_pwm_max=%d; applied_pwm_epoch=%lu; "
       "runtime_overruns=%lu; runtime_last=%lu,%lu; publish_failures=%lu; "
       "phase_max_us=%lu,%lu,%lu,%lu,%lu,%lu,%lu; "
-      "publish_max_us=%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu; "
+      "publish_max_us=%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu; "
       "libraries=%s",
       FW_VERSION,
       FW_GIT_SHA,
@@ -1514,6 +1566,7 @@ void publishFirmwareInfo()
       static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_DRIVE_ENABLED]),
       static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_DRIVE_DIAG]),
       static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_FIRMWARE_INFO]),
+      static_cast<unsigned long>(runtimeGuard.publishMaxUs[RUNTIME_PUBLISH_PULSE]),
       FW_LIBRARY_LIST);
 
   if (infoLength < 0 ||
@@ -1531,6 +1584,84 @@ void publishFirmwareInfo()
       RUNTIME_PUBLISH_FIRMWARE_INFO));
 }
 
+// ============================================================================
+// 예약 41-g — 생존 표본과 사건 배출
+// ============================================================================
+
+// 🔴 생존 표본이 이 펌웨어에 있는 이유 (§79.2): 사건 ring 은 **발생 시** 발행이라
+//    조용한 구간에는 host 로 갈 메시지가 아예 없다. 그러면 "그 300ms 에 사건이
+//    0건이었다" 가 *"loop 이 돌았는데 아무 일 없었다"* 인지 *"loop 이 섰다"* 인지
+//    구별되지 않는다. **부재는 관측이 아니다** — 관측이 살아 있었다는 증거가
+//    따로 있어야 부재가 관측이 된다.
+void publishFirmwarePulse()
+{
+  const uint32_t nowMs = millis();
+
+  if (!linkProbePulseDue(&linkProbe, nowMs)) {
+    return;
+  }
+
+  LinkPulse pulse;
+  linkProbeBuildPulse(&linkProbe, nowMs, currentEpochMs(), &pulse);
+
+  // ≤128B 고정 서식. 상한은 host harness 가 최악값으로 재서 회귀에 박아 뒀다.
+  char pulseBuffer[LINK_PULSE_TEXT_MAX];
+  const int pulseLength =
+      linkPulseFormat(&pulse, pulseBuffer, static_cast<int>(sizeof(pulseBuffer)));
+
+  if (pulseLength < 0 ||
+      static_cast<size_t>(pulseLength) >= sizeof(pulseBuffer)) {
+    // 잘린 표본은 보내지 않는다. 실패 계수는 한 곳(linkProbePublishResult)에서만
+    // 센다 — 두 곳에서 세면 같은 실패가 2 로 보인다.
+    linkProbePublishResult(&linkProbe, RUNTIME_PUBLISH_PULSE, false,
+                           RUNTIME_PHASE_LOOP,
+                           linkClockExtend(&linkClock, micros()), currentEpochMs());
+    linkProbePulseSent(&linkProbe, false);
+    return;
+  }
+
+  rosidl_runtime_c__String__assign(&firmwarePulseMessage.data, pulseBuffer);
+
+  // publishMeasured 경유 = publish slot 8. 이 발행 자체의 최악 시간도 runtime
+  // guard 에 잡혀야 한다 (계약 3판 ⑤ "계측" 행).
+  // 🔴 RCSOFTCHECK 를 쓰지 않는다 — 실패해도 해제하지 않고 다음 표본에 실어 보낸다.
+  //    자동 해제 **5사유는 불변**이다. 계측이 차량을 세우면 계측이 위험원이 된다.
+  const rcl_ret_t pulseRc = publishMeasured(
+      &firmwarePulsePublisher, &firmwarePulseMessage, RUNTIME_PUBLISH_PULSE);
+  linkProbePulseSent(&linkProbe, pulseRc == RCL_RET_OK);
+}
+
+// 사건 ring 을 한 판에 최대 LINK_DRAIN_PER_LOOP 개까지 뺀다.
+// 🔴 한 판에 다 쏟지 않는 이유: 16칸이면 String 16개 약 2KB 를 한 loop 에서 밀어야
+//    해서 계측이 스스로 지연을 만든다. 남은 칸은 다음 판에 나간다.
+void drainLinkEvents()
+{
+  LinkEvent event;
+
+  for (uint8_t i = 0; i < LINK_DRAIN_PER_LOOP; ++i) {
+    if (!linkProbeDrain(&linkProbe, &event)) {
+      return;
+    }
+
+    char eventBuffer[LINK_EVENT_TEXT_MAX];
+    const int eventLength = linkEventFormat(&event, eventBuffer,
+                                            static_cast<int>(sizeof(eventBuffer)));
+    if (eventLength < 0 ||
+        static_cast<size_t>(eventLength) >= sizeof(eventBuffer)) {
+      continue;
+    }
+
+    rosidl_runtime_c__String__assign(&firmwareEventMessage.data, eventBuffer);
+
+    // 🔴 publishMeasured 를 쓰지 않는다. 사건 publisher 는 **비주기**라 계약이
+    //    publish slot 전수(8 → 9)에 넣지 않고 따로 세라고 했다. 넣으면 9 가 10 이 된다.
+    //    이 발행의 실패는 host 가 pulse 의 evt_seq 회계로 본다:
+    //    (evt_seq - evt_dropped_total) 보다 실제 수신이 적으면 판정 불능이다.
+    // 🔴 실패해도 사건을 또 만들지 않는다 — 무한 재귀다.
+    (void)rcl_publish(&firmwareEventPublisher, &firmwareEventMessage, nullptr);
+  }
+}
+
 void periodicTimeSync()
 {
   const uint32_t nowMs = millis();
@@ -1541,7 +1672,12 @@ void periodicTimeSync()
   lastTimeSyncMs = nowMs;
 
   // Maximum blocking time is 100 ms, below the 500 ms motor watchdog.
-  (void)rmw_uros_sync_session(100);
+  // 🔴 예약 41-g 계약 3판 ③ — 반환값을 **버리지 않는다**. 동기가 실패했거나 낡으면
+  //    epoch_ms 는 uptime fallback 이거나 낡은 offset 이라 bag 수신 시각과 대응할
+  //    수 없다. 그 구간은 원인이 아니라 **판정 불능**이고, 그렇게 적으려면 host 가
+  //    성공 여부를 알아야 한다.
+  const rmw_ret_t syncRc = rmw_uros_sync_session(100);
+  linkProbeSyncResult(&linkProbe, syncRc == RMW_RET_OK, nowMs);
 }
 
 // ============================================================================
@@ -1689,6 +1825,21 @@ void setup()
       ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3),
       "drive/diag"));
 
+  // 예약 41-g 3판 — 생존 표본. 🔴 BEST_EFFORT 여야 한다. RELIABLE 이면 감시 loop 에
+  // ACK 대기를 다시 넣는 것이고, 그건 1.6.1 → 1.6.2 회귀를 그대로 되풀이하는 것이다.
+  RCCHECK(rclc_publisher_init_best_effort(
+      &firmwarePulsePublisher,
+      &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+      "firmware/pulse"));
+
+  // 사건 스트림. 비주기라 주기 publisher 전수에는 넣지 않는다.
+  RCCHECK(rclc_publisher_init_best_effort(
+      &firmwareEventPublisher,
+      &node,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+      "firmware/event"));
+
   RCCHECK(rclc_service_init_default(
       &driveEnableService,
       &node,
@@ -1708,6 +1859,8 @@ void setup()
   std_msgs__msg__String__init(&firmwareInfoMessage);
   std_msgs__msg__Bool__init(&driveEnabledMessage);
   geometry_msgs__msg__Vector3__init(&driveDiagMessage);
+  std_msgs__msg__String__init(&firmwarePulseMessage);
+  std_msgs__msg__String__init(&firmwareEventMessage);
   std_srvs__srv__SetBool_Request__init(&driveEnableRequest);
   std_srvs__srv__SetBool_Response__init(&driveEnableResponse);
 
@@ -1774,12 +1927,26 @@ void setup()
       &driveEnableResponse,
       &driveEnableCallback));
 
-  (void)rmw_uros_sync_session(1000);
+  // 🔴 부팅 동기도 결과를 버리지 않는다. 여기서 실패하면 첫 30초 동안 epoch_ms 가
+  //    uptime fallback 이고, 그 구간은 원인이 아니라 판정 불능이다.
+  const rmw_ret_t bootSyncRc = rmw_uros_sync_session(1000);
   lastTimeSyncMs = millis();
 
   resetOdometry();
   resetImuYaw();
   runtimeGuardInit(&runtimeGuard);
+
+  // ── 예약 41-g 계측 초기화 ────────────────────────────────────────────────
+  // boot_id 는 **부팅마다 달라야** MCU reset 이 유한 정지와 갈린다(분류표 2행).
+  // 여기 micros() 는 2초 대기 + agent 발견 + BNO055 초기화가 끝난 시각이라
+  // 부팅마다 마이크로초 단위로 흔들린다.
+  // 🔴 그래도 충돌 가능성을 0 이라 주장하지 않는다. 충돌하면 어떻게 되는지가
+  //    중요한데, 그때는 boot_id 가 같은 채 sample_seq 가 0 으로 되돌아가므로
+  //    분류표 1행(rollback)에 걸려 **판정 불능**이 된다 — 틀린 원인이 아니라
+  //    분류 거부다. fail-closed 라서 EEPROM 쓰기를 부팅 경로에 넣지 않았다.
+  linkClockInit(&linkClock);
+  linkProbeInit(&linkProbe, LINK_EVENT_RING_MAX, static_cast<uint32_t>(micros()));
+  linkProbeSyncResult(&linkProbe, bootSyncRc == RMW_RET_OK, lastTimeSyncMs);
 }
 
 // ============================================================================
@@ -1791,9 +1958,17 @@ void loop()
   runtimeGuardBeginLoop(&runtimeGuard);
   const uint32_t loopStartedUs = micros();
 
+  // 🔴 예약 41-g — 판 **시작**을 여기서 찍는다. 이 자리가 안전 점검보다 앞이어야
+  //    직전 판 끝부터 여기까지의 `idle_us`(= 판 사이)가 전부 잡힌다.
+  //    exec 와 idle 을 따로 재는 것이 loop 안·판 사이 배타성의 유일한 근거다 —
+  //    "판 꼭대기 간격" 하나로 재면 loop 안 300ms 가 판 사이로도 잡힌다(§78.3).
+  linkProbeLoopBegin(&linkProbe, linkClockExtend(&linkClock, loopStartedUs),
+                     currentEpochMs());
+
   // Safety checks are intentionally performed before and after ROS work.
   checkSafety();
 
+  currentRuntimePhase = RUNTIME_PHASE_SPIN;
   const uint32_t spinStartedUs = micros();
   const rcl_ret_t spinRc =
       rclc_executor_spin_some(&executor, RCL_MS_TO_NS(2));
@@ -1822,27 +1997,45 @@ void loop()
   updateAppliedPwmEpoch();
 
   updateMotorOutputs();
+  currentRuntimePhase = RUNTIME_PHASE_ODOM;
   uint32_t phaseStartedUs = micros();
   updateOdometry();
   recordRuntimePhase(RUNTIME_PHASE_ODOM, phaseStartedUs);
 
+  currentRuntimePhase = RUNTIME_PHASE_IMU;
   phaseStartedUs = micros();
   updateImu();
   recordRuntimePhase(RUNTIME_PHASE_IMU, phaseStartedUs);
 
+  currentRuntimePhase = RUNTIME_PHASE_DIAGNOSTICS;
   phaseStartedUs = micros();
   publishDiagnostics();
   recordRuntimePhase(RUNTIME_PHASE_DIAGNOSTICS, phaseStartedUs);
 
+  currentRuntimePhase = RUNTIME_PHASE_FIRMWARE_INFO;
   phaseStartedUs = micros();
   publishFirmwareInfo();
   recordRuntimePhase(RUNTIME_PHASE_FIRMWARE_INFO, phaseStartedUs);
 
+  currentRuntimePhase = RUNTIME_PHASE_TIME_SYNC;
   phaseStartedUs = micros();
   periodicTimeSync();
   recordRuntimePhase(RUNTIME_PHASE_TIME_SYNC, phaseStartedUs);
 
+  // 🔴 예약 41-g — 생존 표본을 먼저, 사건을 그 다음에 낸다. 사건이 밀려도 생존
+  //    표본은 주기를 지켜야 한다. phase 배열은 **7 그대로**다 — 이 둘은 새 phase 가
+  //    아니라 loop phase 안에서 일어난다.
+  currentRuntimePhase = RUNTIME_PHASE_LOOP;
+  publishFirmwarePulse();
+  drainLinkEvents();
+
   recordRuntimePhase(RUNTIME_PHASE_LOOP, loopStartedUs);
+
+  // 🔴 판 **끝**을 delay(1) **앞**에서 찍는다. delay 는 판 사이(idle)다 —
+  //    뒤에서 찍으면 delay·USB serviceEvent·agent 왕복이 exec_us 에 들어가
+  //    "loop 안"으로 오분류된다. §74.6 이 지적한 자리의 재발이다.
+  linkProbeLoopEnd(&linkProbe, linkClockExtend(&linkClock, micros()),
+                   currentEpochMs());
 
   delay(1);
 }

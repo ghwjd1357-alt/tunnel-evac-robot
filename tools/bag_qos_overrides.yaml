@@ -102,3 +102,20 @@
   depth: 100
   reliability: best_effort
   durability: volatile
+
+# 08-18 D0-FW 1.6.3 (예약 41-g 3판): 생존 표본과 사건 스트림.
+# 🔴 관측되지 않으면 계약이 아니다 — 이 둘이 bag 에 없으면 41-g 분류표의
+#   1·3·8행(pulse 무표본 · 시행 종료 · host 이후)을 평가할 수 없다.
+# 둘 다 발행이 BEST_EFFORT 이므로 구독도 BEST_EFFORT 로 둔다.
+/firmware/pulse:
+  history: keep_last
+  depth: 1000
+  reliability: best_effort
+  durability: volatile
+
+# 사건은 버스트로 온다 — 349ms 공백 하나가 수십 건을 낸다. depth 를 넉넉히 둔다.
+/firmware/event:
+  history: keep_last
+  depth: 1000
+  reliability: best_effort
+  durability: volatile

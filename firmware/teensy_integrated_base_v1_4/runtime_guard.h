@@ -18,7 +18,10 @@
 // and replace it only after phase_max_us/publish_max_us are measured on-board.
 static const uint32_t RUNTIME_STALL_LIMIT_US = 400000U;
 static const uint8_t RUNTIME_PHASE_COUNT = 7U;
-static const uint8_t RUNTIME_PUBLISH_COUNT = 8U;
+// 🔴 예약 41-g 계약 3판: 생존 표본 /firmware/pulse 가 publishMeasured 를 거치므로
+// publish slot 은 8 → **9** 다. 8 로 남으면 pulse 가 계측 밖이라는 뜻이라 FAIL 이다
+// (MASTER_PLAN §7 41-g "그 증가 자체를 기대값으로 회귀에 넣는다").
+static const uint8_t RUNTIME_PUBLISH_COUNT = 9U;
 static const uint8_t RUNTIME_PUBLISH_CODE_BASE = 16U;
 
 enum RuntimePhase {
@@ -39,7 +42,11 @@ enum RuntimePublishSite {
   RUNTIME_PUBLISH_ESTOP = 4,
   RUNTIME_PUBLISH_DRIVE_ENABLED = 5,
   RUNTIME_PUBLISH_DRIVE_DIAG = 6,
-  RUNTIME_PUBLISH_FIRMWARE_INFO = 7
+  RUNTIME_PUBLISH_FIRMWARE_INFO = 7,
+  // 예약 41-g 3판 — 생존 표본. 이 publish 자체의 최악 시간도 runtime guard 에
+  // 잡혀야 한다. 🔴 사건 publisher(/firmware/event)는 **비주기**라 이 배열에
+  // 넣지 않고 따로 센다 — 넣으면 계약의 "8 → 9" 가 10 이 된다.
+  RUNTIME_PUBLISH_PULSE = 8
 };
 
 struct RuntimeGuard {
