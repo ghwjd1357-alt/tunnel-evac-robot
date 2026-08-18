@@ -1,0 +1,319 @@
+# nav2_params_real_db.yaml — 🔴 구동부 불감대 대응 시험판 (2026-08-19 신설)
+# =====================================================================
+# 🔴 이 파일은 nav2_params_real.yaml 의 **시험용 사본**이다. 원본은 건드리지 않는다.
+#    되돌리기 = 런치 인자에서 nav2_params:= 를 빼면 끝이다.
+#
+#      ros2 launch tunnel_bringup real_bringup.launch.py \
+#          nav2_params:=nav2_params_real_db.yaml
+#
+# 왜 만들었나 — 08-18 B6 예행에서 3m goal 이 교착했다. 원인은 Nav2 도 로봇도 아니고
+# 둘 사이의 단위 불일치다. `REAL_ROBOT_VALUES §1-h` 실측 불감대와 원본 값을 겹치면 보인다:
+#
+#   | 파라미터                        | 원본  | 실측 불감대   | 결과                       |
+#   | rotate_to_heading_min_angle    | 0.6   | —            | 34° 넘어야 제자리회전 발동   |
+#   | rotate_to_heading_angular_vel  | 0.5   | 0.32         | ✅ 발동하면 잘 돈다          |
+#   | (34° 미만 = 혼합 조향)          | 0.10~0.23 | 0.32     | 🔴 불감대 안 — 안 돈다       |
+#   | min_approach_linear_velocity   | 0.05  | 0.025~0.05   | 🔴 전진 불감대 경계 위       |
+#
+#   → 로봇이 고장난 게 아니라 **Nav2 가 이 로봇이 못 듣는 목소리로 말하고 있다.**
+#
+# 원본과 다른 곳은 정확히 세 줄뿐이다 (diff 로 확인 가능):
+#   rotate_to_heading_min_angle   0.6  → 0.25   (34° → 14°)
+#   min_approach_linear_velocity  0.05 → 0.10
+#   movement_time_allowance       20.0 → 30.0
+#
+# ⚠ 부작용 예상 — 제자리 회전이 잦아져 주행이 끊겨 보인다. 시연 화면상 어색하면
+#   0.25 → 0.35 로 되돌리며 절충한다. **움직이는 것이 먼저다.**
+#
+# ⚠ velocity_smoother 의 `deadband_velocity` 는 쓰지 않는다 — 그 파라미터는 작은 명령을
+#   **0 으로 죽이는** 것이라 우리 문제와 방향이 반대다.
+#
+# 🔴 이 판의 숫자는 **판재 천공·PCB 이식 前** 실측에 기반한다. 하드웨어 작업 뒤에는
+#   무게가 늘어 불감대가 올라가므로 `MASTER_PLAN §7` 예약 40 기준으로 다시 잰다.
+#
+# 🔴 시험 통과해도 원본에 자동 이관하지 않는다 — 이관은 독립검토 뒤 별도 묶음이다.
+# =====================================================================
+# ⚠ 시뮬 nav2_params.yaml 의 복사본이 아니다. 세 종류의 값이 섞여 있고, 각각 신분이 다르다:
+#   [확정]  구동부 실측에서 온 값 (footprint·외접반경). 바꾸려면 실물을 다시 재야 한다.
+#   [임시]  TEENSY 합의사항의 '임시 기준' — 상대팀과 합의는 됐으나 R1 실측 전이다.
+#   [TODO]  아직 아무 근거가 없는 값. **추정치로 채우지 않고 TODO 로 남긴다.**
+#           채우면 R 단계에서 "튜닝이 덜 됐다"와 "애초에 가짜였다"를 구분할 수 없다.
+#   확인법:  grep -n "TODO: " config/nav2_params_real.yaml
+#
+# [시뮬과 구조적으로 다른 3가지]
+#   ① 시뮬 시계를 쓰지 않는다 (전 섹션 use_sim_time: false).
+#   ② footprint 가 커졌다: 0.50×0.40 → 0.57×0.55, 외접반경 0.32 → 0.40 m.
+#   ③ 전방 충돌검사(use_collision_detection)를 **켠다.** 시뮬에선 가상 라이다 노이즈로
+#      오탐이 나서 껐지만, 실차에서 끄면 "장애물을 보고도 그냥 들이받는" 설정이 된다.
+#
+# [지도·위치추정은 여기 없다]
+#   운영 방식은 시뮬과 같다 — slam_toolbox 의 localization 모드가 저장 posegraph 로
+#   map→odom 을 발행한다 (config/slam_real_localization.yaml). map_server·amcl 은
+#   그래서 이 스택에서 기동하지 않는다. 아래 map_server/amcl 섹션은 나중에 누군가
+#   nav2_bringup 의 bringup_launch 계열을 쓸 때 'yaml_filename not initialized' 로
+#   활성화가 실패하는 것을 막기 위한 방어용이다 (PITFALLS.md §6).
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: ""
+
+amcl:
+  ros__parameters:
+    use_sim_time: false
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    global_frame_id: map
+    scan_topic: scan
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    # ★ 커스텀 BT(회복 순서 BackUp 우선)는 지금 지정하지 않는다 — 두 가지 이유:
+    #   ① bt_navigator 의 이 파라미터는 **파일 전체 경로**만 받는데, yaml 은 런치 치환이
+    #      안 돼서 절대경로를 박아야 한다. Jetson 계정은 hanhan 이라 노트북 경로는
+    #      존재하지 않는다 (MASTER_PLAN.md §7 예약 8과 같은 함정).
+    #   ② 애초에 그 BT 는 "시뮬에서 콘에 쐐기처럼 끼는" 상황을 보고 만든 튜닝이다.
+    #      실차 회복동작 순서는 R6 에서 실제 끼임을 보고 정할 일이다.
+    #   TODO: R6 후 확정 — 이식하기로 하면 런치에서 share 경로를 계산해 파라미터로
+    #     주입한다(yaml 에 절대경로를 쓰지 말 것). 시뮬 근거 파일 =
+    #     src/tunnel_sim/config/bt_nav_to_pose_backup_first.xml
+
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    progress_checker_plugin: "progress_checker"
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.3
+      movement_time_allowance: 30.0       # 🔴 db판: 20.0→30.0 — 느린 보정을 abort 로 죽이지 않게
+    general_goal_checker:
+      stateful: true
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # TODO: R6 실측 후 확정 — 시뮬 값(0.15 / 0.25)을 시작값으로 둔다.
+      #   시뮬은 SLAM 궤적오차 0.027 m 환경에서 잡은 값이라 실차엔 낙관적일 수 있다.
+      #   너무 조이면 목표 근처에서 맴돌고(진동), 너무 풀면 도달 오차가 커진다.
+      #   R6 판정 기준은 "도달 오차 ≤ 0.3 m" (MASTER_PLAN.md §3).
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.25
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    # ── RPP (Regulated Pure Pursuit) — 차동로봇 복도주행에 강건 ────────────
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+
+      # [임시] 최초 자율주행 순항속도.
+      #   ★ 08-02 정정: 예전 주석은 "합의 상한 0.30 m/s 의 절반 이하라 0.12" 라고 적혀
+      #     있었는데, 3차 회신에서 **펌웨어 상한 자체가 0.12 m/s** 로 확정됐다. 즉 이 값은
+      #     이제 '상한의 절반'이 아니라 **상한과 같다.** 값은 그대로 두되 근거가 바뀌었다.
+      #   ⚠ 그래서 여유가 없다 — 곡선에서 선속도와 각속도가 동시에 걸리면 바깥 바퀴 속도가
+      #     펌웨어 상한을 넘어 **펌웨어가 잘라낸다**(잘린 사실은 Nav2 에 보고되지 않는다).
+      #     지금은 실측이 없으므로 값을 임의로 낮추지 않는다 — R6 에서 실제로 잘리는지 보고
+      #     정한다. TODO: R6 실측 후 확정 — 잘림이 관측되면 desired_linear_vel 을 내리거나
+      #     구동부에 상한 상향을 요청한다(둘 중 무엇인지는 잘림 빈도가 정한다).
+      #   ⚠ 미션(R7)까지 켤 때: mission_manager 의 waypoints yaml `normal_speed` 와
+      #     이 값이 **같아야** 한다. 미션이 유도 종료 후 평시속도로 되돌릴 때 이 값을
+      #     기준으로 파라미터를 덮어쓰기 때문이다 (어긋나면 조용히 다른 속도로 달린다).
+      desired_linear_vel: 0.12
+
+      # TF 지연 허용. 시뮬은 부하 시 94ms 지연이 실측돼 0.5 로 완화했다.
+      # 실차는 USB·micro-ROS 구간이 더해져 더 클 수 있다.
+      # TODO: R3 bag 후 확정 — odom/imu/scan 의 실제 지연을 재고 맞춘다.
+      transform_tolerance: 0.5
+
+      lookahead_dist: 0.6
+      min_lookahead_dist: 0.3
+      max_lookahead_dist: 0.9
+      # ★ 08-02 정정: 예전 주석은 "합의 상한 0.80 rad/s 의 절반 이하" 였으나, 3차 회신에서
+      #   **펌웨어 각속도 상한이 0.50 rad/s** 로 확정됐다 — 이 값도 상한과 같아졌다.
+      #   위 desired_linear_vel 과 같은 경고가 그대로 적용된다. TODO: R1 슬립 실측 후 확정.
+      rotate_to_heading_angular_vel: 0.5
+      max_angular_accel: 2.0            # TODO: R1 슬립 실측 후 확정
+      use_velocity_scaled_lookahead_dist: false
+      min_approach_linear_velocity: 0.10  # 🔴 db판: 0.05→0.10 — 전진 불감대 0.025~0.05 위로
+      approach_velocity_scaling_dist: 0.6
+      use_regulated_linear_velocity_scaling: true
+
+      # 비용 기반 감속: 시뮬은 전역 플래너가 이미 중앙 경로를 그려서 껐다.
+      # 실차는 벽이 울퉁불퉁하고 지도도 완벽하지 않아 켜는 쪽이 안전할 수 있다.
+      # TODO: R6 후 확정. ⚠ 켤 때는 아래 inflation_cost_scaling_factor 가 costmap 의
+      #   cost_scaling_factor 와 **반드시 같아야** 한다 — 다르면 비용→거리 역산이 틀어져
+      #   엉뚱한 곳에서 감속한다 (시뮬 07-06 실측으로 확인된 함정).
+      use_cost_regulated_linear_velocity_scaling: false
+      inflation_cost_scaling_factor: 2.5      # ← costmap cost_scaling_factor 와 일치
+      regulated_linear_scaling_min_radius: 0.6
+      regulated_linear_scaling_min_speed: 0.1
+
+      # 제자리 회전으로 방향을 먼저 맞춘다(차동구동의 강점).
+      # ⚠ 실물은 4륜 스키드 스티어라 제자리 회전에 바닥 마찰 스크럽이 크다 —
+      #   R1 에서 이상 진동·편향이 보이면 여기부터 의심한다.
+      #   TODO: R6 후 확정 (필요 시 false + 완만한 곡선 주행으로 전환).
+      use_rotate_to_heading: true
+      rotate_to_heading_min_angle: 0.25   # 🔴 db판: 0.6(34°)→0.25(14°) — 08-18 불감대 0.32 근거
+      allow_reversing: false
+      max_robot_pose_search_dist: 10.0
+
+      # ★★ 전방 충돌검사 ON — 실차 필수 (시뮬은 가상 라이다 오탐 때문에 껐던 것).
+      #   끄면 "장애물이 보이는데도 그대로 진행"이 되고, 실차에선 그게 곧 충돌이다.
+      #   R6 통과 판정에 "collision ON 상태에서 정지거리 확인"이 들어 있다.
+      use_collision_detection: true
+      # TODO: R6 실측 후 확정 — 전방 몇 초 앞까지 검사할지(max_allowed_time_to_collision_up_to_carrot).
+      #   기본값을 쓰되, 실측 제동거리를 받으면 명시한다.
+
+# ── velocity_smoother — 실차에서만 의미가 있는 노드 ──────────────────────
+#   Nav2 컨트롤러가 내는 /cmd_vel_nav 를 부드럽게 깎아 /cmd_vel 로 내보낸다.
+#   실차에서 필요한 이유: 급가속은 ① 바퀴 슬립 → 오도메트리 오차 ② 전류 스파이크 →
+#   IMU 자기 간섭 ③ 기구 충격 을 동시에 만든다. 시뮬엔 이 셋이 다 없다.
+#   ⚠ 이건 Jetson 쪽 완화일 뿐이고, Teensy 도 독립적으로 slew-rate·PWM 상한을
+#     갖기로 합의돼 있다 (합의사항 §4.1) — 이중 방어.
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    # [x, y, theta] — 4륜 차동이라 y(횡방향)는 0.
+    # ★ [확정] 08-02 — **펌웨어 상한**으로 교체했다 (구동부 3차 회신 §2, 최종합의서 제3부).
+    #   구값 0.30 m/s · 0.80 rad/s 는 07-24 합의사항 §4.1 의 '임시 기준'이었고, 3차 회신에서
+    #   실제 펌웨어 상한이 **0.12 m/s · 0.50 rad/s** 로 확정되면서 폐기됐다.
+    #   ⚠ 왜 이게 D+0 즉발인가: 상한이 펌웨어보다 높으면 Nav2 는 0.30 을 명령하고 펌웨어는
+    #     0.12 로 잘라 실행한다. 그런데 Nav2 는 **자기가 0.30 으로 가고 있다고 믿은 채**
+    #     경로를 추종한다 — 예측 위치와 실제 위치가 벌어지고, 증상은 "곡선에서 크게 돌거나
+    #     goal 을 지나친다"로 나타나 원인을 설정에서 찾기 어렵다.
+    #   ⚠ 음수 쪽(min_velocity)도 같이 바꾼다 — 상한은 대칭이라 한쪽만 고치면 후진·역회전
+    #     경로에서 같은 결함이 그대로 남는다 (allow_reversing 은 지금 false 지만, 회복동작
+    #     BackUp 은 후진을 쓴다).
+    #   TODO: R1 후 재확인 — 펌웨어 상한이 올라가면 이 값도 함께 올린다. 이 값은 '튜닝'이
+    #     아니라 **구동부 계약값의 복사본**이므로 우리 판단으로 올리지 않는다.
+    max_velocity: [0.12, 0.0, 0.50]
+    min_velocity: [-0.12, 0.0, -0.50]
+    # TODO: R1 제동거리·슬립 실측 후 확정 — max_accel / max_decel.
+    #   지금은 nav2 기본값을 쓴다. "기본값 = 확정값"이 아니라 "아직 안 쟀다"는 뜻이다.
+    #   ⚠ 이 두 줄을 근거 없이 채우면 R1 에서 슬립 원인이 '설정'인지 '기구'인지
+    #     가려낼 수 없게 된다.
+    odom_topic: "odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      global_frame: odom
+      robot_base_frame: base_footprint
+      rolling_window: true
+      width: 4
+      height: 4
+      resolution: 0.05
+      # ★ [확정] 실측 외형 0.55(폭,y) × 0.57(길이,x) → 중심 기준 꼭짓점
+      #   (docs/REAL_ROBOT_VALUES.md §3). 외접반경 √(0.285²+0.275²) ≈ 0.40 m.
+      footprint: "[ [0.285, 0.275], [0.285, -0.275], [-0.285, -0.275], [-0.285, 0.275] ]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          data_type: "LaserScan"
+          # RPLIDAR C1 데이터시트 측정거리 12 m — 시뮬의 16 m 는 가상 라이다 값이라
+          # 그대로 쓰면 "있지도 않은 먼 관측"을 전제하게 된다.
+          # TODO: R3 확인 — bag 의 scan.range_max 실측값으로 맞춘다.
+          raytrace_max_range: 12.0
+          obstacle_max_range: 11.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        # ★ 확인: inflation_radius 0.9 ≥ 외접반경 0.40 (PITFALLS.md §6 조건 충족).
+        #   크게 두는 이유는 계획기가 터널 중앙 경로를 선호하게 만들기 위해서다.
+        #   ⚠ 실측 footprint 가 시뮬보다 커서 폭 2.5 m 피난연결통로 여유가 현재
+        #     과대평가돼 있다 (docs/REAL_ROBOT_VALUES.md §2) →
+        #     TODO: R6 좁은 통로 통과 검증 후 확정. 통과 실패 시 먼저 줄일 값이 여기다.
+        inflation_radius: 0.9
+        cost_scaling_factor: 2.5
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      global_frame: map
+      robot_base_frame: base_footprint
+      resolution: 0.05
+      # rolling 금지 — 라이브 SLAM 지도가 자랄 때 static_layer 리사이즈와 충돌해
+      # planner 가 '성공 + 빈 경로'를 뱉는 사고가 있었다 (PITFALLS.md §6).
+      rolling_window: false
+      # unknown(미탐사) 셀을 unknown 으로 유지 — 아래 planner 의 allow_unknown:false 가
+      # 의미를 가지려면 이 값이 true 여야 한다. 기본값에 안전을 맡기지 않고 명시.
+      track_unknown_space: true
+      footprint: "[ [0.285, 0.275], [0.285, -0.275], [-0.285, -0.275], [-0.285, 0.275] ]"
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true   # slam_toolbox 의 /map QoS 와 일치
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        track_unknown_space: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          raytrace_max_range: 12.0    # TODO: R3 확인 (위와 동일 근거)
+          obstacle_max_range: 11.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.9         # ≥ 외접반경 0.40 — TODO: R6 좁은 통로 검증
+        cost_scaling_factor: 2.5
+
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      # goal tolerance(0.15)보다 크되 최소한으로 — planner 가 목표에서 이만큼 떨어진
+      # 곳에 경로 끝점을 찍어도 되는 허용폭이다. goal checker 보다 작으면 도달 자체가
+      # 불가능해진다. TODO: R6 에서 goal tolerance 를 조정하면 같이 맞춘다.
+      tolerance: 0.25
+      use_astar: false
+      # 미탐사 공간을 통과 가능으로 보지 않는다 — true 면 벽의 옅은 틈으로 지도 밖
+      # 경로를 그린다(시뮬에서 벽 관통 경로 실측). 지도를 먼저 만들고(R5) 그 위에서
+      # 목표를 주는 운영 방식이라 false 가 맞다.
+      allow_unknown: false
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    # TODO: R6 후 확정 — 회복동작의 속도·거리(backup 0.05 m/s 등)는 실차 정지거리와
+    #   주변 여유를 보고 정한다. ⚠ 회복동작 중 후진은 라이다 사각(뒤쪽 낮은 장애물)에
+    #   그대로 노출되므로 실차에선 시뮬보다 보수적이어야 한다.
+
+# ── 이 스택에서 기동하지만 별도 튜닝이 없는 노드 ─────────────────────────
+#   smoother_server · waypoint_follower 는 nav2 기본값으로 둔다.
+#   (waypoint_follower 는 우리 미션이 쓰지 않는다 — mission_manager 가 goal 을 하나씩 보낸다)
+smoother_server:
+  ros__parameters:
+    use_sim_time: false
+
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: false
