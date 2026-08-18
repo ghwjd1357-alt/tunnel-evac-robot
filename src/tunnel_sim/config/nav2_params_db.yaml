@@ -1,0 +1,202 @@
+# nav2_params.yaml — Nav2 자율주행 설정 (2E 신설 → 2F 까지 실측 튜닝 누적, 07-07 현재 운영 정본)
+# ============================================================
+# Nav2 = "지도 위에서 목표점까지 스스로 경로 찾고 장애물 피해 주행".
+# 입력: /map(SLAM 지도 또는 저장맵) + /scan + odom TF + /tf
+# 출력: /cmd_vel (→ diff_drive → 바퀴)
+#
+# ★ 우리 로봇 핵심값 반영:
+#   - robot_base_frame: base_footprint  (URDF·diff_drive 와 일치)
+#   - footprint: 0.50×0.40 직사각형 (확정 몸통크기 — costmap 충돌계산)
+#   - 모션모델: differential (제자리회전 가능) → DWB 또는 RPP 컨트롤러
+#   - max 속도: 시뮬 검증된 0.26 m/s 근처 (skid-steer 무리 안 가게)
+
+# map_server : 저장맵(.yaml)을 읽어 /map 발행.
+# ★ yaml_filename 은 빈값으로 두면 bringup_launch 가 'map:=' 인자로 자동 치환.
+#   (이 섹션이 없으면 'yaml_filename not initialized' 에러로 localization 활성화 실패!)
+map_server:
+  ros__parameters:
+    use_sim_time: true
+    yaml_filename: ""
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    global_frame_id: map
+    scan_topic: scan
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    # ★ 커스텀 BT (07-07): 기본 BT 와 동일하되 회복 순서만 청소→BackUp→Spin→Wait.
+    #   (기본은 BackUp 이 마지막 — 콘 쐐기처럼 물리적으로 끼면 후진이 먼저여야 함)
+    #   yaml 은 런치 치환이 안 돼 install 절대경로 — symlink-install 이라 src 수정 즉시 반영.
+    default_nav_to_pose_bt_xml: /home/minwoo/ros2_ws/install/tunnel_sim/share/tunnel_sim/config/bt_nav_to_pose_backup_first.xml
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    # 진행 판정: 제자리 회전(rotate_to_heading)은 이동거리 0 이라
+    # 기본(0.5m/10초)로는 긴 회전 중 "Failed to make progress" 오탐 → 완화 (07-05)
+    progress_checker_plugin: "progress_checker"
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.3
+      movement_time_allowance: 30.0       # 🔴 db판 A/B
+    # 목표 도달 판정 (general goal checker)
+    # ★ 07-06 벤치 근거로 강화: SLAM 궤적오차 평균 0.027m 인데 끝점오차 0.26~0.30m
+    #   = 도달오차의 지배 요인이 tolerance('여기면 됐다' 문턱)였음 → 절반으로.
+    #   yaw 0.5rad(≈29°)도 과대 — 집결지 yaw(탈출구 응시)가 유도 출발방향이라 조임.
+    #   ⚠ 더 조일 땐 목표 근처 맴돎(진동) 확인 필수 (벤치 소요시간 비교로 감지).
+    general_goal_checker:
+      stateful: true
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.25
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    # RPP(Regulated Pure Pursuit) — 차동로봇 복도주행에 강건. 궤적샘플링 안 해서
+    # DWB의 "no valid trajectories" 문제 없음. 경로를 따라 부드럽게 추종.
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.26          # 시뮬 검증 최고속 안전치 (미션 GUIDE 중엔 0.12 로 동적 변경)
+      # ★ TF 지연 허용 (07-05 ②단계): 기본 0.1s 는 부하 시(추종자 노드 등 동시 실행)
+      #   "extrapolation into the future" 로 간헐 abort — 94ms 지연 실측. 0.5 로 완화.
+      transform_tolerance: 0.5
+      lookahead_dist: 0.6
+      min_lookahead_dist: 0.3
+      max_lookahead_dist: 0.9
+      rotate_to_heading_angular_vel: 0.5
+      max_angular_accel: 2.0
+      use_velocity_scaled_lookahead_dist: false
+      min_approach_linear_velocity: 0.10  # 🔴 db판 A/B
+      approach_velocity_scaling_dist: 0.6
+      use_regulated_linear_velocity_scaling: true
+      # ★ 비용 기반 감속 (07-06 실험으로 종결 — 이월 숙제 'RPP 속도저하 규명'):
+      #   이 키는 기본값이 true 라 안 적어도 켜져 있었음. §8.7 의 감속(0.26→0.12)은
+      #   rolling+static costmap 결함 시절 관측 → rolling_window:false 수정 후
+      #   직선 12m·곁복도 9m 모두 평균 0.257 로 재현 불가 실측 (감속 원인 소멸).
+      #   시뮬은 전역 플래너가 이미 중앙 경로를 그리므로 명시적으로 끔 (이중 감속 방지).
+      use_cost_regulated_linear_velocity_scaling: false
+      # ⚠ 실차에서 켤 경우: 이 값은 costmap 의 cost_scaling_factor 와 반드시 일치(2.5).
+      #   기본값 3.0 인 채 켜면 비용→장애물거리 역산이 틀어져 잘못된 감속 (07-06 불일치 실측).
+      inflation_cost_scaling_factor: 2.5
+      regulated_linear_scaling_min_radius: 0.6
+      regulated_linear_scaling_min_speed: 0.1
+      use_rotate_to_heading: true       # 제자리 회전으로 방향 먼저 맞춤 (차동 강점)
+      rotate_to_heading_min_angle: 0.25   # 🔴 db판 A/B — 실차 불감대 대응안 검증용
+      allow_reversing: false
+      max_robot_pose_search_dist: 10.0
+      # 전방 충돌검사 완화: 노이즈 많은 시뮬에서 오탐(false collision)으로 중단되는 것 방지.
+      # 전역 플래너가 벽을 피하므로 시뮬 검증엔 끔. (실차에선 켜는 것 권장)
+      use_collision_detection: false
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: odom
+      robot_base_frame: base_footprint
+      rolling_window: true
+      width: 4
+      height: 4
+      resolution: 0.05
+      # ★ 확정 몸통 0.50×0.40 직사각형 footprint (중심 기준 꼭짓점, m)
+      footprint: "[ [0.25, 0.20], [0.25, -0.20], [-0.25, -0.20], [-0.25, 0.20] ]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          data_type: "LaserScan"
+          raytrace_max_range: 16.0
+          obstacle_max_range: 15.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.9     # ★ 크게: 계획기가 터널 중앙 경로 선호 (벽 근처 회전불가 지대 원천 회피, 07-05)
+        cost_scaling_factor: 2.5
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: map
+      robot_base_frame: base_footprint
+      resolution: 0.05
+      # ★ 비-rolling 전환 (07-05 미션 통합테스트): rolling(40×40) + static_layer 는
+      #   라이브 SLAM 지도가 자라며 static layer 가 2초마다 리사이즈될 때 간헐 충돌 —
+      #   planner 가 '성공+빈 경로(0 poses)'를 뱉어 goal ABORTED (이동 중에만 발생,
+      #   정지 상태 16/16 정상 실측). 비-rolling 이면 costmap 크기가 /map 을 그대로
+      #   따라가는 표준 SLAM+Nav2 구성 = 리사이즈 경로가 하나로 정리됨.
+      #   (rolling 은 원래 '초기 /map 작음' 우회책 — allow_unknown:false 인 지금은
+      #    지도 밖 목표가 어차피 거부되므로 rolling 의 존재 이유 없음)
+      rolling_window: false
+      # ★ 명시 (07-19 검토 반영): unknown(미탐사) 셀을 unknown 으로 '유지'해야
+      #   planner 의 allow_unknown:false 가 의미를 가짐 — false(기본값)면 unknown 이
+      #   free 로 해석돼 "지도 밖·벽 너머 경로 차단" 정책이 기본값 하나에 매달림.
+      #   지금까지는 실측으로 동작 확인됐지만, 배포판 기본값 의존 대신 명시로 고정.
+      track_unknown_space: true
+      footprint: "[ [0.25, 0.20], [0.25, -0.20], [-0.25, -0.20], [-0.25, 0.20] ]"
+      # ★ static_layer 복귀 (07-05 심야): obstacle_layer(실시간 스캔)만으론 벽 마킹이
+      #   띄엄띄엄 → allow_unknown 과 결합 시 planner 가 벽의 옅은 틈을 뚫고
+      #   터널 밖 미탐사 공간으로 경로를 그림 (실제 /plan 덤프로 확인 — 벽 관통 대각선).
+      #   SLAM /map(누적·조밀한 벽)을 static_layer 로 깔아 원천 차단.
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true   # slam_toolbox 의 /map QoS 와 일치
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        track_unknown_space: true   # 레이어 자체 파라미터도 명시 (노드 레벨과 한 세트)
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          raytrace_max_range: 16.0
+          obstacle_max_range: 15.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.9     # ★ 크게: 계획기가 터널 중앙 경로 선호 (벽 근처 회전불가 지대 원천 회피, 07-05)
+        cost_scaling_factor: 2.5
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      # ★ 07-06: 0.5 → 0.25 — "목표 정확히엔 경로 못 그리면 0.5m 근처로 대충" 허용폭.
+      #   goal checker 를 0.15 로 조였는데 planner 가 0.5m 옆에 경로 끝점을 찍으면
+      #   도달 자체가 불가능해짐 → 항상 goal tolerance 보다 크되 최소한으로.
+      tolerance: 0.25
+      use_astar: false
+      # ★ false 로 (07-05): true 면 미탐사 공간(=터널 밖 바위 속!)을 "통과 가능" 취급
+      #   → 벽의 옅은 틈으로 벽 관통 경로를 그리는 사고의 공범이었음.
+      #   지도 제작(탐사) 주행이 먼저 끝난 뒤 목표를 주는 우리 운영 방식에선 false 가 안전.
+      allow_unknown: false
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
