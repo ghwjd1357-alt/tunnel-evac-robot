@@ -1493,7 +1493,7 @@ FLASH code 294,176 / RAM1 variables 62,656 로 지문 3개 일치.
 | 열린 이유 | `drive_0817_1325`에서 ARMED·`cmd_vel wz=-1.0` 지속 중 Teensy 8 telemetry가 약 6.85초 생성되지 않음. 단일 `loop()` 정지로 watchdog·E-stop 표본·PWM 갱신까지 같이 멈추는 안전 구조 결함 |
 | 실제 변경 | 주기 telemetry 8개 BEST_EFFORT, publish 8·phase 7 계측, runtime overrun 해제 사유 7·`disarm_runtime`, spin 응답 실패 해제 사유 8·`disarm_spin`, state-bearing 진단 발행 직전 상태 재생성. `src/tunnel_bringup` 3파일은 **주석·docstring 전용**(QoS 배경 설명 정정, 실행 코드 0줄). 임시 경계는 실측 전 **400ms** |
 | 변경 안 함 | `CMD_WHEEL_BASE`, FF/게인, 지도 자산, 하드웨어 watchdog, 08-14 torn `/odom` 원인, §72.2 odom 3×3 가드 구현 |
-| 회귀 | runtime-guard **11/11**, re-arm host **989/0 + 구조 11/0**, firmware-info **61/61**·상한 1407/1535. 전체 게이트는 `CURRENT_HANDOFF` 현재 결과를 따름 |
+| 회귀 | runtime-guard **11/11**, re-arm host **989/0 + 구조 11/0**, firmware-info **61/61**·상한 1418/1664 (08-18 1.6.3 — publish slot 9번째 칸으로 1407→1418, 버퍼 1536→1664). 전체 게이트는 `CURRENT_HANDOFF` 현재 결과를 따름 |
 
 **§73 조건부 수용과 보완 폐포**
 

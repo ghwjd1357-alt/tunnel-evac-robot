@@ -953,6 +953,33 @@ format과 인자를 같이 지우거나 배열 순서만 바꾸어도
 🔴 마지막 `loop`는 `delay(1)`과 판 사이 틈을 제외한 **한 판의 작업 시간**이다.
 `publish_max_us` 순서 = `odom, imu, imu_yaw, gyro_bias, estop, drive_enabled, drive_diag,
 firmware_info`.
+🔴 **08-18 1.6.3 부터 9번째 칸 `pulse` 가 붙는다** (예약 41-g 계측). 순서 =
+`odom, imu, imu_yaw, gyro_bias, estop, drive_enabled, drive_diag, firmware_info, **pulse**`.
+`phase_max_us` 는 **7 그대로**이고 자동 해제 **5사유**도 불변이다 — 이 둘이 바뀌면 역회귀 위반이다.
+
+### §1-g-1. 08-18 1.6.3 실측 (현장 후보 · 승인본 아님)
+
+`build=Aug 18 2026 12:32:35` · bag `~/d0_evidence/r3_0818`(662.419초 · 9토픽 · 81,045건).
+🔴 **주행 중 사용자가 손으로 방향을 바꾼 구간이 있어 odom 정확도·예약 44·39 근거로는 못 쓴다.**
+
+| 계측 | 08-18 1.6.3 실측 | 08-17 1.6.2 대비 |
+|---|---|---|
+| `phase_max_us` **7개** | `2007,20998,4166,23,20095,844,46083` | loop 최대 47.165 → **46.083ms** (계측을 넣었는데 안 늘었다) |
+| `publish_max_us` **9개** | `20993,23,6,6,5,5,6,20003,`**`7`** | 🔴 RELIABLE 둘만 ACK 상한 20ms 를 꽉 채우고, **pulse 는 7µs** |
+| `runtime_overruns` | **0** · `runtime_last=0,0` | 불변 |
+| `disarm_runtime`·`disarm_spin` | **0 · 0** · `/drive/diag` **661 표본 전수 `y=0`** | 🔴 `y=7` 0건 = 계측이 차량을 세우지 않았다 |
+| `publish_failures` | **47** | `evt_seq 47` 과 **정확히 일치** = ring 이 하나도 안 놓쳤다 |
+| 계측 자신 | `evt_dropped_total=0` · `pulse_fail=0` · `sync_ok` 내내 true · `sync_age` 최대 15.8s | — |
+
+**해독** — `publish_max_us` 의 RELIABLE 두 칸(odom 20,993µs · info 20,003µs)이
+`LARGE_PUBLISH_TIMEOUT_MS=20` 을 꽉 채운 것이 *"발행 층"* 판정의 계기 증거다. 같은 300ms 를
+BEST_EFFORT 여섯 칸은 5~23µs 로 통과했다. 🔴 **`/odom` stamp 는 297.00ms 건너뛰는데
+`/imu/data` stamp 는 최대 36.80ms** — odom 표본은 사라졌고 imu 표본은 늦게 왔을 뿐이다.
+분류 전문·한계 = `MASTER_PLAN §7` 41-g, 판독 재현 = `tools/link_stall_bag_extract.py`.
+
+⚠ **뿌리 원인은 이 표가 소유하지 않는다.** 분류는 발행 층까지이고 그 아래
+(USB CDC 버퍼·agent 스케줄·autosuspend)는 후보다. USB 재열거는 이 세 사건에 한해 기각됐다.
+
 
 ⚠ **검토 §75.2 조건부 수용** — enable 응답 spin 실패와 400ms overrun이 동시에 성립하면
 현행 순서에서는 runtime 사유 7이 먼저 DISARMED로 전환해 사유 8·`disarm_spin`이 남지 않을

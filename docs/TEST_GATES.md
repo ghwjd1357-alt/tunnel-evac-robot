@@ -15,6 +15,7 @@ bash tools/regression_negative.sh                        # ~6분
 bash tools/regression_3goals.sh                          # ~4분
 bash tools/mission_e2e.sh                                # ~3분
 bash tools/abort_e2e.sh                                  # ~3분
+bash tools/link_stall_host_test.sh                       # ~5초 — 예약 41-g 계측 3단(MCU 367 · 분류 23 · 구조 14)
 bash tools/doc_check.sh                                  # ~1초 — 문서 동기화 (커밋 직전)
 #   … 커밋 + push …
 bash tools/doc_check.sh --after-push                     # 원격 동기 재확인 (필수)
@@ -282,6 +283,32 @@ bash tools/doc_check.sh --after-push                        # 원격 ahead/behin
 ★★★★★★★★★ **08-14 — 🔴 조건부 수용의 재개방 조건은 발동 가능해야 한다** (검토 §71.4).
 누가 언제 보는지가 빠지면 그 조건은 안 울리고 **조건부 수용이 영구 면제가 된다.**
 규율 전문·관측 지점 셋 = `PROJECT_CONTEXT §8-c`.
+
+★★★★★★★★★★ **08-18 예약 41-g 계측 도구 3종 신설** (1.6.3 · 커밋 `6638d96`).
+
+```bash
+bash tools/link_stall_host_test.sh                 # 3단 — MCU 동작 367 · 호스트 분류 23 · 구조 14
+python3 -m pytest tools/test_link_stall_classify.py -q   # 분류표 전칭·상호배타·경계 28건
+python3 tools/link_stall_bag_extract.py <bag>      # 실기 bag → 9행 분류 (B4 판독)
+```
+
+`firmware/teensy_integrated_base_v1_4/link_stall_probe.h` 는 `rearm_gate.h` 와 같은 이유로
+Arduino 를 안 쓰는 순수 헤더라 **가짜 시계로 300ms 를 기다리지 않고 찍는다** — 실기로는
+loop **안** 300ms 와 판 **사이** 300ms 를 따로 만들 수가 없다.
+
+🔴 **검토자가 공격할 지점** ① 주입이 **서로 다른** 분류를 내는가(같은 분류로 다 통과하면
+계측이 아니다 — 실행기가 "서로 다른 분류 최소 6종"과 필수 8분류 존재를 따로 본다)
+② 분류표가 code 조합에 대해 **전칭**인가(못 덮는 조합 0개를 양방향으로 고정했다)
+③ 판정 불능이 원인 분류로 새지 않는가(1행이 맨 위인 것이 계약이다)
+④ 접기가 **ring 전량 스캔**인가 — tail 하나로 되돌리면 08-17 처럼 두 토픽이 번갈아 실패할 때
+접기가 한 번도 안 일어나 깊이 16 이 즉시 넘친다(harness ⓘ 가 죽는다)
+⑤ `micros()` 뒤집힘 보정이 있는가(71.6분마다 가짜 4295초 idle 사건이 난다 — harness ⓞ)
+⑥ pulse tick 이 **catch-up 금지**인가(몰아 올리면 "loop 이 섰다"와 "host 가 잃었다"가 같은 값)
+⑦ `evt_seq` 회계를 **절대값이 아니라 증가량**으로 보는가(bag 은 굽기보다 늦게 시작한다).
+
+⚠ **이 harness 가 증명하지 않는 것**: 스케치가 그 함수들을 부르는가(3단 구조 검사가
+**텍스트로만** 본다 = 약한 증거) · 실제 USB/agent 가 서는가(B3 실기 bag) · **복귀하지 않는
+영구 정지**의 원인(§79.2 가 공개한 한계 — "시행 종료"로만 적는다).
 
 ⚠ **08-17 §73 현행 re-arm/runtime 보완 수치** — 위 판정 도구 행의 08-11
 `922+7`은 당시 기준선이다. 현행 생산 경로는 runtime 해제 사유 7과 중복 해제
