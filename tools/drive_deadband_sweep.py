@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""제자리 회전 불감대 `D` 를 계단 스윕으로 재고 **실행 천장과 대조해 판정까지 낸다**.
+"""제자리 회전 불감대 `D` 를 계단 스윕으로 재고 **명령 등가 상한과 대조해 판정까지 낸다**.
 
 사용 (🔴 이미 무장돼 있어야 한다 — 이 도구는 무장하지 않는다):
     python3 tools/drive_deadband_sweep.py
@@ -11,8 +11,10 @@
 -----------------
 08-18 은 5점 스윕을 **손으로** 했다. 08-20 재조립 뒤에는 이 값이 그날의 분기를 정한다:
 
-    D <  천장  →  Nav2 튜닝으로 간다 (`max_angular_accel = D / dt`)
-    D >= 천장  →  🔴 Nav2 로는 못 고친다. 구동부(FF·게인·기구)로 넘어간다
+    D <  상한  →  Nav2 튜닝으로 간다 (`max_angular_accel = D / dt`)
+    D >= 상한  →  🔴 Nav2 로는 못 고친다. 구동부(FF·게인·기구)로 넘어간다
+                  ⚠ 엄격한 불가능 증명은 `D > 상한` 이고 등호는 여유가 정확히 0 이다.
+                    `>=` 로 가르는 것이 검토 §81 이 승인한 **보수 경계**다.
 
 손계산이 그 분기를 떠받치면 안 된다. 08-13 에 줄자 한 번을 잘못 읽어 상수·문서·검토
 3회차가 통째로 기각된 자리가 정확히 이 구조였다.
@@ -73,14 +75,17 @@ BEST_EFFORT = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
 
 
 def rotation_ceiling():
-    """제자리 회전에서 **실제로 낼 수 있는** 최대 명령 ω [rad/s].
+    """제자리 회전에서 **명령으로 표현 가능한** 최대 등가 각속도 [rad/s].
 
     `applySkidSteerCommand()` 는 `wheel = ±ω · CMD_WHEEL_BASE/2` 를 만든 뒤
     `max(|L|,|R|) > MAX_WHEEL_CMD` 면 좌우를 같은 비로 줄인다. 제자리(linear=0)에서
     그 한계는 `MAX_WHEEL_CMD / (CMD_WHEEL_BASE/2)` 다.
 
-    🔴 `MAX_ANGULAR_CMD` 가 아니다 — 그 값(0.50)은 제자리에서 **도달 불가능한 죽은
-    상수**이고, 실제로 구속하는 것은 휠 속도 상한이다 (검토 §80 · 예약 50-2).
+    🔴 `MAX_ANGULAR_CMD` 가 아니다 — 그 값(0.50)은 제자리에서 **더 낮은 휠 상한에 가려진다**
+    (검토 §80·§81 · 예약 50-2). `ω=0.50` → 휠 ±0.155 → 배율 0.967742 → ±0.15 → 다시 0.4839.
+
+    🔴 **이것은 물리 상한이 아니라 *명령 등가 상한* 이다** (검토 §81 한정) — 제자리 휠
+    목표로 **표현 가능한** 각속도의 한계이지, 슬립·과도응답까지 봉인한 값이 아니다.
     """
     return firmware_double("MAX_WHEEL_CMD") / (firmware_double("CMD_WHEEL_BASE") / 2.0)
 
@@ -189,7 +194,7 @@ def main(argv=None):
     print("  계단 %s" % " ".join("%.2f" % s for s in steps))
     print("  계단당 %.1fs (앞 %.1fs 버림)   예상 소요 %.0fs"
           % (args.hold, args.settle, args.hold * len(steps) + 5))
-    print("  🔵 실행 천장 = MAX_WHEEL_CMD / (CMD_WHEEL_BASE/2) = %.4f rad/s" % ceiling)
+    print("  🔵 명령 등가 상한 = MAX_WHEEL_CMD / (CMD_WHEEL_BASE/2) = %.6f rad/s" % ceiling)
     print("  🔴 물리 E-stop 담당자 · 주변 비움 · 바퀴 지면")
     print("=" * 72)
     if args.dry:
@@ -265,21 +270,22 @@ def main(argv=None):
               % (len(live), slope, D, r2))
         print("  " + "-" * 66)
         print("  🔵 불감대 D = %.4f rad/s      전달률 a = %.3f" % (D, slope))
-        print("  🔵 실행 천장 = %.4f rad/s     여유 = %.4f (%.0f%%)"
+        print("  🔵 명령 등가 상한 = %.4f rad/s  여유 = %.4f (%.0f%%)"
               % (ceiling, ceiling - D, 100.0 * (ceiling - D) / ceiling))
         print("  " + "-" * 66)
         print()
         if D < ceiling:
             need = D / 0.05                      # dt = 1/controller_frequency(20Hz)
             cap = ceiling / 0.05
-            print("  🟢 D < 천장 — **Nav2 튜닝으로 갈 수 있다.**")
+            print("  🟢 D < 상한 — **Nav2 튜닝으로 갈 수 있다.**")
             print("     max_angular_accel 재유도:  D/dt = %.2f  (상한 천장/dt = %.2f)"
                   % (need, cap))
             print("     ⚠ 여유가 %.0f%% 다. 30%% 밑이면 램프가 경계에 걸려 얇다(검토 §80 단서)."
                   % (100.0 * (ceiling - D) / ceiling))
             rc = 0
         else:
-            print("  🔴 D >= 천장 — **Nav2 파라미터로는 못 고친다.**")
+            print("  🔴 D >= 상한 — **Nav2 파라미터로는 못 고친다.**")
+            print("     ⚠ 등호는 여유가 정확히 0 이다 — 검토 §81 이 승인한 보수 경계다.")
             print("     어떤 값을 써도 명령이 불감대를 못 넘는다. 구동부로 넘어간다:")
             print("     `MASTER_PLAN §7` 예약 51 — FF 에 회전 스크럽 항이 없고")
             print("     제어 여유가 INTEGRAL_PWM_LIMIT 에서 잘린다.")
