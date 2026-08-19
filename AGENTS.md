@@ -154,7 +154,9 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
   cold-start 총량(이 파일 + `CLAUDE.md` + 핸드오프) = **45,000 bytes / 14,500 o200k 토큰**
   (`tools/test_ai_context.py` 의 `COLD_START_*`. 08-07 비율 폐기 → **08-11 총량 완화 + 단독
   상한 신설**, 둘 다 사용자 결정). ⚠ 총량이 걸리면 줄일 것은 **정본이지 핸드오프가 아니다.**
-- **커밋 = push 한 세트.** 원격 `https://github.com/ghwjd1357-alt/tunnel-evac-robot` (private).
+- **커밋 = push 한 세트.** 원격 `https://github.com/ghwjd1357-alt/tunnel-evac-robot`
+  (🔴 **08-19 확인 = 공개**. 구 표기 "private" 정정 — push 하면 전 세계가 읽는다.
+  전기계통·펌웨어 소스도 공개 상태이므로 비밀번호·개인정보를 커밋에 섞지 않는다).
 - 빌드는 항상 `colcon build --symlink-install` (수동 실행).
 - **`make_map.sh` 실런 금지** — 지도 자산 변경은 사용자 명시 승인 + 정기 지도 제작 때만. E2E 스크립트는 전용 시뮬 PC 전용(Jetson 실행 금지).
 - 같은 branch/worktree 를 두 AI 가 동시 수정 금지. **Gazebo E2E 는 어떤 worktree 에서도 동시 실행 금지** (전역 프로세스 cleanup 충돌).
