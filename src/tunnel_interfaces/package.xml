@@ -21,10 +21,18 @@
   <depend>geometry_msgs</depend>     <!-- Point (position) -->
 
   <exec_depend>rosidl_default_runtime</exec_depend>
-  <member_of_group>rosidl_interface_packages</member_of_group>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+
+  <!-- 🔴 format 3 스키마는 순서를 강제한다 — dependency 구역이 끝난 **뒤**에
+       member_of_group, 그다음 export 다. 초판은 member_of_group 을 test_depend
+       앞에 둬서 ament_xmllint 가 거부했다(검토 §80.3):
+         "Element 'test_depend': This element is not expected.
+          Expected is one of ( member_of_group, export )"
+       빌드와 ros2 interface show 는 통과했기 때문에 조용했고, colcon test 를
+       돌려야만 드러났다. -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>
     <build_type>ament_cmake</build_type>

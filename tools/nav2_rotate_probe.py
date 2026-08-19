@@ -28,7 +28,6 @@ import time
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from rclpy.duration import Duration
 
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
@@ -110,32 +109,49 @@ def main(argv=None):
             print("🔴 %s→%s TF 없음 — 스택이 안 떴다." % (MAP_FRAME, BASE_FRAME))
             return 2
         x, y, yaw = pose
+
+        # 🔴 goal 은 **회전 전** 자세에서 정한다 (08-19 정정).
+        #    구판은 회전 뒤 자세에서 goal 을 만들어서, `--spin` 을 아무리 줘도 목표가
+        #    돌아간 정면에 찍혔다 = **방위오차 0** 이었다. `--abs` 와 같이 쓸 때만
+        #    우연히 동작했고, 그 함정을 08-19 현장에서 문서로만 우회했다.
+        if args.abs:
+            gx, gy = args.abs
+        else:
+            gx = x + args.goal * math.cos(yaw) - args.left * math.sin(yaw)
+            gy = y + args.goal * math.sin(yaw) + args.left * math.cos(yaw)
+
         if args.spin:
-            # 🔴 계측 전에 방위오차를 만든다. Nav2 밖에서 직접 돌리므로 이 구간은
-            #    samples 에 안 들어간다(아래에서 clear 한다).
+            # 계측 전에 방위오차를 만든다. Nav2 밖에서 직접 돌리므로 이 구간은
+            # samples 에 안 들어간다(아래에서 clear 한다).
+            # ⚠ 열린 루프다 — 불감대 때문에 실제 회전량은 명령보다 훨씬 작을 수 있다.
+            #   그래서 아래 err 를 **회전 뒤 실제 기하**로 다시 계산해 인쇄한다.
             pub = node.create_publisher(Twist, "cmd_vel", 10)
             w = 0.5 if args.spin > 0 else -0.5
             dur = abs(math.radians(args.spin)) / 0.5
             t_end = time.time() + dur
-            tw = Twist(); tw.angular.z = w
+            tw = Twist()
+            tw.angular.z = w
             while time.time() < t_end:
-                pub.publish(tw); rclpy.spin_once(node, timeout_sec=0.05)
+                pub.publish(tw)
+                rclpy.spin_once(node, timeout_sec=0.05)
             pub.publish(Twist())
             for _ in range(10):
                 rclpy.spin_once(node, timeout_sec=0.05)
+            yaw_before = yaw
             x, y, yaw = node.wait_tf(timeout=10.0) or (x, y, yaw)
-            print("  제자리 %+.0f° 회전 후 yaw %.1f°" % (args.spin, math.degrees(yaw)))
+            turned = math.degrees(yaw - yaw_before)
+            turned = (turned + 180.0) % 360.0 - 180.0
+            print("  제자리 %+.0f° 요청 → 실제 %+.1f° 회전 (yaw %.1f°)"
+                  % (args.spin, turned, math.degrees(yaw)))
 
-        if args.abs:
-            gx, gy = args.abs
-            err = abs(math.degrees(math.atan2(gy - y, gx - x) - yaw))
-            err = min(err, 360.0 - err)
-        else:
-            gx = x + args.goal * math.cos(yaw) - args.left * math.sin(yaw)
-            gy = y + args.goal * math.sin(yaw) + args.left * math.cos(yaw)
-            err = abs(math.degrees(math.atan2(args.left, args.goal)))
+        # 🔵 err 는 언제나 **실제 기하**로 낸다 — 명령이 아니라 관측이다.
+        err = abs(math.degrees(math.atan2(gy - y, gx - x) - yaw))
+        err = min(err, 360.0 - err)
         print("  출발 (%.2f, %.2f) yaw %.1f°  →  목표 (%.2f, %.2f)  초기 방위오차 %.1f°"
               % (x, y, math.degrees(yaw), gx, gy, err))
+        if err < 5.0:
+            print("  ⚠ 방위오차가 5° 미만이다 — 이 시행으로는 회전 파라미터를 시험할 수 없다"
+                  " (판별각 14~34°). --left 를 키우거나 --spin 을 늘려라.")
 
         if not node.client.wait_for_server(timeout_sec=60.0):
             print("🔴 navigate_to_pose 액션 서버 없음.")

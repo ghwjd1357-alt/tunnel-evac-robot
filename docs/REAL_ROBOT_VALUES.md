@@ -1233,6 +1233,11 @@ odom 1 + IMU 2 + diagnostics 4 + firmware info 1 = **한 판 최대 8회 publish
   분류표는 맨 아래 catch-all 을 둔 **전칭·상호배타**여야 하며, `evt_dropped` 는 누계와
   구간 delta 를 나눠 손실 구간만 판정 불능으로 만든다(누계만 두면 영구 판정 불능이 된다).
 - **§79 판정은 P0 0이며 커밋 `ee2f398` 유지와 승인 지문 1.6.1 유지다.**
+- **§80 판정은 P0 0이며 1.6.3 계측 조건부 승인과 FF·게인 착수 개방이다** — 승인 대상
+  firmware tree `62cbae22…`(`.ino` `b238f797…` · `runtime_guard.h` `7a135214…` ·
+  `link_stall_probe.h` `42fa8cbe…`)이고 `rearm_gate.h`·`drive_wiring.h` 는 승인본 그대로다.
+  🔴 **아직 없는 FF·게인 diff 의 사전 승인이 아니다** — 재조립 뒤 선행 실측 5종을 통과하고
+  그 diff 를 별도 Tier A 묶음으로 다시 독립검토해야 한다.
 
 ### ★★ §1-i. 로봇 기울기 분포 — 역할 B 약속 **Q1** 실측 (2026-08-19)
 

@@ -788,5 +788,15 @@
     "id": "0813-d0-fw-78-fix-review-zero-new-p0-79",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§79 판정은 P0 0이며 커밋 `ee2f398` 유지와 승인 지문 1.6.1 유지다"
+  },
+  {
+    "id": "0813-interface-manifest-dependency-order-80",
+    "path": "src/tunnel_interfaces/package.xml",
+    "anchor": "인터페이스 패키지 manifest 의 의존 구역 순서는 format 3 스키마가 강제한다"
+  },
+  {
+    "id": "0813-d0-fw-79-fix-review-zero-new-p0-80",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§80 판정은 P0 0이며 1.6.3 계측 조건부 승인과 FF·게인 착수 개방이다"
   }
 ]
