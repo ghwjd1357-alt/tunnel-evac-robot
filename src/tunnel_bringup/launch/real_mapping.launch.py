@@ -8,9 +8,13 @@ real_mapping.launch.py — 실터널 지도 제작 전용 (R5).
   # 다른 터미널에서 사람이 직접 운전한다 (저속!)
   ros2 run teleop_twist_keyboard teleop_twist_keyboard
 
-  # 다 돌고 나서 posegraph 저장 (확장자 없이 준다)
-  ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializeMap \
-      "{filename: '<저장할 경로>/tunnel_real_localization'}"
+  # 다 돌고 나서 posegraph 저장
+  # 🔴 타입은 SerializePoseGraph 다. `SerializeMap` 은 존재하지 않는 타입이고,
+  #    이 머리말이 08-14~08-20 그렇게 적고 있어서 실제로 두 번 거부당했다
+  #    (08-20 재촬영 직후 = 지도를 못 건질 뻔한 자리). 전문 = docs/PITFALLS.md §7.
+  # ⚠ 경로는 절대경로여야 하고(`~` 안 먹는다) 확장자는 붙이지 않는다.
+  ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+      "{filename: '/home/<user>/Desktop/maps_XXXX/corridor_XXXX'}"
 
 [real_bringup 과 무엇이 다른가]
   · slam_toolbox 를 **mapping** 모드로 띄운다 (빈 지도에서 그려 나간다).
