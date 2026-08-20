@@ -270,6 +270,14 @@ local_costmap:
           topic: /scan
           max_obstacle_height: 2.0
           data_type: "LaserScan"
+          # ★ [08-20 실차] 둘 다 **명시**한다. yaml 에 없으면 nav2 기본값이 쓰이는데
+          #   그 기본이 `clearing: false` 다 — 실차에서 `ros2 param get` 으로 확인했다.
+          #   clearing 이 꺼져 있으면 라이다에 한 번 잡힌 것이 costmap 에서 **영원히
+          #   안 지워진다.** 사람이 지나가면 그 자리에 유령 벽이 남고, 시연처럼 사람이
+          #   등장하는 시나리오에서는 복도가 유령으로 막혀 로봇이 갇힌다.
+          #   🔴 raytrace_max_range >= obstacle_max_range 여야 지우기가 찍기를 덮는다.
+          marking: true
+          clearing: true
           # RPLIDAR C1 데이터시트 측정거리 12 m — 시뮬의 16 m 는 가상 라이다 값이라
           # 그대로 쓰면 "있지도 않은 먼 관측"을 전제하게 된다.
           # TODO: R3 확인 — bag 의 scan.range_max 실측값으로 맞춘다.
@@ -311,6 +319,11 @@ global_costmap:
         scan:
           topic: /scan
           data_type: "LaserScan"
+          # ★ [08-20 실차] 위 local_costmap 과 같은 이유로 명시한다 (예약 50-4).
+          #   전역도 같이 켜야 한다 — 전역만 유령이 남으면 계획이 멀쩡한 통로를
+          #   막힌 것으로 보고 우회하거나 실패한다.
+          marking: true
+          clearing: true
           raytrace_max_range: 12.0    # TODO: R3 확인 (위와 동일 근거)
           obstacle_max_range: 11.0
       inflation_layer:
