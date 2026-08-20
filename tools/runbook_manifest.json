@@ -1,0 +1,40 @@
+{
+  "_why": "커밋이 완료 근거로 인용하는 저장소 밖 런북의 지문·필수 관문. 본문은 넣지 않는다 — 이 저장소는 공개다(AGENTS.md §5). 대조 = tools/runbook_check.py, 백업 = 비공개 tunnel-evac-docs.",
+  "_added": "2026-08-21 (Codex 검토 §82.10)",
+  "runbooks": [
+    {
+      "path": "Desktop/0821_명령묶음.md",
+      "role": "08-21 오전 실차 측정 (배포·M1~M4)",
+      "sha256": "54e11c7ad10ebaff6cd95dcac366fc3ab70b6afc2e0116832eb3b0f7e3f43352",
+      "bytes": 13084,
+      "required_gates": [
+        "colcon build --symlink-install",
+        "/drive/diag",
+        "z: 2.0",
+        "--segments",
+        "대조군 visible run == 0",
+        "scp -r hanhan@jetson.local"
+      ]
+    },
+    {
+      "path": "Desktop/0822_촬영_명령묶음.md",
+      "role": "08-22~23 촬영 테이크 절차",
+      "sha256": "7e9e4bba5e27bb4a8668fc3d7463eebe09f8c5c46399956f8dd1d13001dcde98",
+      "bytes": 7733,
+      "required_gates": [
+        "/adapter_cmd std_msgs/msg/String \"{data: rearm}\"",
+        "어댑터 재무장",
+        "yaw 관문",
+        "record_screen.sh",
+        "무장 확인 (z: 2.0)"
+      ]
+    },
+    {
+      "path": "Desktop/0822_촬영_샷리스트.md",
+      "role": "촬영 샷 목록",
+      "sha256": "7ed5fab50efdb883bff1ac05285ef687c73faa7251c96c6b9ff1c4d8c19c3f4f",
+      "bytes": 6406,
+      "required_gates": []
+    }
+  ]
+}

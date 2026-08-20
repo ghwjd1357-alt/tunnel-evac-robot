@@ -962,10 +962,6 @@ class MissionNode(Node):
                     f'알람 거부: 복도에서 {d:.1f}m 떨어진 좌표 (허용 {maxd}m) — '
                     f'지도 밖 오클릭 의심. 관제에서 좌표 확인 후 재발사 요망')
                 return
-        self.fire = {
-            'pos': (fx, fy),
-            'kind': 'fire',             # 자리 예약
-        }
         # ⓐ 집결지 계산 (07-06 → 07-19 그래프판 → S1-2 정책 확정):
         #   그래프 선언 시   = 그래프 계산, 실패하면 직선 '건너뛰고' yaml 고정값
         #   그래프 미선언 시 = 직선 수식, 실패하면 yaml 고정값
@@ -976,15 +972,53 @@ class MissionNode(Node):
         esc = self.wp['escape']
         gd = float(self.wp.get('gather_dist', 8.0))
         if graph is not None:
-            self.gather_wp = compute_gather_point_graph(
+            gather = compute_gather_point_graph(
                 fx, fy, float(esc['x']), float(esc['y']), gd, graph)
-            if self.gather_wp is None:
+            if gather is None:
                 self.get_logger().warn(
                     '그래프 집결지 계산 불가(화재≈탈출구 또는 동일 투영점) — '
                     '직선 생략, yaml 검증 고정 집결지 사용')
         else:
-            self.gather_wp = compute_gather_point(
+            gather = compute_gather_point(
                 fx, fy, float(esc['x']), float(esc['y']), gd)
+
+        # ★ S1-3 집결지 안전거리 불변조건 (08-21 Codex §82.7 재현 반영 — 동결 예외 아홉 번째)
+        #   [무엇이 틀렸었나] 설정 부등식 `min_fire_dist < gather_dist` 만 검사하고
+        #   **계산 결과**는 검사하지 않았다. 경로가 gather_dist 보다 짧으면
+        #   compute_gather_point_graph 가 탈출구로 클램프하는데, 그러면 집결지가
+        #   화재 코앞이 된다. 재현(08-21): H yaml · fire(1.0,-10.65) → 알람게이트 통과
+        #   (투영거리 0.00) → 집결지 (0.50,-10.65) = 화재에서 **0.50m**. 선언한
+        #   min_fire_dist 는 1.5m 였다. fire(0.6,…) 이면 0.10m 까지 좁혀진다.
+        #
+        #   [왜 여기서 막나] SEARCH_BACK 목표만 나중에 클램프해도 **이미 수행한
+        #   APPROACH 는 되돌릴 수 없다.** 그래서 상태를 바꾸기 전에 거부한다
+        #   (S1-1 과 같은 규율 — 검증 통과 전엔 아무것도 안 바꾼다).
+        #
+        #   [정책] V1 에는 대체 탈출구가 없다. 안전한 집결지를 못 만들면
+        #   **자동 출동하지 않고** 관제 판단으로 넘긴다. 조용히 가까이 가는 것보다
+        #   안 가고 사람이 아는 편이 낫다.
+        #
+        #   ⚠ min_fire_dist 미선언이면 이 불변조건을 요구하지 않은 설정이므로 건너뛴다
+        #     (기존 yaml · 기존 테스트 하네스가 그 경우다 — 거동 불변).
+        sb = self.wp.get('search_back') or {}
+        min_fd = sb.get('min_fire_dist')
+        if min_fd is not None:
+            eff = gather if gather is not None else self.wp.get('gather')
+            if eff is not None:
+                d_fire = math.hypot(float(eff['x']) - fx, float(eff['y']) - fy)
+                if d_fire < float(min_fd):
+                    self.get_logger().warn(
+                        f'알람 거부: 계산된 집결지 ({float(eff["x"]):.2f},{float(eff["y"]):.2f}) 가 '
+                        f'화재에서 {d_fire:.2f}m — 최소 안전거리 {float(min_fd):.2f}m 미만. '
+                        f'탈출구 근처 화재라 경로가 짧아 집결지가 화재로 끌려왔다. '
+                        f'자동 출동하지 않는다 — 관제에서 대피 경로를 판단할 것')
+                    return
+
+        self.fire = {
+            'pos': (fx, fy),
+            'kind': 'fire',             # 자리 예약
+        }
+        self.gather_wp = gather
         if self.gather_wp is not None:
             self.get_logger().info(
                 f'집결지 계산: 화재({fx:.1f},{fy:.1f}) → '

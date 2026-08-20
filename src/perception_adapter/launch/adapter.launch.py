@@ -22,7 +22,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -64,7 +64,14 @@ def generate_launch_description():
             '--x', LaunchConfiguration('cam_x'),
             '--y', LaunchConfiguration('cam_y'),
             '--z', LaunchConfiguration('cam_z'),
-            '--roll', '-1.5707963', '--pitch', '0', '--yaw', '-1.5707963',
+            # 🔴 08-21 §82.3 — 구판은 여기 yaw 를 상수로 박아서 `cam_yaw` 가
+            #   optical=true(기본값)에서 **아무 효과가 없었다.** 운용자가 값을
+            #   넘겨도 좌표가 안 변한다 — 조용한 무시가 가장 나쁜 종류다.
+            #   합성: Rz(θ)·Rz(-π/2)·Rx(-π/2) = Rz(θ-π/2)·Rx(-π/2)
+            #   → roll 은 그대로 -π/2, yaw 만 θ-π/2 가 된다.
+            '--roll', '-1.5707963', '--pitch', '0',
+            '--yaw', PythonExpression(
+                ['str(float("', LaunchConfiguration('cam_yaw'), '") - 1.5707963)']),
             '--frame-id', LaunchConfiguration('parent_frame'),
             '--child-frame-id', LaunchConfiguration('camera_frame'),
         ],

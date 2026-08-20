@@ -157,6 +157,13 @@ GPS 불가 터널에서 재난 시: 위치 파악 → 출동 → 대피자 집�
 - **커밋 = push 한 세트.** 원격 `https://github.com/ghwjd1357-alt/tunnel-evac-robot`
   (🔴 **08-19 확인 = 공개**. 구 표기 "private" 정정 — push 하면 전 세계가 읽는다.
   전기계통·펌웨어 소스도 공개 상태이므로 비밀번호·개인정보를 커밋에 섞지 않는다).
+- **Desktop 문서 백업** (08-21 신설) — `~/Desktop` 은 별도 저장소이고 원격은
+  `https://github.com/ghwjd1357-alt/tunnel-evac-docs` **(비공개)**. `.gitignore` 화이트리스트로
+  `*.md` 만 올라간다(증거 미디어 390MB 는 제외 — 증거는 `~/robot_evidence` + USB 2차 사본).
+  ⚠ **두 저장소는 공개 여부가 다르다.** 정본은 공개, 문서 백업은 비공개다.
+  회신 원문·현황을 정본 저장소에 옮기면 공개된다 — 옮기기 전에 이 줄을 다시 읽는다.
+  🔴 08-12 → 08-21 사이 9일간 한 번도 커밋되지 않아 54건이 백업 밖에 있었다.
+  **저장소가 있다는 것과 백업되고 있다는 것은 다르다**(`PITFALLS §16` 과 같은 종류).
 - 빌드는 항상 `colcon build --symlink-install` (수동 실행).
 - **`make_map.sh` 실런 금지** — 지도 자산 변경은 사용자 명시 승인 + 정기 지도 제작 때만. E2E 스크립트는 전용 시뮬 PC 전용(Jetson 실행 금지).
 - 같은 branch/worktree 를 두 AI 가 동시 수정 금지. **Gazebo E2E 는 어떤 worktree 에서도 동시 실행 금지** (전역 프로세스 cleanup 충돌).

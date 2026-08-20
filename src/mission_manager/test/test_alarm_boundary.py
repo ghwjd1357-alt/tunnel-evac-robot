@@ -155,3 +155,98 @@ def test_alarm_ignored_outside_patrol():
     node.on_alarm(fake_alarm(14.0, 0.0))
     assert node.state == State.GUIDE
     assert node.fire is None
+
+
+# ============================================================
+# S1-3: 계산된 집결지의 안전거리 불변조건 (08-21, Codex §82.7 재현)
+# ------------------------------------------------------------
+# [무엇을 잡나] 설정 부등식 min_fire_dist < gather_dist 만 보고 **계산 결과**를
+#   안 봤다. 경로가 gather_dist 보다 짧으면 집결지가 탈출구로 클램프되는데,
+#   탈출구 근처 화재에서는 그 탈출구가 곧 화재 코앞이다.
+#   재현: H 좌표 · fire(1.0,-10.65) → 집결지 (0.50,-10.65) = 화재에서 0.50m.
+#   선언한 min_fire_dist 는 1.5m 였고, 알람게이트(투영거리 0.00)는 통과했다.
+# [규율] S1-1 과 같다 — 거부는 상태를 아무것도 바꾸지 않는다.
+# ============================================================
+
+def h_node(min_fire_dist=1.5):
+    """실제 촬영 좌표(H자)를 쓰는 껍데기 — 아래 복도 서쪽이 탈출구."""
+    node = bare_node(with_graph=False)
+    node.wp = {
+        'escape': {'x': 0.50, 'y': -10.65},
+        'gather': {'x': 6.0, 'y': -10.65, 'yaw': 3.14},
+        'gather_dist': 2.0,
+        'alarm_max_projection_dist': 3.0,
+        'corridor_graph': {
+            'nodes': {'up_west': {'x': 0.50, 'y': -0.08},
+                      'up_junc': {'x': 8.95, 'y': -0.08},
+                      'up_east': {'x': 12.99, 'y': -0.10},
+                      'low_junc': {'x': 8.95, 'y': -10.65},
+                      'low_east': {'x': 12.45, 'y': -10.97},
+                      'low_west': {'x': 0.50, 'y': -10.65}},
+            'edges': [['up_west', 'up_junc'], ['up_junc', 'up_east'],
+                      ['up_junc', 'low_junc'], ['low_junc', 'low_east'],
+                      ['low_junc', 'low_west']],
+        },
+    }
+    if min_fire_dist is not None:
+        node.wp['search_back'] = {'min_fire_dist': min_fire_dist}
+    return node
+
+
+def test_s13_fire_near_escape_rejected_not_approached():
+    """🔴 재현본 — 탈출구 0.5m 옆 화재. 수정 전엔 집결지 0.50m 로 출동했다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert_rejected(node, '최소 안전거리')
+    assert node.gather_wp is None
+
+
+def test_s13_fire_almost_on_escape_rejected():
+    """0.10m — 경계가 아니라 완전히 안쪽."""
+    node = h_node()
+    node.on_alarm(fake_alarm(0.6, -10.65))
+    assert_rejected(node, '최소 안전거리')
+
+
+def test_s13_boundary_exactly_min_fire_dist_accepted():
+    """정확히 1.50m = 허용. 부등식은 '미만'만 거부한다 (경계 포함)."""
+    node = h_node()
+    node.on_alarm(fake_alarm(2.0, -10.65))
+    assert node.state == State.APPROACH
+    assert node.gather_wp is not None
+    d = math.hypot(node.gather_wp['x'] - 2.0, node.gather_wp['y'] + 10.65)
+    assert abs(d - 1.5) < 1e-6, d
+
+
+def test_s13_far_fire_keeps_full_gather_dist():
+    """탈출구에서 먼 화재는 gather_dist 2.0 을 그대로 채운다 — 회귀 방지."""
+    node = h_node()
+    node.on_alarm(fake_alarm(3.5, -10.65))
+    assert node.state == State.APPROACH
+    d = math.hypot(node.gather_wp['x'] - 3.5, node.gather_wp['y'] + 10.65)
+    assert abs(d - 2.0) < 1e-6, d
+
+
+def test_s13_current_shot_script_fire_still_accepted():
+    """🔵 대본 화재 (12.5,-0.1) 은 영향받지 않는다 — 집결지 (10.5,-0.08) 부근."""
+    node = h_node()
+    node.on_alarm(fake_alarm(12.5, -0.1))
+    assert node.state == State.APPROACH
+    assert abs(node.gather_wp['x'] - 10.5) < 0.05, node.gather_wp
+    assert abs(node.gather_wp['y'] + 0.08) < 0.05, node.gather_wp
+
+
+def test_s13_fire_equals_escape_rejected_via_fixed_gather():
+    """화재=탈출구 → 그래프 계산 None → yaml 고정 집결지로 안전거리를 본다."""
+    node = h_node()
+    node.wp['gather'] = {'x': 0.50, 'y': -10.65, 'yaw': 3.14}   # 고정값도 화재 위
+    node.on_alarm(fake_alarm(0.50, -10.65))
+    assert_rejected(node, '최소 안전거리')
+
+
+def test_s13_no_min_fire_dist_declared_keeps_old_behaviour():
+    """⚠ 미선언이면 불변조건을 요구하지 않은 설정 — 거동 불변(기존 yaml 보호)."""
+    node = h_node(min_fire_dist=None)
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert node.state == State.APPROACH
+    assert abs(node.gather_wp['x'] - 0.50) < 1e-6

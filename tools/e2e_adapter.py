@@ -37,25 +37,50 @@ from perception_adapter.fake_detections import FakeDetections
 #   → 카메라 앞 2 m 화재 = map (12, 0). 이 값이 판정 기준이다.
 CAM_X, CAM_Z = 10.0, 0.3
 
+# REP-103 optical → base 회전 rpy(-π/2, 0, -π/2) 의 사원수 (x, y, z, w).
+#   launch/adapter.launch.py 의 static_transform_publisher 인자와 같은 회전이다.
+#   검산은 tools/test_optical_frame.py 가 한다 (합성 좌표 3방향).
+OPTICAL_Q = (-0.5, 0.5, -0.5, 0.5)
+
 
 class TfPub(Node):
-    """map → camera_color_optical_frame 정적 TF.
+    """map → camera_color_optical_frame 정적 TF + map → base_link.
 
     실차에선 SLAM(map→odom) + EKF(odom→base_footprint) + URDF(base→camera) 가
     이 사슬을 만든다. 여기선 사슬 전체를 한 변환으로 줄여 **어댑터만** 시험한다.
+
+    🔴 08-21 §82.3 — 구판은 회전을 **단위 사원수**로 뒀다. 그래서 좌표 13/13 이
+    통과해도 optical 축(x=오른쪽·y=아래·z=앞)을 한 번도 시험하지 않았다.
+    이제 REP-103 optical 회전(rpy = -π/2, 0, -π/2)을 실제로 건다:
+
+        optical (x_r, y_d, z_f)  →  map ( z_f, -x_r, -y_d ) + 카메라 위치
+
+    그리고 `base_link` 도 트리에 올린다 — **존재하지만 계약이 아닌** frame 이
+    거부되는지 보려면 변환 가능해야 하기 때문이다(없으면 TF 실패와 구별 불가).
     """
 
     def __init__(self):
         super().__init__('e2e_tf')
         self._b = StaticTransformBroadcaster(self)
+        now = self.get_clock().now().to_msg()
+
         t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.stamp = now
         t.header.frame_id = 'map'
         t.child_frame_id = 'camera_color_optical_frame'
         t.transform.translation.x = CAM_X
         t.transform.translation.z = CAM_Z
-        t.transform.rotation.w = 1.0
-        self._b.sendTransform(t)
+        (t.transform.rotation.x, t.transform.rotation.y,
+         t.transform.rotation.z, t.transform.rotation.w) = OPTICAL_Q
+
+        t2 = TransformStamped()
+        t2.header.stamp = now
+        t2.header.frame_id = 'map'
+        t2.child_frame_id = 'base_link'
+        t2.transform.translation.x = CAM_X
+        t2.transform.rotation.w = 1.0
+
+        self._b.sendTransform([t, t2])
 
 
 class AlarmSpy(Node):
@@ -121,6 +146,17 @@ CASES = [
     ('smoke',       False, [], None),
     ('fire',        True,  [Parameter('use_fixed_range', value=True),
                             Parameter('fixed_range', value=2.0)], (12.0, 0.0)),
+    # ── 08-21 §82.3 — optical 축을 실제로 시험한다 ──────────────────────
+    ('fire_left',   True,  [], (12.0, 1.0)),      # optical x=-1 → map +y
+    ('fire_right',  True,  [], (12.0, -1.0)),     # optical x=+1 → map -y
+    # 🔴 TF 에 **있는** 엉뚱한 frame — 구판은 조용히 변환해 (12,0) 을 냈다
+    ('resolvable_frame', False, [], None),
+    # 🔵 검사를 끄면(비권장) 같은 입력이 통과한다 — 잠금이 실제로 일하는지 대조.
+    #   🔴 그리고 **답이 틀린다**: base_link 는 회전이 없으므로 optical 규약의
+    #   z=2(앞) 가 여기서는 '위쪽 2m' 로 읽혀 map (10,0) 이 나온다. 화재는 2m
+    #   앞인데 좌표는 로봇 발밑이다. 이것이 frame 잠금이 필요한 이유 그 자체다.
+    ('resolvable_frame', True,
+     [Parameter('expected_source_frame', value='')], (10.0, 0.0)),
 ]
 
 
@@ -131,7 +167,13 @@ def main():
         for i, (scen, expect, ov, want_xy) in enumerate(CASES):
             got = run_case(scen, ov)
             fired = got is not None
-            tag = scen + (' [격하]' if ov else '')
+            names = [q.name for q in ov]
+            if 'use_fixed_range' in names:
+                tag = scen + ' [격하]'
+            elif 'expected_source_frame' in names:
+                tag = scen + ' [잠금끔]'
+            else:
+                tag = scen
             if fired != expect:
                 print(f'  XX  {tag:16s} 기대={expect} 실제={fired}  <-- 불일치')
                 bad += 1

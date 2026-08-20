@@ -174,7 +174,14 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "docs/AI_CONTEXT.md", "tools/ai_context.py", "tools/test_ai_context.py",
         "tools/ai_known_p0_p1.json", "tools/local_token_count.js",
     )),
-    ("mission", ("src/mission_manager/**",)),
+    ("mission", (
+        "src/mission_manager/**",
+        # 08-21 검토 §82.6: 판별 도구는 `FollowerMonitor` 계약을 그대로 재생한다 —
+        # 파일은 `tools/` 지만 계약은 미션이 소유하므로 같은 프로필이어야 한다.
+        "tools/cluster_width_report.py", "tools/test_cluster_report.py",
+        # 08-21 §82.8: 좌표 yaml 을 쓰는 도구. 불변조건 소유자가 미션이다.
+        "tools/apply_measurements.py",
+    )),
     ("bringup", (
         "src/tunnel_bringup/**", "docs/JETSON_SETUP.md", "docs/D1_FIRST_STEP.md",
         "tools/d0_check.sh", "tools/bag_gap_report.py", "tools/todo_d0_scan.py",
@@ -192,6 +199,8 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 08-13 밤: 여러 지면 주행을 한 표로 세운다 — 짝 도구(drive_ground_report)와
         # 같은 프로필이어야 "한 시행은 상수를 못 정한다"는 규율이 문맥에서 안 끊긴다.
         "tools/ground_run_table.py",
+        # 08-21 검토 §82.2: 게이트 사슬 구조 검사. 대상이 real_bringup 런치다.
+        "tools/test_bringup_camera_gate.py",
     )),
     ("nav2", (
         "**/*nav2*.yaml", "**/*.urdf", "**/*.xacro",
@@ -211,10 +220,16 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("judgment", (
         "tools/gate_baseline_scan.py", "tools/handoff_single_check.sh",
         "tools/doc_check.sh",
+        # 08-21 검토 §82.10: 저장소 밖 런북의 지문·관문 대조. 증거 경계 판정이다.
+        "tools/runbook_check.py", "tools/test_runbook_check.py",
+        "tools/runbook_manifest.json",
     )),
     ("perception", (
         "src/tunnel_interfaces/**", "**/*detection*", "**/*perception*",
         "console/**",
+        # 08-21 검토 §82.3: optical 회전 검산. 이름에 perception 이 없어 라우팅
+        # 밖이었다 — 계약(REP-103 축)은 인지 좌표가 소유한다.
+        "tools/test_optical_frame.py", "tools/e2e_adapter.py",
     )),
     # 검토 §47.1: 굽기 전 오염 판정기는 `firmware/` 밖(`tools/`)에 있지만 계약은
     # `FIRMWARE_REBUILD §4` 가 소유한다 — 기대 증감을 이 둘이 따로 들면 곧 갈라진다.

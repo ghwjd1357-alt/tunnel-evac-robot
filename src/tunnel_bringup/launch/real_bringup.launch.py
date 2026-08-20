@@ -57,7 +57,7 @@ from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
                             IncludeLaunchDescription, LogInfo,
                             OpaqueFunction, Shutdown)
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -235,13 +235,19 @@ def launch_setup(context, *_):
     # ⚠ 실패하면 런치 전체를 내린다(when_ready 의 fail-closed). 카메라를 켜겠다고
     #   선언했는데 depth 가 안 오는 상태는 **반쪽 인지**라, 그대로 촬영하면
     #   "찍었는데 아무것도 안 나온" 테이크가 된다.
+    # 🔴 08-21 §82.2 재현 반영 (동결 예외 아홉 번째) — 게이트는 **직렬**이어야 한다
+    #   구판은 `camera_gate` 를 `when_ready(gate_sensors, [slam,...])` 와 **형제**로
+    #   뒀다. 형제는 동시에 진행한다. 그래서 core 센서가 먼저 준비되면
+    #   slam→Nav2→미션이 depth 보다 **먼저** 떴고, depth 가 끝내 없으면 90초 뒤에야
+    #   전체가 내려갔다. 종국 fail-closed 는 돌지만 그 90초 동안 반쪽 인지 상태로
+    #   미션이 goal 을 받을 수 있었다. 그리고 런북은 "게이트에서 멈춘다" 라고
+    #   적혀 있어 촬영자가 준비됐다고 오판한다 — 문장으로는 못 막는 종류다.
+    #
+    #   그래서 camera:=true 면 사슬을 하나로 잇는다:
+    #       gate_sensors ─▶ gate_camera ─▶ slam ─▶ gate_localized ─▶ Nav2 ─▶ 미션
+    #   camera:=false 면 기존 사슬 그대로다 (gate_camera 자체를 안 만든다).
     gate_camera = make_gate('camera', timeout=90.0,
                             topics=['/camera/depth/image_raw'])
-    camera_gate = GroupAction(
-        actions=[gate_camera,
-                 when_ready(gate_camera, [], '카메라 depth 스트림 확인')],
-        condition=IfCondition(LaunchConfiguration('camera')),
-    )
 
     # ══════════════════════════════════════════════════════════════════
     # 2단계 — 위치추정 (저장 지도)
@@ -324,8 +330,23 @@ def launch_setup(context, *_):
         odom_guard,
         ekf,
         gate_sensors,
-        camera_gate,
-        when_ready(gate_sensors, [slam, gate_localized], '위치추정(slam_toolbox)'),
+        # camera:=true — depth 확인이 **선행 조건**이다 (§82.2)
+        GroupAction(
+            actions=[
+                when_ready(gate_sensors, [gate_camera], '카메라 depth 스트림 확인'),
+                when_ready(gate_camera, [slam, gate_localized],
+                           '위치추정(slam_toolbox)'),
+            ],
+            condition=IfCondition(LaunchConfiguration('camera')),
+        ),
+        # camera:=false — 08-20 까지와 **같은 순서**다 (거동 불변)
+        GroupAction(
+            actions=[
+                when_ready(gate_sensors, [slam, gate_localized],
+                           '위치추정(slam_toolbox)'),
+            ],
+            condition=UnlessCondition(LaunchConfiguration('camera')),
+        ),
         when_ready(gate_localized, [navigation, gate_nav2], 'Nav2'),
         when_ready(gate_nav2, after_nav2, what),
     ]

@@ -798,5 +798,45 @@
     "id": "0813-d0-fw-79-fix-review-zero-new-p0-80",
     "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
     "anchor": "§80 판정은 P0 0이며 1.6.3 계측 조건부 승인과 FF·게인 착수 개방이다"
+  },
+  {
+    "id": "0821-camera-gate-parallel-not-a-barrier-82",
+    "path": "src/tunnel_bringup/launch/real_bringup.launch.py",
+    "anchor": "camera:=true 의 depth 게이트는 센서 사슬의 선행 barrier 여야 하고 형제로 두면 병렬이다"
+  },
+  {
+    "id": "0821-adapter-tf-uses-latest-not-capture-stamp-82",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "TF 는 촬영시각으로 조회한다 — 최신 TF 는 회전 중 좌표를 옮긴다"
+  },
+  {
+    "id": "0821-adapter-source-frame-not-locked-82",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "기대 source frame 을 잠그지 않으면 TF 트리의 아무 frame 이나 조용히 변환된다"
+  },
+  {
+    "id": "0821-confirm-tracker-counts-arrival-not-frames-82",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "반복 관측은 촬영시각과 공간 결합으로 세야 하고 수신시각만으로는 재전송을 못 가른다"
+  },
+  {
+    "id": "0821-adapter-numeric-params-unvalidated-82",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "수치 파라미터는 기동 시 유한·부호·범위를 검증하고 실패하면 크게 종료한다"
+  },
+  {
+    "id": "0821-adapter-not-rearmed-between-takes-82",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "발사 이력은 테이크마다 명시적으로 재무장해야 하고 미션 reset 은 어댑터를 안 건드린다"
+  },
+  {
+    "id": "0821-cluster-metric-loses-scan-continuity-82",
+    "path": "tools/cluster_width_report.py",
+    "anchor": "추종 판정은 스캔별 연속성이며 평균 지표는 몰림과 연속을 구별하지 못한다"
+  },
+  {
+    "id": "0821-gather-safety-distance-not-enforced-82",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "집결지 안전거리는 설정 부등식이 아니라 계산 결과에 적용해야 한다"
   }
 ]

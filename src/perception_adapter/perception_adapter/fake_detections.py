@@ -26,7 +26,6 @@
     ros2 param set /fake_detections scenario empty
 """
 
-import math
 
 import rclpy
 from rclpy.node import Node
@@ -49,6 +48,10 @@ SCENARIOS = (
     'no_frame',      # frame_id 빈 문자열. 안 쏴야 한다
     'wrong_frame',   # TF 에 없는 frame. 변환 실패로 안 쏴야 한다
     'smoke',         # fire 가 아닌 클래스만. 안 쏴야 한다
+    # ── 08-21 §82.3 추가: optical 축과 frame 잠금을 실제로 시험한다 ──
+    'fire_left',        # optical x=-1 → map 에서 왼쪽(+y) 으로 나와야 한다
+    'fire_right',       # optical x=+1 → map 에서 오른쪽(-y)
+    'resolvable_frame',  # TF 에 **있는** 엉뚱한 frame(base_link). 거부해야 한다
 )
 
 
@@ -106,35 +109,45 @@ class FakeDetections(Node):
         msg.header.frame_id = frame
 
         if s == 'fire':
-            msg.detections = [mk('fire', 0.82, 2.0, 0.0, 0.3)]
+            msg.detections = [mk('fire', 0.82, 0.0, 0.0, 2.0)]
         elif s == 'fire_far':
-            msg.detections = [mk('fire', 0.82, 20.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.82, 0.0, 0.0, 20.0)]
         elif s == 'multi':
-            msg.detections = [mk('person_ok', 0.91, 1.2, 0.0, 0.0),
-                              mk('fire', 0.55, 2.4, 0.1, 0.2),
-                              mk('fire', 0.77, 2.6, 0.1, 0.2)]
+            msg.detections = [mk('person_ok', 0.91, 0.0, 0.0, 1.2),
+                              mk('fire', 0.55, -0.1, 0.0, 2.4),
+                              mk('fire', 0.77, -0.1, 0.0, 2.6)]
         elif s == 'empty':
             msg.detections = []
         elif s == 'low_conf':
-            msg.detections = [mk('fire', 0.10, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.10, 0.0, 0.0, 2.0)]
         elif s == 'nan':
-            msg.detections = [mk('fire', 0.90, float('nan'), 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.90, float('nan'), 0.0, 2.0)]
         elif s == 'bad_class':
-            msg.detections = [mk('human', 0.90, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('human', 0.90, 0.0, 0.0, 2.0)]
         elif s == 'stale':
-            msg.detections = [mk('fire', 0.90, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
             msg.header.stamp.sec = max(0, msg.header.stamp.sec - 5)
         elif s == 'future':
-            msg.detections = [mk('fire', 0.90, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
             msg.header.stamp.sec = msg.header.stamp.sec + 5
         elif s == 'no_frame':
             msg.header.frame_id = ''
-            msg.detections = [mk('fire', 0.90, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
         elif s == 'wrong_frame':
             msg.header.frame_id = 'frame_that_does_not_exist'
-            msg.detections = [mk('fire', 0.90, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
+        elif s == 'fire_left':
+            # optical x=오른쪽 이므로 왼쪽은 음수. map 에서는 +y 로 나와야 한다.
+            msg.detections = [mk('fire', 0.90, -1.0, 0.0, 2.0)]
+        elif s == 'fire_right':
+            msg.detections = [mk('fire', 0.90, 1.0, 0.0, 2.0)]
+        elif s == 'resolvable_frame':
+            # 🔴 §82.3 — TF 트리에 **존재하는** 엉뚱한 frame. 구판은 이걸 조용히
+            #   map 으로 변환했다. 이제 expected_source_frame 이 거부해야 한다.
+            msg.header.frame_id = 'base_link'
+            msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
         elif s == 'smoke':
-            msg.detections = [mk('smoke', 0.95, 2.0, 0.0, 0.0)]
+            msg.detections = [mk('smoke', 0.95, 0.0, 0.0, 2.0)]
         else:
             self.get_logger().error(
                 f'알 수 없는 scenario "{s}". 가능한 값 = {SCENARIOS}',

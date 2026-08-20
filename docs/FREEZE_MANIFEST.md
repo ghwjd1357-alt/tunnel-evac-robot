@@ -1627,3 +1627,55 @@ camera:=true          →  /camera/depth/image_raw 를 요구. 없으면 런치 
   안 뜨면 `camera:=false` 로 되돌린다.
 - ESP32 쪽 udev(`tools/udev/99-thermal-esp32.rules`)는 **역할 B가 설치해야** 한다.
   우리 규칙만으로는 반쪽이다.
+
+## 10.30 🔴 **아홉 번째 예외** — §82 검토 반영: 게이트 직렬화 + 집결지 안전 불변조건 (2026-08-21)
+
+| | |
+|---|---|
+| 승인 | 사용자, 2026-08-21 새벽 (*"동결 예외 아홉번째 열어서 제대로 고치자"*) |
+| 승인 범위 | `src/tunnel_bringup/launch/real_bringup.launch.py` · `src/mission_manager/mission_manager/mission_node.py` — **아래 2건에 한정** |
+| 변경 안 함 (경계) | `tunnel_bringup/tunnel_bringup/**`(노드 코드) · `config/**` · `urdf/**` · `firmware/**` · `mission_node` 의 나머지 상태 전이 전량 · `follower_monitor.py` |
+| 사유 | 독립검토 §82 (Codex GPT-5) — P0 0 · P1 7 · P2 2. 그중 2건이 동결 안쪽이다 |
+| 회귀 | `pytest src/mission_manager` **191**(신규 7) · `pytest tools` **251**(신규 29) · `pytest perception_adapter` **38** · `e2e_adapter` **17/17** · `doc_check` |
+
+### ① 카메라 depth 게이트를 센서 사슬에 직렬로 잇는다 (§82.2)
+
+여덟 번째 예외(§10.29)가 만든 배선을 **아홉 번째가 고친다.** 게이트를 형제로 두면
+동시에 진행하므로, depth 를 요구한다고 선언해 놓고도 그 앞에 아무 문이 없었다.
+
+```
+구판:  gate_sensors ─▶ slam ─▶ Nav2 ─▶ 미션        (gate_camera 는 옆에서 따로 90초)
+수정:  gate_sensors ─▶ gate_camera ─▶ slam ─▶ Nav2 ─▶ 미션
+       camera:=false 면 gate_camera 자체를 안 만든다 — 08-20 까지와 같은 순서
+```
+
+⚠ **종국 fail-closed 는 구판에서도 돌았다.** 문제는 그때까지의 90초다.
+🔵 `tools/test_bringup_camera_gate.py` 5건이 이 사슬을 **구조로** 고정한다 —
+노드를 하나도 안 띄우고 런치 서술의 이벤트 핸들러를 따라가 순서를 그린다.
+`camera:=false` 사슬이 종전과 같은지, 하류(localized→Nav2)가 두 모드에서 같은지도
+같이 본다(범위 최소 증명).
+
+### ② `on_alarm` 에 집결지 안전거리 불변조건 (S1-3) (§82.7)
+
+설정 부등식만 보고 계산 결과를 안 봤다. 재현·정책·경계는 `MASTER_PLAN §8` 마지막 줄
+(§82.7 행)과 `mission_node.on_alarm` 주석이 소유한다. 여기서는 **동결 관점**만 적는다:
+
+- 거부는 **상태를 아무것도 바꾸지 않는다** — 기존 S1-1 규율을 그대로 따랐다.
+  새 실패 모드를 만들지 않는다.
+- `search_back.min_fire_dist` **미선언이면 검사를 건너뛴다.** 그 설정은 불변조건을
+  요구한 적이 없으므로 거동이 불변이다 — 기존 yaml·기존 테스트 하네스가 그 경우다.
+  실측: 184건 전량이 손대기 전과 같이 통과했다.
+- 새 거부 경로는 `waypoints_real_H.yaml` 에서 **탈출구 주변 약 3.6 m** 다
+  (`apply_measurements.py` 가 적용 후 인쇄한다). 대본 화재 (12.5, −0.1) 은 집결지
+  2.00 m 로 영향 없다.
+
+### 🔴 이 예외가 덮지 않는 것
+
+- **예약 58**(`SEARCH_BACK` yaw 하드코딩)은 **여전히 촬영 후**다. 검토 §82.9 는
+  촬영 대본 우회를 *조건부 수용* 하면서 전제(진입 yaw ≈ π)를 명시하라고 했고,
+  그 관문은 코드가 아니라 `0822_촬영_명령묶음.md` 의 테이크 절차 ⑥ 이 든다.
+- **예약 55**(keepout 배선)도 촬영 후다. 마스크만 있고 Nav2 필터가 없다.
+- ①은 **실차에서 `camera:=true` 로 검증된 적이 없다.** 구조 검사와 `camera:=false`
+  회귀만 있다. 08-21 오후가 최초 실행이다.
+- ②는 **실차 알람으로 검증된 적이 없다.** 단위 재현 7건뿐이다.
+- 이 묶음은 **재검토 전**이다. §82 를 닫는 보완이므로 §83 이 이 diff 를 본다.

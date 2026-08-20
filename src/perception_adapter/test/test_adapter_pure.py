@@ -12,6 +12,7 @@ import pytest
 
 from perception_adapter.adapter_node import (
     VALID_CLASSES, ConfirmTracker, clamp_range, fix_range, is_finite_point,
+    validate_params,
     pick_best, stamp_age_sec)
 
 
@@ -107,38 +108,132 @@ def test_stamp_age_negative_for_future_is_not_squashed():
 
 
 # ── ConfirmTracker ─────────────────────────────────────────────────────
+# 🔴 08-21 §82.4 이후 서명 = add(수신시각, 촬영시각stamp, 좌표).
+#    수신시각만 세던 구판은 같은 프레임 한 장의 재전송을 확정으로 올렸다.
+P = (2.0, 0.0, 0.0)          # 기준 좌표 — 특별한 뜻 없음
+
 
 def test_tracker_needs_n_hits():
     t = ConfirmTracker(need=3, window_sec=10.0)
-    assert t.add(1.0) is False
-    assert t.add(2.0) is False
-    assert t.add(3.0) is True
+    assert t.add(1.0, 1.0, P) is False
+    assert t.add(2.0, 2.0, P) is False
+    assert t.add(3.0, 3.0, P) is True
 
 
 def test_tracker_drops_hits_outside_window():
     t = ConfirmTracker(need=3, window_sec=2.0)
-    t.add(0.0)
-    t.add(0.5)
+    t.add(0.0, 0.0, P)
+    t.add(0.5, 0.5, P)
     # 10초 뒤 관측 하나 — 앞의 둘은 창 밖이라 버려진다
-    assert t.add(10.0) is False
+    assert t.add(10.0, 10.0, P) is False
     assert t.count(10.0) == 1
 
 
 def test_tracker_tolerates_a_dropped_frame():
     # ⚠ '연속'이 아니라 '창 안에서 N번'이라는 계약. 깜빡임이 확정을 막으면 안 된다
     t = ConfirmTracker(need=3, window_sec=3.0)
-    assert t.add(0.0) is False
+    assert t.add(0.0, 0.0, P) is False
     # 1.0 에 프레임이 빠짐
-    assert t.add(2.0) is False
-    assert t.add(2.5) is True
+    assert t.add(2.0, 2.0, P) is False
+    assert t.add(2.5, 2.5, P) is True
 
 
 def test_tracker_reset_clears():
     t = ConfirmTracker(need=2, window_sec=10.0)
-    t.add(1.0)
+    t.add(1.0, 1.0, P)
     t.reset()
     assert t.count() == 0
-    assert t.add(2.0) is False
+    assert t.add(2.0, 2.0, P) is False
+
+
+# ── §82.4 재현본: 반복 관측이 아닌 것을 반복으로 세지 않는다 ────────────
+
+def test_tracker_same_stamp_replay_never_confirms():
+    """🔴 재현 — 같은 프레임 한 장을 5번. 구판은 [F,F,F,F,True] 였다."""
+    t = ConfirmTracker(need=5, window_sec=10.0)
+    got = [t.add(x / 10.0, 7.0, P) for x in range(5)]
+    assert got == [False] * 5, got
+    assert t.count() == 1
+
+
+def test_tracker_out_of_order_stamp_rejected():
+    """역순 stamp — 지연 도착이거나 시계 어긋남. 새 근거로 세지 않는다."""
+    t = ConfirmTracker(need=2, window_sec=10.0)
+    assert t.add(1.0, 5.0, P) is False
+    assert t.add(1.1, 4.0, P) is False
+    assert t.count() == 1
+
+
+def test_tracker_nonfinite_stamp_rejected():
+    t = ConfirmTracker(need=1, window_sec=10.0)
+    assert t.add(1.0, float('nan'), P) is False
+    assert t.add(1.0, float('inf'), P) is False
+    assert t.count() == 0
+
+
+def test_tracker_spatially_separated_hits_do_not_accumulate():
+    """🔴 서로 다른 자리의 한-프레임 오탐 5개 — 한 화재가 아니다."""
+    t = ConfirmTracker(need=3, window_sec=10.0, assoc_radius=1.0)
+    pts = [(0.0, 0.0, 0.0), (5.0, 0.0, 0.0), (10.0, 0.0, 0.0),
+           (15.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
+    got = [t.add(i * 0.1, float(i), q) for i, q in enumerate(pts)]
+    assert not any(got), got
+    assert t.count() == 1          # 매번 새로 시작한다
+
+
+def test_tracker_same_place_jitter_still_confirms():
+    """🟢 진짜 화재는 몇 cm 흔들린다 — 그건 같은 대상이다."""
+    t = ConfirmTracker(need=3, window_sec=10.0, assoc_radius=1.0)
+    pts = [(2.0, 0.0, 0.0), (2.10, 0.05, 0.0), (1.95, -0.03, 0.0)]
+    got = [t.add(i * 0.1, float(i), q) for i, q in enumerate(pts)]
+    assert got[-1] is True, got
+
+
+def test_tracker_reset_clears_stamp_monotonic_guard():
+    """재무장(다음 테이크) 뒤에는 stamp 기준도 지워져야 한다 (§82.5)."""
+    t = ConfirmTracker(need=1, window_sec=10.0)
+    assert t.add(1.0, 100.0, P) is True
+    t.reset()
+    assert t.add(2.0, 50.0, P) is True      # 더 이른 stamp 도 새 시작으로 받는다
+
+
+# ── validate_params (§82.4) ────────────────────────────────────────────
+
+GOOD = {
+    'min_confidence': 0.4, 'confirm_frames': 5, 'confirm_window_sec': 3.0,
+    'max_stamp_age_sec': 1.0, 'max_range': 5.0, 'fixed_range': 2.0,
+    'refire_cooldown_sec': -1.0, 'confirm_assoc_radius_m': 1.0,
+}
+
+
+def test_params_good_set_passes():
+    assert validate_params(dict(GOOD)) == []
+
+
+def test_params_negative_cooldown_is_allowed():
+    """0 이하 = '평생 1회' 라는 뜻이라 부호를 막지 않는다."""
+    assert validate_params({**GOOD, 'refire_cooldown_sec': 0.0}) == []
+
+
+def test_params_reject_bad_values():
+    """🔴 각 파라미터의 NaN/Inf/음수/0/범위밖을 항목별로 막는다."""
+    bad = [
+        ('min_confidence', 1.5), ('min_confidence', -0.1),
+        ('min_confidence', float('nan')),
+        ('confirm_frames', 0), ('confirm_frames', -3), ('confirm_frames', 2.5),
+        ('confirm_window_sec', 0.0), ('confirm_window_sec', -1.0),
+        ('confirm_window_sec', float('inf')),
+        ('max_stamp_age_sec', 0.0), ('max_stamp_age_sec', float('nan')),
+        ('max_range', -1.0), ('max_range', 0.0), ('max_range', float('inf')),
+        ('fixed_range', -2.0), ('fixed_range', float('nan')),
+        ('refire_cooldown_sec', float('nan')),
+        ('refire_cooldown_sec', float('inf')),
+        ('confirm_assoc_radius_m', 0.0), ('confirm_assoc_radius_m', -1.0),
+        ('min_confidence', 'x'), ('max_range', None),
+    ]
+    for k, v in bad:
+        out = validate_params({**GOOD, k: v})
+        assert out and any(k in m for m in out), (k, v, out)
 
 
 # ── pick_best ──────────────────────────────────────────────────────────
@@ -184,3 +279,35 @@ def test_valid_classes_matches_contract():
     # 계약 정본 = 합의사항 §15-b · tunnel_interfaces/msg/Detection3D.msg
     assert set(VALID_CLASSES) == {
         'person_fallen', 'person_ok', 'person_unknown', 'fire', 'smoke'}
+
+
+# ── §82.4 재현본: confidence 계약 (0~1 유한값) ──────────────────────────
+
+def test_pick_best_rejects_nan_confidence():
+    """🔴 재현 — NaN 은 어떤 비교에도 False 라 `< min_conf` 를 그냥 통과했다.
+
+    구판에서 NaN 짜리가 best 로 채택됐고 violations 는 빈 목록이었다.
+    즉 계약 위반인데 **아무도 몰랐다.**"""
+    best, bad = pick_best([_D('fire', float('nan'))], 'fire', 0.40)
+    assert best is None
+    assert bad and 'confidence' in bad[0], bad
+
+
+def test_pick_best_rejects_inf_confidence():
+    best, bad = pick_best([_D('fire', float('inf'))], 'fire', 0.40)
+    assert best is None and bad
+
+
+def test_pick_best_rejects_out_of_range_confidence():
+    """계약은 0~1 이다. 1.5 는 다른 스케일을 쓰고 있다는 신호라 거부 + 신고."""
+    for v in (1.5, -0.2):
+        best, bad = pick_best([_D('fire', v)], 'fire', 0.40)
+        assert best is None and bad, v
+
+
+def test_pick_best_bad_confidence_does_not_hide_a_good_one():
+    """🟢 불량 한 건이 같은 프레임의 정상 탐지를 가리면 안 된다."""
+    best, bad = pick_best(
+        [_D('fire', float('nan')), _D('fire', 0.66)], 'fire', 0.40)
+    assert best is not None and math.isclose(best.confidence, 0.66)
+    assert bad

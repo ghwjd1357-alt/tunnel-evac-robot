@@ -127,22 +127,56 @@ class ConfirmTracker:
       진짜 화재가 깜빡임 때문에 영원히 확정 안 되는 쪽이 더 위험하다.
       (`mission_node` 가 추종 판정에서 같은 이유로 lost/visible 타이머를
        비대칭으로 둔 것과 같은 논리다.)
+
+    🔴 08-21 Codex §82.4 재현 반영 — 수신 벽시각만 세면 안 된다
+    ------------------------------------------------------------------
+    구판은 `add(수신시각)` 이었다. 재현: **같은 프레임 한 장**을 0.0~0.4 초에
+    다섯 번 넣으면 `[F,F,F,F,True]` 로 확정됐다. 서로 다른 자리의 한-프레임
+    오탐 다섯 개도 똑같이 확정됐다. 둘 다 "반복 관측" 이 아니다.
+
+    그래서 근거를 두 개 요구한다:
+      ① **촬영시각(stamp)이 새로워야 한다** — 같거나 과거면 같은 프레임이거나
+         재전송이다. 새 증거가 아니므로 세지 않는다.
+      ② **직전 관측과 공간적으로 가까워야 한다** — 멀면 다른 대상이다.
+         그때는 누적을 버리고 처음부터 센다(합치지 않는다).
     """
 
-    def __init__(self, need, window_sec):
+    def __init__(self, need, window_sec, assoc_radius=1.0):
         self.need = int(need)
         self.window_sec = float(window_sec)
-        self._hits = []          # 관측 시각 목록 (초)
+        self.assoc_radius = float(assoc_radius)
+        self._hits = []          # [(수신시각, stamp, (x,y,z) 또는 None)]
+        self._last_stamp = None
 
-    def add(self, t):
-        """관측 1건 기록 후, 확정됐으면 True."""
-        self._hits.append(float(t))
+    @staticmethod
+    def _far(a, b, r):
+        if a is None or b is None:
+            return False
+        return math.dist(a, b) > r
+
+    def add(self, t, stamp, pos=None):
+        """관측 1건 기록 후, 확정됐으면 True.
+
+        t     = 수신 벽시각 [s] (창 계산용)
+        stamp = 촬영시각 [s] (동일·역순 거부용). 유한값이 아니면 버린다.
+        pos   = 관측 좌표 (x,y,z). 좌표계는 호출부가 일관되게만 주면 된다.
+        """
+        t = float(t)
+        s = float(stamp)
+        if not math.isfinite(s):
+            return False
+        if self._last_stamp is not None and s <= self._last_stamp:
+            return False                 # 같은 프레임/재전송 — 새 근거가 아니다
+        if self._hits and self._far(pos, self._hits[-1][2], self.assoc_radius):
+            self._hits = []              # 다른 대상 — 누적을 합치지 않는다
+        self._last_stamp = s
+        self._hits.append((t, s, pos))
         self._prune(t)
         return len(self._hits) >= self.need
 
     def _prune(self, t):
         lo = t - self.window_sec
-        self._hits = [h for h in self._hits if h >= lo]
+        self._hits = [h for h in self._hits if h[0] >= lo]
 
     def count(self, t=None):
         if t is not None:
@@ -150,7 +184,52 @@ class ConfirmTracker:
         return len(self._hits)
 
     def reset(self):
+        """재무장 — 누적과 stamp 단조 기준을 함께 지운다 (82.5 다음 테이크)."""
         self._hits = []
+        self._last_stamp = None
+
+
+def validate_params(vals):
+    """수치 파라미터 전량 검사 — 불량 사유 목록을 돌려준다 (빈 목록 = 통과).
+
+    🔴 08-21 Codex §82.4: 선언 시 아무 검사가 없어 NaN/Inf/음수/0 이 그대로
+    돌았다. 재현 = `max_range=-1` → `clamp_range(2,0,0,-1)` 이 `(-1,0,0)`,
+    즉 **로봇 뒤쪽** 좌표를 만들었다. 순수 함수로 뽑아 pytest 로 전수 검사한다.
+    """
+    out = []
+
+    def num(k, lo=None, hi=None, positive=False, integer=False):
+        v = vals.get(k)
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            out.append(f'{k}: 숫자가 아니다 ({v!r})')
+            return
+        if not math.isfinite(f):
+            out.append(f'{k}: 유한값이 아니다 ({v!r})')
+            return
+        if integer and float(v) != int(f):
+            out.append(f'{k}: 정수여야 한다 ({v!r})')
+            return
+        if positive and f <= 0:
+            out.append(f'{k}: 0 이하 ({v!r})')
+            return
+        if lo is not None and f < lo:
+            out.append(f'{k}: {lo} 미만 ({v!r})')
+        if hi is not None and f > hi:
+            out.append(f'{k}: {hi} 초과 ({v!r})')
+
+    num('min_confidence', lo=0.0, hi=1.0)
+    num('confirm_frames', lo=1, integer=True)
+    num('confirm_window_sec', positive=True)
+    num('max_stamp_age_sec', positive=True)
+    num('max_range', positive=True)
+    num('fixed_range', positive=True)
+    num('confirm_assoc_radius_m', positive=True)
+    # refire_cooldown_sec 은 0 이하가 "평생 1회" 라는 뜻이라 부호를 안 막는다.
+    # 다만 NaN/Inf 는 비교가 전부 False 가 되어 억제가 조용히 사라진다.
+    num('refire_cooldown_sec')
+    return out
 
 
 def pick_best(detections, want, min_conf):
@@ -169,7 +248,18 @@ def pick_best(detections, want, min_conf):
             continue
         if name != want:
             continue
-        if getattr(d, 'confidence', 0.0) < min_conf:
+        # 🔴 §82.4 — 계약은 confidence 를 0~1 로 고정한다. NaN 은 어떤 비교에도
+        #   False 라 `< min_conf` 를 그냥 통과했다(재현: NaN 이 best 로 채택됨).
+        conf = getattr(d, 'confidence', None)
+        try:
+            conf = float(conf)
+        except (TypeError, ValueError):
+            violations.append(f'{name}: confidence 숫자 아님({conf!r})')
+            continue
+        if not math.isfinite(conf) or not (0.0 <= conf <= 1.0):
+            violations.append(f'{name}: confidence 범위 밖({conf!r}) — 계약은 0~1')
+            continue
+        if conf < min_conf:
             continue
         p = d.position
         if not is_finite_point(p.x, p.y, p.z):
@@ -211,6 +301,15 @@ class PerceptionAdapter(Node):
         self.declare_parameter('refire_cooldown_sec', -1.0)
         # 카메라 optical frame 이 비어 오면 이걸로 대체한다. 빈 문자열이면 거부.
         self.declare_parameter('fallback_source_frame', '')
+        # 🔴 §82.4 — 직전 관측과 이만큼 떨어지면 다른 대상으로 본다 [m]
+        self.declare_parameter('confirm_assoc_radius_m', 1.0)
+        # 🔴 §82.3 — 기대 source frame. 빈 문자열이면 검사 안 함(비권장).
+        #    이게 없으면 TF 트리에 있는 아무 frame(base_link 등)도 조용히 통과한다.
+        self.declare_parameter('expected_source_frame', 'camera_color_optical_frame')
+        # 🔴 §82.3 — 촬영시각 TF 가 없을 때 최신 TF 로 후퇴할지. 후퇴하면 격하 표시.
+        self.declare_parameter('allow_latest_tf_fallback', True)
+        # §82.5 — 테이크 사이 재무장 명령 토픽 (std_msgs/String "rearm")
+        self.declare_parameter('cmd_topic', '/adapter_cmd')
 
         p = self.get_parameter
         self.detections_topic = p('detections_topic').value
@@ -238,12 +337,40 @@ class PerceptionAdapter(Node):
         # 관제·기록용 상태 문자열. 왜 안 쐈는지가 여기 남는다.
         self.status_pub = self.create_publisher(String, '/adapter_status', 10)
 
+        # 🔴 §82.4 — 수치 파라미터를 기동 시 한 곳에서 검증하고, 실패하면
+        #    **크게 죽는다.** 재현: max_range=-1 이면 clamp_range 가 (2,0,0) 을
+        #    (-1,0,0) 으로 뒤집어 로봇 **뒤쪽** 좌표를 만들었다. 조용히 도는 것보다
+        #    안 뜨는 편이 낫다 — 안 뜨면 관제 수동 클릭이라는 후퇴로가 살아 있다.
+        bad = validate_params({
+            'min_confidence': p('min_confidence').value,
+            'confirm_frames': p('confirm_frames').value,
+            'confirm_window_sec': p('confirm_window_sec').value,
+            'max_stamp_age_sec': p('max_stamp_age_sec').value,
+            'max_range': p('max_range').value,
+            'fixed_range': p('fixed_range').value,
+            'refire_cooldown_sec': p('refire_cooldown_sec').value,
+            'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
+        })
+        if bad:
+            for m in bad:
+                self.get_logger().error(f'🔴 파라미터 거부 — {m}')
+            raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
+
         # ── 상태 ────────────────────────────────────────────────────────
         self.tracker = ConfirmTracker(p('confirm_frames').value,
-                                      p('confirm_window_sec').value)
+                                      p('confirm_window_sec').value,
+                                      p('confirm_assoc_radius_m').value)
         self.fired_at = None
         self._frames = 0
         self._last_reason = '아직 프레임 없음'
+        self._tf_degraded = False
+
+        # §82.5 재무장 — 촬영은 3~5 테이크다. 구판은 refire_cooldown_sec=-1 이라
+        #   **프로세스 평생 1회**였고, 미션 reset 을 보지 않아 두 번째 테이크부터
+        #   어댑터가 조용히 안 쐈다. 단순 쿨다운은 이전 테이크의 지속 오탐이 새
+        #   테이크를 자동 시작시켜서 더 나쁘다 — 사람이 명시적으로 재무장한다.
+        self.create_subscription(
+            String, p('cmd_topic').value, self.on_cmd, 10)
 
         self.create_timer(2.0, self.tick)
 
@@ -258,6 +385,18 @@ class PerceptionAdapter(Node):
                 f'{p("fixed_range").value} m 로 강제한다. 기록에 남길 것.')
 
     # ------------------------------------------------------------------
+    def on_cmd(self, msg: String):
+        """§82.5 — 테이크 사이 재무장. `ros2 topic pub --once /adapter_cmd ... rearm`"""
+        cmd = (msg.data or '').strip().lower()
+        if cmd == 'rearm':
+            self.fired_at = None
+            self.tracker.reset()
+            self._last_reason = '재무장됨 — 다음 테이크 대기'
+            self.get_logger().warn('🔵 재무장 — 발사 이력과 누적 관측을 지웠다')
+            self.say('REARMED')
+        elif cmd:
+            self.get_logger().warn(f'알 수 없는 명령 "{cmd}" — rearm 만 받는다')
+
     def now_sec(self):
         return self.get_clock().now().nanoseconds / 1e9
 
@@ -322,7 +461,11 @@ class PerceptionAdapter(Node):
             return
 
         # ── ④ 반복 관측 확정 ───────────────────────────────────────────
-        if not self.tracker.add(t):
+        # 🔴 §82.4 — 촬영시각과 좌표를 함께 넘긴다. 수신시각만으로는 같은 프레임
+        #   한 장의 재전송과 진짜 반복 관측을 구별할 수 없다(재현: [F,F,F,F,True]).
+        stamp_sec = st.sec + st.nanosec / 1e9
+        bp = best.position
+        if not self.tracker.add(t, stamp_sec, (bp.x, bp.y, bp.z)):
             self._last_reason = (f'{want} conf={best.confidence:.2f} '
                                  f'확정대기 {self.tracker.count(t)}/{self.tracker.need}')
             return
@@ -354,25 +497,61 @@ class PerceptionAdapter(Node):
                 '(fallback_source_frame 파라미터로 지정 가능)')
             self._last_reason = 'frame_id 없음'
             return
+        # 🔴 §82.3 — 기대 frame 잠금. 구판은 "비었나" 만 봤다. 그래서 TF 트리에
+        #   존재하는 아무 frame(`base_link` 등)도 조용히 map 으로 변환됐고,
+        #   3m 투영 게이트 안이면 **잘못된 화재 위치가 첫 goal 을 정했다.**
+        expect = self.get_parameter('expected_source_frame').value
+        if expect and src != expect:
+            self.get_logger().error(
+                f'🔴 source frame 불일치: "{src}" (기대 "{expect}") — 변환 거부. '
+                f'계약은 color optical frame 이다(합의사항 §4.3). '
+                f'검사를 끄려면 expected_source_frame:="" (비권장)',
+                throttle_duration_sec=5.0)
+            self._last_reason = f'frame 불일치 {src}≠{expect}'
+            return
 
         pt = PointStamped()
         pt.header.frame_id = src
         pt.header.stamp = msg.header.stamp
         pt.point.x, pt.point.y, pt.point.z = px, py, pz
+        # 🔴 §82.3 — **촬영시각의 TF** 로 조회한다.
+        #   구판은 `rclpy.time.Time()`(=최신)을 썼고, 주석에 "속도 0.087 m/s 면
+        #   이동은 cm 단위" 라고 근거까지 적어놨다. 그 계산이 **병진만** 본 것이다.
+        #   회전 중에는 이동이 아니라 **각도**가 문제다 — 제자리 0.13 rad/s 로도
+        #   0.3초면 2.2°, 2m 앞 목표가 7.7cm 옮겨간다. 코너에서는 더 크다.
+        #   버퍼에 그 시점이 없으면(초기화 직후 등) 최신으로 후퇴하되 **격하 표시**한다.
+        stamp_err = None
+        out = None
         try:
-            # ⚠ rclpy.time.Time() (=0) 으로 조회한다 — "가장 최근" 이라는 뜻이다.
-            #   촬영시각 그대로 조회하면 TF 버퍼에 그 시점이 아직 없거나 이미
-            #   밀려나 실패한다. 2~3m 앞 화재에 로봇 속도 0.087 m/s 면
-            #   그 사이 이동은 cm 단위라 무시할 수 있다.
             tr = self.tf_buffer.lookup_transform(
-                self.target_frame, src, rclpy.time.Time())
+                self.target_frame, src, rclpy.time.Time.from_msg(msg.header.stamp))
             out = do_transform_point(pt, tr)
         except Exception as e:
+            # ⚠ 파이썬은 except 블록을 벗어나면 `as e` 를 지운다 — 문자열로 붙잡는다.
+            stamp_err = str(e)
+
+        if out is None:
+            if not self.get_parameter('allow_latest_tf_fallback').value:
+                self.get_logger().warn(
+                    f'TF 변환 실패 (촬영시각 {src}→{self.target_frame}): {stamp_err} '
+                    f'— 후퇴 금지 설정이라 발행하지 않는다', throttle_duration_sec=3.0)
+                self._last_reason = f'TF 실패(촬영시각) {src}→{self.target_frame}'
+                return
+            try:
+                tr = self.tf_buffer.lookup_transform(
+                    self.target_frame, src, rclpy.time.Time())
+                out = do_transform_point(pt, tr)
+            except Exception as e:
+                self.get_logger().warn(
+                    f'TF 변환 실패 ({src} → {self.target_frame}): {e}',
+                    throttle_duration_sec=3.0)
+                self._last_reason = f'TF 실패 {src}→{self.target_frame}'
+                return
+            degraded = True
+            self._tf_degraded = True
             self.get_logger().warn(
-                f'TF 변환 실패 ({src} → {self.target_frame}): {e}',
-                throttle_duration_sec=3.0)
-            self._last_reason = f'TF 실패 {src}→{self.target_frame}'
-            return
+                f'⚠ 촬영시각 TF 없음 → 최신 TF 로 후퇴 (격하). 회전 중이면 좌표가 '
+                f'밀린다. 사유: {stamp_err}', throttle_duration_sec=5.0)
 
         if not is_finite_point(out.point.x, out.point.y, out.point.z):
             self.get_logger().error('🔴 변환 결과가 유한값이 아님 — 발행 취소')
