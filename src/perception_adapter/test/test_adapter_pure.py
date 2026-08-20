@@ -1,0 +1,186 @@
+"""어댑터 순수 함수부 단위테스트 — ROS 를 띄우지 않고 판정 수식만 본다.
+
+🔴 이 파일은 `src/mission_manager/test/` 와 **별도 패키지**다.
+   `tools/doc_check.sh` 가 `pytest src/mission_manager/test/` 개수(184)를 계약으로
+   잠그고 있어서, mission_manager 안에 테스트를 넣으면 그 계약이 깨진다.
+   어댑터를 별도 패키지로 만든 이유 중 하나가 이것이다.
+"""
+
+import math
+
+import pytest
+
+from perception_adapter.adapter_node import (
+    VALID_CLASSES, ConfirmTracker, clamp_range, fix_range, is_finite_point,
+    pick_best, stamp_age_sec)
+
+
+class _P:
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = float(x), float(y), float(z)
+
+
+class _D:
+    """Detection3D 최소 대역 — ROS 메시지 없이 pick_best 를 시험한다."""
+    def __init__(self, class_name, confidence, x=1.0, y=0.0, z=0.0):
+        self.class_name = class_name
+        self.confidence = confidence
+        self.position = _P(x, y, z)
+
+
+# ── is_finite_point ────────────────────────────────────────────────────
+
+def test_finite_normal():
+    assert is_finite_point(1.0, 2.0, 3.0)
+
+
+@pytest.mark.parametrize('bad', [float('nan'), float('inf'), float('-inf')])
+def test_finite_rejects_nonfinite_in_every_axis(bad):
+    # 🔴 축마다 따로 본다 — x 만 검사하고 y 를 빠뜨리는 것이 흔한 구멍이다.
+    assert not is_finite_point(bad, 0.0, 0.0)
+    assert not is_finite_point(0.0, bad, 0.0)
+    assert not is_finite_point(0.0, 0.0, bad)
+
+
+# ── clamp_range ────────────────────────────────────────────────────────
+
+def test_clamp_leaves_near_point_untouched():
+    x, y, z, c = clamp_range(2.0, 0.0, 0.0, 5.0)
+    assert (x, y, z) == (2.0, 0.0, 0.0)
+    assert c is False
+
+
+def test_clamp_pulls_far_point_to_max_and_keeps_bearing():
+    x, y, z, c = clamp_range(20.0, 0.0, 0.0, 5.0)
+    assert c is True
+    assert math.isclose(math.sqrt(x * x + y * y + z * z), 5.0, rel_tol=1e-9)
+    # 방위가 보존돼야 한다 — 거리만 자르는 것이 이 함수의 계약이다
+    assert x > 0 and math.isclose(y, 0.0) and math.isclose(z, 0.0)
+
+
+def test_clamp_preserves_direction_in_3d():
+    x, y, z, c = clamp_range(6.0, 8.0, 0.0, 5.0)     # 원래 거리 10
+    assert c is True
+    assert math.isclose(math.sqrt(x * x + y * y + z * z), 5.0, rel_tol=1e-9)
+    assert math.isclose(x / y, 6.0 / 8.0, rel_tol=1e-9)
+
+
+def test_clamp_at_exact_boundary_does_not_clamp():
+    _, _, _, c = clamp_range(5.0, 0.0, 0.0, 5.0)
+    assert c is False
+
+
+def test_clamp_zero_distance_is_returned_unchanged():
+    # ⚠ 거리 0 은 방향이 없어 자를 수 없다. ZeroDivision 이 나면 안 된다.
+    x, y, z, c = clamp_range(0.0, 0.0, 0.0, 5.0)
+    assert (x, y, z) == (0.0, 0.0, 0.0)
+    assert c is False
+
+
+# ── fix_range ──────────────────────────────────────────────────────────
+
+def test_fix_range_sets_distance_and_keeps_bearing():
+    x, y, z = fix_range(10.0, 0.0, 0.0, 2.0)
+    assert math.isclose(math.sqrt(x * x + y * y + z * z), 2.0, rel_tol=1e-9)
+    assert x > 0
+
+
+def test_fix_range_works_when_original_is_closer_than_fixed():
+    # 격하 모드는 "멀면 당긴다" 가 아니라 "무조건 그 거리" 다
+    x, y, z = fix_range(0.5, 0.0, 0.0, 2.0)
+    assert math.isclose(math.sqrt(x * x + y * y + z * z), 2.0, rel_tol=1e-9)
+
+
+def test_fix_range_returns_none_at_zero_distance():
+    assert fix_range(0.0, 0.0, 0.0, 2.0) is None
+
+
+# ── stamp_age_sec ──────────────────────────────────────────────────────
+
+def test_stamp_age_positive_for_past():
+    assert math.isclose(stamp_age_sec(100.0, 99.0), 1.0)
+
+
+def test_stamp_age_negative_for_future_is_not_squashed():
+    # 🔴 미래 stamp 를 0 으로 뭉개면 시계 어긋남이 '신선함'으로 통과한다
+    assert stamp_age_sec(100.0, 105.0) < 0
+
+
+# ── ConfirmTracker ─────────────────────────────────────────────────────
+
+def test_tracker_needs_n_hits():
+    t = ConfirmTracker(need=3, window_sec=10.0)
+    assert t.add(1.0) is False
+    assert t.add(2.0) is False
+    assert t.add(3.0) is True
+
+
+def test_tracker_drops_hits_outside_window():
+    t = ConfirmTracker(need=3, window_sec=2.0)
+    t.add(0.0)
+    t.add(0.5)
+    # 10초 뒤 관측 하나 — 앞의 둘은 창 밖이라 버려진다
+    assert t.add(10.0) is False
+    assert t.count(10.0) == 1
+
+
+def test_tracker_tolerates_a_dropped_frame():
+    # ⚠ '연속'이 아니라 '창 안에서 N번'이라는 계약. 깜빡임이 확정을 막으면 안 된다
+    t = ConfirmTracker(need=3, window_sec=3.0)
+    assert t.add(0.0) is False
+    # 1.0 에 프레임이 빠짐
+    assert t.add(2.0) is False
+    assert t.add(2.5) is True
+
+
+def test_tracker_reset_clears():
+    t = ConfirmTracker(need=2, window_sec=10.0)
+    t.add(1.0)
+    t.reset()
+    assert t.count() == 0
+    assert t.add(2.0) is False
+
+
+# ── pick_best ──────────────────────────────────────────────────────────
+
+def test_pick_best_takes_highest_confidence_of_target_class():
+    best, bad = pick_best(
+        [_D('fire', 0.55), _D('fire', 0.77), _D('person_ok', 0.99)],
+        'fire', 0.40)
+    assert best is not None and math.isclose(best.confidence, 0.77)
+    assert bad == []
+
+
+def test_pick_best_returns_none_on_empty_array():
+    # 빈 배열 = 정상 미탐지. 실패가 아니다 (합의사항 §6)
+    best, bad = pick_best([], 'fire', 0.40)
+    assert best is None and bad == []
+
+
+def test_pick_best_rejects_below_min_confidence():
+    best, _ = pick_best([_D('fire', 0.10)], 'fire', 0.40)
+    assert best is None
+
+
+def test_pick_best_rejects_nonfinite_position():
+    best, _ = pick_best([_D('fire', 0.99, x=float('nan'))], 'fire', 0.40)
+    assert best is None
+
+
+def test_pick_best_reports_contract_violation_and_does_not_use_it():
+    # 🔴 'human'·'car' 는 계약 열거 밖 — 역할 B가 drop 하기로 한 값이다.
+    #    우리에게 오면 계약이 깨진 것이므로 조용히 버리지 않고 보고한다.
+    best, bad = pick_best([_D('human', 0.99)], 'fire', 0.40)
+    assert best is None
+    assert bad == ['human']
+
+
+def test_pick_best_ignores_other_valid_class():
+    best, bad = pick_best([_D('smoke', 0.99)], 'fire', 0.40)
+    assert best is None and bad == []
+
+
+def test_valid_classes_matches_contract():
+    # 계약 정본 = 합의사항 §15-b · tunnel_interfaces/msg/Detection3D.msg
+    assert set(VALID_CLASSES) == {
+        'person_fallen', 'person_ok', 'person_unknown', 'fire', 'smoke'}

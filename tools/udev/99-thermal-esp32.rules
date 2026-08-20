@@ -1,0 +1,67 @@
+# 99-thermal-esp32.rules — 열화상 ESP32 에 고정 이름 `/dev/thermal` 을 붙인다
+#                          (2026-08-21 신설 · 역할 B 6차 회신 §6 대응)
+# =============================================================================
+# 무엇을 해결하는가:
+#   역할 B가 08-20 에 열화상(MLX90640 + ESP32 DevKit v1)을 로봇에 붙였다.
+#   그 ESP32 의 USB 시리얼 칩이 🔴 **CP2102 (10c4:ea60)** 인데,
+#   **RPLIDAR C1 과 같은 칩**이다. 즉 VID:PID 로는 두 장치를 구분할 수 없다.
+#
+#   `/dev/ttyUSB0`·`ttyUSB1` 은 **꽂히는 순서**로 번호가 매겨지므로:
+#       ESP32 가 먼저 잡힘  →  라이다 노드가 ESP32 를 연다  →  /scan 이 안 온다
+#       라이다가 먼저 잡힘  →  열화상 노드가 라이다를 연다  →  라이다가 죽는다
+#
+#   🔴 **둘 다 에러를 안 낸다.** 노드는 살아 있고 `node list` 에도 뜬다.
+#      역할 B 6차 §6-b 가 이것을 "무증상 실패"로 정확히 지목했다.
+#
+#   🔴 그리고 이 로봇에서 라이다가 죽으면 **사람 추종까지 죽는다** —
+#      SEARCH_BACK(놓친 추종자 재탐색) 판정이 전부 `/scan` 클러스터다.
+#      즉 이 규칙은 편의가 아니라 **촬영 성립 조건**이다.
+#
+# =============================================================================
+# 🔴 아래 값의 출처 — **역할 B 6차 회신 §6-a 실측**:
+#     idVendor=10c4 · idProduct=ea60 (Silicon Labs CP2102)
+#     ATTRS{serial}=="0001"
+#
+#   🔵 라이다는 serial 이 `78824f27dc6ff011a04a8c301045c30f` 다(08-14 실측,
+#      tools/udev/99-rplidar.rules). **둘이 달라서 규칙이 서로를 배제한다** —
+#      라이다 규칙은 긴 serial 을 요구하므로 ESP32 는 절대 안 걸리고,
+#      이 규칙은 "0001" 을 요구하므로 라이다는 절대 안 걸린다.
+#
+#   🔴 **한계 — `0001` 은 Silicon Labs 기본값이라 "이 개체"를 가리키지 않는다.**
+#      CP2102 를 쓰는 장치를 **하나 더** 붙이면 /dev/thermal 이 그쪽으로 갈 수
+#      있다. 지금은 라이다·ESP32 둘뿐이라 성립하지만, **세 번째가 생기면 이
+#      규칙은 깨진다.** 그때는 ATTRS{devpath}(포트 위치)를 함께 잠가야 한다.
+#      ⚠ 그 시점에 이 주석을 지우지 말고 조건을 추가할 것.
+#
+#   [설치 전 실측 — 값이 다르면 규칙을 고치고 설치한다]
+#     ESP32 를 Jetson USB 에 꽂은 뒤:
+#       udevadm info -a -n /dev/ttyUSB0 | grep -E 'ATTRS\{idVendor\}|ATTRS\{idProduct\}|ATTRS\{serial\}' | head -3
+#     🔴 serial 이 "0001" 이 아니면 그 값으로 아래를 고친다 (오히려 더 안전하다 —
+#        고유값이면 위 '한계'가 사라진다).
+#
+#   [설치]
+#     sudo cp ~/ros2_ws/tools/udev/99-thermal-esp32.rules /etc/udev/rules.d/
+#     sudo udevadm control --reload-rules && sudo udevadm trigger
+#     # USB 를 뽑았다 다시 꽂는 것이 가장 확실하다
+#
+#   [확인]
+#     ls -l /dev/thermal /dev/rplidar     # 둘 다 서로 다른 ttyUSB 를 가리켜야 한다
+#     🔴 두 링크가 **같은** ttyUSB 를 가리키면 규칙이 하나 잘못된 것이다.
+#
+#   [안 걸릴 때 — 08-14 라이다에서 실제로 겪은 함정]
+#     `udevadm trigger` 만으로는 이미 꽂혀 있는 tty 에 안 걸리는 경우가 있다.
+#     규칙이 틀렸다고 단정하기 전에 **매칭 여부부터 판정한다**:
+#       sudo udevadm test $(udevadm info -q path -n /dev/ttyUSB0) 2>&1 | grep -iE 'thermal|SYMLINK'
+#       sudo udevadm trigger --action=add /sys$(udevadm info -q path -n /dev/ttyUSB0)
+#
+#   [쓰는 법 — 역할 B 쪽]
+#     thermal_publisher 의 포트 파라미터를 `/dev/thermal` 로 고정한다.
+#     `ttyUSB0` 을 쓰는 한 번호는 언제든 뒤바뀐다.
+#
+# ⚠ udev 규칙은 **사라질 수 있다** — `ELECTRICAL_BASELINE.md` 가 적어 둔 대로
+#   XT90 분리는 리눅스 전원을 뽑는 것과 같고(파일시스템 손상·udev 규칙 유실),
+#   우리는 08-14 이후 XT90 을 여러 번 분리했다.
+#   🔴 "설치했다" 와 "지금 있다" 는 다른 문장이다. 기동 전에 `ls -l` 로 본다.
+# =============================================================================
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="thermal", MODE="0666"

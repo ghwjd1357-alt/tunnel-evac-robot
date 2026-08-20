@@ -54,7 +54,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
                             IncludeLaunchDescription, LogInfo,
                             OpaqueFunction, Shutdown)
 from launch.conditions import IfCondition
@@ -225,6 +225,24 @@ def launch_setup(context, *_):
         tf_fresh=0.0,
     )
 
+    # ── 카메라 depth 게이트 (08-21 신설 · `camera:=true` 일 때만) ─────────────
+    # 🔴 왜 gate_sensors 에 토픽을 더하지 않고 게이트를 따로 두는가:
+    #   gate_sensors 는 **미션이 성립하기 위한 최소 집합**이다. 카메라는 거기
+    #   안 든다 — 카메라가 없어도 순찰·유도·추종은 전부 돈다. 최소 집합에
+    #   섞으면 카메라 하나로 주행 전체가 못 뜬다.
+    #   같은 이유로 `/thermal/*` 은 **어느 게이트에도 넣지 않는다**(역할 B 6차
+    #   §2-b 요청 수용 — "열화상이 없다고 로봇 전체가 안 뜨면 안 된다").
+    # ⚠ 실패하면 런치 전체를 내린다(when_ready 의 fail-closed). 카메라를 켜겠다고
+    #   선언했는데 depth 가 안 오는 상태는 **반쪽 인지**라, 그대로 촬영하면
+    #   "찍었는데 아무것도 안 나온" 테이크가 된다.
+    gate_camera = make_gate('camera', timeout=90.0,
+                            topics=['/camera/depth/image_raw'])
+    camera_gate = GroupAction(
+        actions=[gate_camera,
+                 when_ready(gate_camera, [], '카메라 depth 스트림 확인')],
+        condition=IfCondition(LaunchConfiguration('camera')),
+    )
+
     # ══════════════════════════════════════════════════════════════════
     # 2단계 — 위치추정 (저장 지도)
     # ══════════════════════════════════════════════════════════════════
@@ -306,6 +324,7 @@ def launch_setup(context, *_):
         odom_guard,
         ekf,
         gate_sensors,
+        camera_gate,
         when_ready(gate_sensors, [slam, gate_localized], '위치추정(slam_toolbox)'),
         when_ready(gate_localized, [navigation, gate_nav2], 'Nav2'),
         when_ready(gate_nav2, after_nav2, what),
@@ -338,8 +357,31 @@ def generate_launch_description():
             'lidar', default_value='true',
             description='false = 라이다 드라이버 미기동 (bag 으로 /scan 을 흘릴 때)'),
         DeclareLaunchArgument(
-            'lidar_port', default_value='/dev/ttyUSB0',
-            description='RPLIDAR 시리얼 포트. TODO: R0 에서 udev 고정 링크로 교체'),
+            'lidar_port', default_value='/dev/rplidar',
+            # 🔴 08-21 동결 예외 **여덟 번째**로 `/dev/ttyUSB0` 에서 바꿨다.
+            #   이유 = 열화상 ESP32 가 라이다와 **같은 CP2102(10c4:ea60)** 라
+            #   `ttyUSB` 번호를 서로 뺏는다(역할 B 6차 §6). 번호가 바뀌면
+            #   라이다 노드가 ESP32 를 열고, `/scan` 이 **에러 없이** 안 온다.
+            #   그 상태는 지도·위치추정뿐 아니라 **사람 추종까지** 죽인다
+            #   (SEARCH_BACK 판정이 전부 /scan 클러스터다).
+            # ⚠ udev 규칙이 있어야 이 경로가 생긴다 — `tools/udev/99-rplidar.rules`
+            #   (serial `78824f27…` 로 잠금 · docs/JETSON_SETUP.md §6-b).
+            #   링크가 없으면 런치가 **크게 실패**한다 — 엉뚱한 장치를 조용히
+            #   여는 것보다 낫다. 규칙이 유실됐으면 재설치하거나, 급하면
+            #   `lidar_port:=/dev/ttyUSB0` 으로 되돌린다(그때는 번호를 눈으로 확인).
+            description='RPLIDAR 시리얼 포트 (udev 고정 링크). '
+                        '규칙 = tools/udev/99-rplidar.rules'),
+        DeclareLaunchArgument(
+            'camera', default_value='false',
+            # 🔴 08-21 신설 (동결 예외 **여덟 번째**). true 면 depth 스트림을 **기동 게이트**에
+            #   넣는다 — 역할 B 6차 §2-b 요구. 역할 B의 depth FATAL 이 미구현이라
+            #   (6차 §2-c: "08-22 촬영 전까지 들어간다고 약속하지 않겠습니다")
+            #   depth 가 죽었을 때 잡는 **자동 방어가 이 게이트 하나뿐**이다.
+            # ⚠ 기본값이 false 인 이유 = 카메라는 08-21 오후에 붙는다. true 를
+            #   기본으로 하면 그전까지 런치가 안 뜬다.
+            # ⚠ 게이트는 **기동 시점만** 본다. 촬영 중 사망은 못 잡는다 —
+            #   그건 역할 B 6차 §2-a 체크리스트(매 테이크 확인)가 담당한다.
+            description='true = /camera/depth/image_raw 를 기동 게이트에 편입'),
         DeclareLaunchArgument(
             'lidar_baud', default_value='460800',
             description='RPLIDAR C1 보레이트 (sllidar_ros2 C1 기본값)'),

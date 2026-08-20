@@ -29,4 +29,4 @@ Desktop 날짜별 현황(`~/Desktop/개발현황/`)은 역사·근거 — 필요
 - **Jetson**: 계정 **`hanhan`** (노트북은 `minwoo`), `ssh hanhan@jetson.local`. **Claude 는 SSH 비번 못 침** → 사용자가 접속·붙여넣기, Claude 는 명령 제공·결과 해석. **노트북 빌드물은 aarch64 에서 못 씀** → Jetson 은 repo clone 후 소스 colcon build.
 - 백그라운드 실행은 Bash `run_in_background` 사용 (수동 `setsid nohup` 불안정).
 - Gazebo GUI 실행법·E2E 실행법 = `docs/TEST_GATES.md §3`. Gazebo = **Classic 11** (Ignition 자료 주의).
-- 패키지: `tunnel_sim`(시뮬 자산) / `tunnel_bringup`(실차 런치·설정) / `mission_manager`(미션) / `tunnel_interfaces`(역할 B 계약 `.msg` 2종 — **실행 코드 0**, 인터페이스 전용) / `my_first_pkg`(학습용) / `console/`(관제 웹, ROS 패키지 아님).
+- 패키지: `tunnel_sim`(시뮬 자산) / `tunnel_bringup`(실차 런치·설정) / `mission_manager`(미션) / `perception_adapter`(인지→미션 어댑터 · 08-21 신설) / `tunnel_interfaces`(역할 B 계약 `.msg` 2종 — **실행 코드 0**, 인터페이스 전용) / `my_first_pkg`(학습용) / `console/`(관제 웹, ROS 패키지 아님).

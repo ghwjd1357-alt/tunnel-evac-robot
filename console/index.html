@@ -26,6 +26,22 @@
   #siren { margin-top:10px; font-size:.85rem; color:#5d6b7a; }
   #siren.on { color:#ffb04d; font-weight:700; }
 
+  /* ── 인지 패널 (08-21 신설 — 역할 B `/detections` 직접 표시) ────────
+     🔴 지도에 3D 점을 찍지 않는 이유: `position` 은 camera optical frame 이라
+        map 으로 옮기려면 TF 사슬이 필요하고, 관제는 rosbridge 로 TF 를 전부
+        받고 있지 않다. 잘못 그린 점은 없는 것보다 나쁘다 — 그래서 수와
+        신뢰도만 정직하게 보여준다. 지도 위 화재 표시는 `/alarm` 이 담당한다. */
+  .det { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .det span { padding:5px 9px; border-radius:6px; background:#232b35; color:#5d6b7a;
+              font-size:.8rem; font-variant-numeric:tabular-nums; }
+  .det span.hit  { background:#173a5e; color:#7fc4ff; font-weight:700; }
+  .det span.fire { background:#5e3a17; color:#ffb04d; font-weight:700; }
+  #detState { margin-top:8px; font-size:.85rem; }
+  #detState.stale { color:#ff9b9b; font-weight:700; }
+  #detState.live  { color:#6fe08d; }
+  #adapter { margin-top:6px; font-size:.75rem; color:#5d6b7a;
+             font-family:ui-monospace,monospace; word-break:break-all; }
+
   /* ── 버튼 ────────────────────────────────────────────────── */
   button { cursor:pointer; border:0; border-radius:6px; padding:10px 14px; font-size:.9rem;
            font-weight:700; color:#fff; }
@@ -80,6 +96,20 @@
     </div>
     <div id="siren">📢 싸이렌: OFF</div>
     <div class="muted" style="margin-top:8px">마지막 수신: <span id="lastseen">—</span></div>
+  </div>
+
+  <!-- ═══ 인지 (역할 B `/detections`) ═══ -->
+  <div class="panel">
+    <h2>인지 — 카메라</h2>
+    <div class="det" id="detBadges">
+      <span data-c="fire">🔥 fire 0</span>
+      <span data-c="smoke">💨 smoke 0</span>
+      <span data-c="person_ok">🧍 person_ok 0</span>
+      <span data-c="person_fallen">🛌 person_fallen 0</span>
+      <span data-c="person_unknown">❓ person_unknown 0</span>
+    </div>
+    <div id="detState">— 수신 없음</div>
+    <div id="adapter">어댑터: —</div>
   </div>
 
   <!-- ═══ 원격 제어 (C2) ═══ -->
@@ -344,7 +374,55 @@ function setupMap() {
 
   new ROSLIB.Topic({ ros, name: '/alarm', messageType: 'geometry_msgs/msg/PoseStamped' })
     .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
+
+  // ── 인지 (08-21 신설) ───────────────────────────────────────────────
+  // 🔴 계약(합의사항 §15-b)이 정한 닫힌 열거 5종. 그 밖의 값이 오면 계약 위반이라
+  //    조용히 버리지 않고 화면에 띄운다 — 알아야 하는 쪽은 사람이다.
+  new ROSLIB.Topic({ ros, name: '/detections',
+                     messageType: 'tunnel_interfaces/msg/Detection3DArray',
+                     throttle_rate: 200 })
+    .subscribe(m => {
+      detLastMs = Date.now();
+      detCount = {}; detConf = {}; detBad = [];
+      for (const d of (m.detections || [])) {
+        if (!DET_CLASSES.includes(d.class_name)) { detBad.push(d.class_name); continue; }
+        detCount[d.class_name] = (detCount[d.class_name] || 0) + 1;
+        detConf[d.class_name] = Math.max(detConf[d.class_name] || 0, d.confidence);
+      }
+    });
+
+  // 어댑터가 "왜 안 쐈는지" 를 계속 흘린다. 이게 없으면 '불이 없다'와
+  // '뭔가 막혔다'가 화면에서 똑같이 보인다 (08-20 에 세 번 당한 형태).
+  new ROSLIB.Topic({ ros, name: '/adapter_status', messageType: 'std_msgs/msg/String' })
+    .subscribe(m => { document.getElementById('adapter').textContent = '어댑터: ' + m.data; });
 }
+
+// ── 인지 상태 렌더 ────────────────────────────────────────────────────
+const DET_CLASSES = ['fire', 'smoke', 'person_ok', 'person_fallen', 'person_unknown'];
+let detLastMs = 0, detCount = {}, detConf = {}, detBad = [];
+
+function drawDetections() {
+  const el = document.getElementById('detState');
+  if (!el) return;
+  for (const span of document.querySelectorAll('#detBadges span')) {
+    const c = span.dataset.c, n = detCount[c] || 0;
+    const icon = span.textContent.split(' ')[0];
+    span.textContent = n ? `${icon} ${c} ${n} (${(detConf[c] || 0).toFixed(2)})`
+                         : `${icon} ${c} 0`;
+    span.className = n ? (c === 'fire' ? 'fire' : 'hit') : '';
+  }
+  // 🔴 계약: 0.5초 stale. 빈 배열(정상 미탐지)과 미발행(실패)은 다른 것이다.
+  const age = detLastMs ? (Date.now() - detLastMs) : Infinity;
+  if (!detLastMs)        { el.textContent = '— 수신 없음'; el.className = ''; }
+  else if (age > 500)    { el.textContent = `🔴 STALE — ${(age / 1000).toFixed(1)}초 미수신`;
+                           el.className = 'stale'; }
+  else                   { el.textContent = '🟢 수신 중 (10 Hz)'; el.className = 'live'; }
+  if (detBad.length) {
+    el.textContent += `  🔴 계약 위반 class: ${[...new Set(detBad)].join(', ')}`;
+    el.className = 'stale';
+  }
+}
+setInterval(drawDetections, 200);
 
 // 지도 좌표(m) → 캔버스 픽셀
 function m2p(x, y, scale) {

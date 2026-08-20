@@ -67,8 +67,13 @@ def generate_launch_description():
             'lidar', default_value='true',
             description='false = 라이다 드라이버 미기동 (bag 으로 /scan 을 흘릴 때)'),
         DeclareLaunchArgument(
-            'lidar_port', default_value='/dev/ttyUSB0',
-            description='RPLIDAR 시리얼 포트. TODO: R0 에서 udev 고정 링크로 교체'),
+            'lidar_port', default_value='/dev/rplidar',
+            # 🔴 08-21 동결 예외 **여덟 번째** — `/dev/ttyUSB0` 에서 바꿨다.
+            #   열화상 ESP32 가 라이다와 같은 CP2102(10c4:ea60)라 ttyUSB 번호를
+            #   서로 뺏는다. 번호가 바뀌면 매핑 세션이 **엉뚱한 장치로 지도를
+            #   그리려 한다.** 전문 = real_bringup.launch.py 같은 인자 주석.
+            description='RPLIDAR 시리얼 포트 (udev 고정 링크). '
+                        '규칙 = tools/udev/99-rplidar.rules'),
         DeclareLaunchArgument(
             'lidar_baud', default_value='460800',
             description='RPLIDAR C1 보레이트 (sllidar_ros2 C1 기본값)'),

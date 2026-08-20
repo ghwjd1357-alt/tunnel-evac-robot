@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>perception_adapter</name>
+  <version>0.1.0</version>
+  <description>
+    역할 B(/detections) → 역할 A(/alarm) 어댑터.
+    합의사항 §2 가 역할 A 에 맡긴 책임 4가지를 여기서 수행한다:
+    schema·frame·stamp·유한값 검증 / TF 로 map 변환 / 반복 관측·오탐 억제 / 이벤트 발행.
+    🔴 기존 코드를 한 줄도 건드리지 않는 별도 노드다. 안 띄우면 없는 것과 같다.
+  </description>
+  <maintainer email="kimwonjung1240@gmail.com">minwoo</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>tunnel_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
