@@ -159,3 +159,124 @@ def test_g11_reset_puts_the_verdict_back_to_stale():
     assert env.node.person_status == 'stale'
     assert env.node.person_status_t is None
     assert env.node.victim is None
+
+
+# ── 🆕 제자리 360° 훑기 (SCAN_AREA) ────────────────────────────────────
+def test_g12_normalize_angle_exists_and_folds():
+    """🔴 08-22 — 이 함수를 **정의하지 않고 호출했었다.**
+
+    문법도 통과했고 회귀 220 도 초록이었다 — 시험이 `SCAN_AREA` 경로를 한 번도
+    안 탔기 때문이다. 실차에서는 훑기 첫 스텝에서 `NameError` 로 죽고 테이크가
+    통째로 날아간다. **회귀가 없는 코드는 문법이 맞아도 안 돈다.**
+    """
+    import math
+
+    from mission_manager.mission_node import normalize_angle
+    # ⚠ ±π 는 같은 방향이다. `atan2` 는 `sin(3π)` 가 아주 작은 **음수**라
+    #   −π 를 돌려준다 — 부호가 아니라 **크기**로 본다.
+    assert abs(abs(normalize_angle(3.0 * math.pi)) - math.pi) < 1e-9
+    assert abs(abs(normalize_angle(-3.0 * math.pi)) - math.pi) < 1e-9
+    assert abs(normalize_angle(0.5) - 0.5) < 1e-12
+    assert abs(normalize_angle(0.5 + 2.0 * math.pi) - 0.5) < 1e-9
+    # 접힌 값은 항상 [-π, π] 안이다
+    for a in (-20.0, -7.0, -0.1, 0.0, 3.2, 9.9, 100.0):
+        assert -math.pi - 1e-9 <= normalize_angle(a) <= math.pi + 1e-9
+
+
+def test_g13_scan_runs_only_when_the_gate_is_on():
+    """🔴 게이트가 꺼진 본편은 훑지 않는다 — 구판처럼 곧바로 GATHER 다."""
+    env = T.make_env(state=State.APPROACH)
+    env.node.wp['person_gate'] = False
+    env.node.on_reached()
+    assert env.node.state == State.GATHER
+
+    env = T.make_env(state=State.APPROACH)
+    env.node.wp['person_gate'] = True
+    env.node.on_reached()
+    assert env.node.state == State.SCAN_AREA
+
+
+def test_g14_scan_goals_keep_the_position_and_only_turn():
+    """🔴 위치가 움직이면 '제자리 훑기'가 아니고, 화재 배제거리 전제도 흔들린다."""
+    import math
+
+    env = T.make_env(state=State.APPROACH)
+    env.node.wp['person_gate'] = True
+    env.node.on_reached()
+    base = env.node.wp['gather']
+    seen = []
+    for i in range(env.node.scan_steps()):
+        env.node.scan_idx = i
+        g = env.node.scan_goal()
+        assert abs(g['x'] - base['x']) < 1e-9
+        assert abs(g['y'] - base['y']) < 1e-9
+        seen.append(g['yaw'])
+    # 네 스텝이 서로 다른 방향이어야 한 바퀴가 된다
+    assert len({round(y, 3) for y in seen}) == env.node.scan_steps()
+    assert all(-math.pi - 1e-9 <= y <= math.pi + 1e-9 for y in seen)
+
+
+def test_g15_a_fallen_person_ends_the_scan_immediately():
+    """🔵 쓰러진 사람이 확정되면 남은 스텝을 마저 돌 이유가 없다."""
+    env = T.make_env(state=State.APPROACH)
+    env.node.wp['person_gate'] = True
+    env.node.on_reached()
+    assert env.node.state == State.SCAN_AREA
+    run_live(env, 2.0, PERSON, 'fallen')
+    assert env.node.state == State.RESCUE, '훑는 중 확정인데 계속 돌았다'
+
+
+def test_g16_a_full_sweep_hands_over_to_gather():
+    """한 바퀴를 다 돌면 판정은 GATHER 가 한다 (분기를 두 곳에 두지 않는다)."""
+    env = T.make_env(state=State.APPROACH)
+    env.node.wp['person_gate'] = True
+    env.node.wp['scan_dwell_sec'] = 0.5
+    env.node.on_reached()
+    for _ in range(env.node.scan_steps()):
+        env.node.on_reached()                 # 그 스텝 goal 도착
+        run_live(env, 1.0, PERSON, 'unknown')
+    assert env.node.state == State.GATHER, '한 바퀴를 다 돌고도 넘어가지 않았다'
+
+
+# ── 🆕 예약 61 — 역행 중 카메라 병행 ───────────────────────────────────
+def sb_env(camera=False):
+    env = T.make_env(state=State.SEARCH_BACK)
+    env.node.wp['search_back']['camera_refind'] = camera
+    return env
+
+
+def test_g17_camera_refind_is_off_by_default():
+    """🔴 예약 61 이 정한 대로 **기본 꺼짐**이다.
+
+    카메라의 3~4 m·저조도 검출은 아직 미검증이다(역할 B 08-18 G5 표: 원거리 ❌).
+    검증 안 된 신호로 라이다 판정을 흔들면, 잘 되던 것까지 같이 망가진다.
+    """
+    env = T.make_env(state=State.SEARCH_BACK)
+    assert env.node.wp['search_back'].get('camera_refind', False) is False
+    say(env, 'ok')
+    assert env.node.camera_refind_status() is None
+
+
+def test_g18_camera_alone_can_refind_when_enabled():
+    """켜면 라이다가 못 봐도 카메라만으로 복귀한다 — OR 이지 AND 가 아니다."""
+    env = sb_env(camera=True)
+    run_live(env, 2.0, EMPTY, 'ok')               # 라이다에는 아무것도 없다
+    assert env.node.state == State.GUIDE
+
+
+def test_g19_lidar_alone_still_works_with_the_camera_on():
+    """🔴 부정 회귀 — 카메라를 켜도 라이다 경로가 살아 있어야 한다.
+
+    OR 을 AND 로 잘못 쓰면 카메라가 없을 때 재발견이 **아예 안 된다** —
+    잘 되던 것이 조용히 죽는다.
+    """
+    env = sb_env(camera=True)
+    run_live(env, 2.0, PERSON, 'stale')           # 카메라는 죽었고 라이다만 본다
+    assert env.node.state == State.GUIDE
+
+
+def test_g20_a_fallen_person_seen_while_reversing_is_not_passed_by():
+    """🔴 역행 중에 쓰러진 사람이 보이면 유도로 복귀하면 안 된다 — 두고 나가는 것이다."""
+    env = sb_env(camera=True)
+    run_live(env, 2.0, EMPTY, 'fallen')
+    assert env.node.state == State.RESCUE

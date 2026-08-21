@@ -84,6 +84,11 @@ class State(Enum):
     #                       FollowerMonitor 가 이미 쓰는 비대칭과 같은 철학이다 —
     #                       "놓침 선언(비싼 역행 유발)은 신중히, 재발견은 빠르게."
     SEARCH_BACK = auto()  # 놓침 → 마지막 목격 지점으로 역행 재탐색
+    SCAN_AREA = auto()    # 🆕 08-22 — 집결지에서 **제자리로 한 바퀴 돌며** 사람을 찾는다.
+    #                       🔴 cmd_vel 을 직접 내지 않는다 — 미션에는 그 발행자가 없고
+    #                       tick 도 2 Hz 다. 대신 같은 (x,y) 에 yaw 만 돌린 Nav2 goal 을
+    #                       `scan_steps` 번 낸다. 08-21 에 고친 회전 경로
+    #                       (PoseProgressChecker · xy_goal_tolerance 0.25)를 그대로 쓴다.
     RESCUE = auto()       # 🆕 08-22 — 쓰러진 사람 확정. 관제에 신고하고 **그 자리에 선다.**
     #                       BLOCKED 과 같은 구조다(새 goal 을 안 낸다 = 정지).
     #                       탈출은 관제 `reset` 뿐이다 — 로봇이 스스로 "이제 됐다"
@@ -123,6 +128,24 @@ PERSON_DECIDE_TIMEOUT_DEFAULT = 10.0
 #   어댑터 자체가 죽으면 아무 말도 못 한다. 그때 마지막 'ok' 를 붙들고 있으면
 #   미션은 사람이 있는 줄 안다. 10 Hz 발행이므로 1초면 충분히 관대하다.
 PERSON_STATUS_TIMEOUT_DEFAULT = 1.0
+# 🆕 제자리 훑기. 4 스텝 × 90° 가 기본이다.
+# 🔴 스텝을 늘리면 그림은 부드러워지지만 goal 왕복이 그만큼 늘어 시간이 길어진다.
+#   촬영 대본은 집결 장면에 40~60초를 쓸 수 있다 — 4 스텝이 그 안이다.
+SCAN_STEPS_DEFAULT = 4
+# 각 스텝 도착 뒤 서서 판정 프레임을 모으는 시간. 어댑터가 10 Hz 이므로 2초면
+# 20 프레임이고, `person_min_frames`(6) 를 넉넉히 넘는다.
+SCAN_DWELL_SEC_DEFAULT = 2.0
+
+
+def normalize_angle(a):
+    """각을 (−π, π] 로 접는다.
+
+    🔴 08-22 — 처음에 이 함수를 **정의하지 않고 호출했다.** 문법도 통과하고 회귀
+    220 도 초록이었다 — 시험이 `SCAN_AREA` 경로를 한 번도 안 탔기 때문이다.
+    실차에서는 훑기 첫 스텝에서 `NameError` 로 죽는다. 테이크 하나가 통째로 날아간다.
+    🔵 **회귀가 없는 코드는 문법이 맞아도 안 돈다** 는 것을 이 자리가 증명한다.
+    """
+    return math.atan2(math.sin(a), math.cos(a))
 
 
 def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
@@ -556,6 +579,8 @@ class MissionNode(Node):
         self.victim = None             # /victim 좌표 (신고에 싣는다)
         self._rescue_logged = False
         self._no_victim_logged = False
+        self.scan_idx = 0              # 지금 몇 번째 훑기 스텝인가
+        self.scan_dwell_since = None   # 스텝 도착 뒤 관측 시작 시각 (None = 이동 중)
         # ★ 직전 tick 이 '실제로 분기시킨' 상태 (08-01 검토 §26 P1 — GUIDE 진입 감지용).
         #   resume_state(FAULT 복귀 목적지)와 혼동 금지: 이건 순수한 전이 감지 재료다.
         self._prev_tick_state = None
@@ -658,10 +683,22 @@ class MissionNode(Node):
             self.patrol_idx = (self.patrol_idx + 1) % len(self.wp['patrol'])
 
         elif self.state == State.APPROACH:
-            self.state = State.GATHER
-            self.gather_since = self.get_clock().now()
+            # 🆕 08-22 — 사람 판정을 쓸 때만 훑는다. 🔴 게이트가 꺼져 있으면
+            #   (본편 테이크) 구판과 한 글자도 다르지 않게 GATHER 로 간다.
+            if self.person_gate_on():
+                self.enter_scan_area()
+            else:
+                self.state = State.GATHER
+                self.gather_since = self.get_clock().now()
+                self.get_logger().info(
+                    f'집결지 도착 → GATHER: {self.wp["gather_wait_sec"]}초 집결대기')
+
+        elif self.state == State.SCAN_AREA:
+            # 한 스텝 도착 — 그 자리에 서서 판정 프레임을 모은다.
+            self.scan_dwell_since = self.get_clock().now()
             self.get_logger().info(
-                f'집결지 도착 → GATHER: {self.wp["gather_wait_sec"]}초 집결대기')
+                f'훑기 {self.scan_idx + 1}/{self.scan_steps()} 도착 — '
+                f'{self.scan_dwell_sec():.1f}초 관측')
 
         elif self.state == State.GUIDE:
             self.set_siren(False)
@@ -764,6 +801,30 @@ class MissionNode(Node):
             if not self.goal_active:
                 # 계산된 집결지 우선, 계산 불가였으면 yaml 고정값 (fallback)
                 self.send_goal(self.gather_wp or self.wp['gather'], tag='gather')
+
+        elif self.state == State.SCAN_AREA:
+            # 🔵 **쓰러진 사람이 확정되면 더 돌 이유가 없다.** 즉시 신고로 간다 —
+            #   나머지 스텝을 마저 도는 동안 사람은 계속 쓰러져 있다.
+            if self.fresh_person_status() == 'fallen':
+                self.get_logger().error('🔴 훑는 중 쓰러진 사람 확정 → RESCUE (남은 스텝 생략)')
+                self.enter_rescue()
+            elif self.scan_dwell_since is None:
+                # 이동 중 — goal 이 없으면 이번 스텝의 goal 을 낸다.
+                if not self.goal_active:
+                    self.send_goal(self.scan_goal(), tag='scan')
+            else:
+                waited = (self.get_clock().now()
+                          - self.scan_dwell_since).nanoseconds / 1e9
+                if waited >= self.scan_dwell_sec():
+                    self.scan_idx += 1
+                    self.scan_dwell_since = None
+                    if self.scan_idx >= self.scan_steps():
+                        # 한 바퀴 다 돌았다 → 판정은 GATHER 가 한다(이미 있는 분기).
+                        self.state = State.GATHER
+                        self.gather_since = self.get_clock().now()
+                        self.get_logger().info(
+                            f'훑기 완료 → GATHER: '
+                            f'{self.wp["gather_wait_sec"]}초 집결대기')
 
         elif self.state == State.GATHER:
             elapsed = (self.get_clock().now() - self.gather_since).nanoseconds / 1e9
@@ -896,8 +957,17 @@ class MissionNode(Node):
                         self.state = State.GUIDE
 
         elif self.state == State.SEARCH_BACK:
-            # 재발견은 zone='any'(전방위) — 역행 중엔 사람이 로봇 '앞'에 있으므로!
-            if self.monitor.visible(zone='any'):
+            # 🆕 08-22 예약 61 — 카메라 병행 재발견. 🔴 **OR 로만 더한다.**
+            #   라이다 판정을 대체하지 않는다 — 라이다는 빛과 무관하고 3 m 까지
+            #   실측으로 검증됐지만, 카메라의 그 거리·저조도는 아직 미검증이다
+            #   (역할 B 08-18 G5 표: 원거리 ❌). 기본은 꺼짐이다.
+            cam = self.camera_refind_status()
+            if cam == 'fallen':
+                # 🔴 역행 중에 **쓰러진 사람이 보인다.** 유도로 복귀하면 그를 두고
+                #   나가는 것이다. 보이는데 지나치지 않는다.
+                self.get_logger().error('🔴 역행 중 쓰러진 사람 확정 → RESCUE')
+                self.enter_rescue()
+            elif self.monitor.visible(zone='any') or cam == 'ok':
                 # ★ 재발견 → 유도 재개
                 self.get_logger().info('★ 추종자 재발견 → GUIDE 복귀')
                 self.cancel_current_goal()
@@ -1054,6 +1124,48 @@ class MissionNode(Node):
         timeout = float(self.wp.get('person_decide_timeout_sec',
                                     PERSON_DECIDE_TIMEOUT_DEFAULT))
         return 'rescue' if waited >= timeout else 'wait'
+
+    def camera_refind_status(self):
+        """카메라 재발견이 켜져 있을 때의 사람 상태. 꺼져 있으면 None.
+
+        예약 61 — 사용자 요청으로 등록했고 **기본 OFF** 로 좁혔다.
+        ⚠ 어댑터가 없으면 `fresh_person_status()` 가 'stale' 이라 켜 두어도 아무
+          영향이 없다. 그래도 키를 따로 두는 이유는 **의도를 남기기 위해서**다 —
+          "카메라도 본다" 는 결정은 설정에 적혀 있어야 한다.
+        """
+        # ⚠ `.get('search_back', {})` — 최소 wp 로 만든 회귀 환경에는 이 절이
+        #   없다. 선택 기능 하나가 그런 환경을 KeyError 로 죽이면 안 된다.
+        if not bool(self.wp.get('search_back', {}).get('camera_refind', False)):
+            return None
+        s = self.fresh_person_status()
+        return s if s in ('ok', 'fallen') else None
+
+    def scan_steps(self):
+        return max(1, int(self.wp.get('scan_steps', SCAN_STEPS_DEFAULT)))
+
+    def scan_dwell_sec(self):
+        return float(self.wp.get('scan_dwell_sec', SCAN_DWELL_SEC_DEFAULT))
+
+    def enter_scan_area(self):
+        self.scan_idx = 0
+        self.scan_dwell_since = None
+        self.state = State.SCAN_AREA
+        self.get_logger().info(
+            f'집결지 도착 → SCAN_AREA: 제자리로 한 바퀴 훑는다 '
+            f'({self.scan_steps()} 스텝 × {360.0 / self.scan_steps():.0f}°)')
+
+    def scan_goal(self):
+        """현재 스텝의 goal — 집결지와 **같은 (x,y)**, yaw 만 돌린다.
+
+        🔴 위치를 그대로 두는 것이 핵심이다. 조금이라도 옮기면 화재 배제거리·
+        keepout 전제가 흔들리고, 무엇보다 '제자리 훑기' 가 아니게 된다.
+        """
+        base = self.gather_wp or self.wp['gather']
+        step = 2.0 * math.pi / self.scan_steps()
+        yaw = float(base['yaw']) + step * (self.scan_idx + 1)
+        # normalize 는 목표 yaw 표현만 정리한다 — 회전량 자체는 Nav2 가 정한다.
+        return {'x': float(base['x']), 'y': float(base['y']),
+                'yaw': normalize_angle(yaw)}
 
     def enter_rescue(self):
         self.cancel_current_goal()
@@ -1365,6 +1477,8 @@ class MissionNode(Node):
             self.victim = None
             self._rescue_logged = False
             self._no_victim_logged = False
+            self.scan_idx = 0
+            self.scan_dwell_since = None
             # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
             # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
             self.speed.cancel_pending('reset')
