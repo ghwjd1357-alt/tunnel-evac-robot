@@ -22,6 +22,7 @@ import argparse
 import math
 
 import rclpy
+from geometry_msgs.msg import Twist, Vector3
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
@@ -112,13 +113,64 @@ def report(scan):
     advise(err)
 
 
+TURN_RATE = 0.45        # rad/s 명령 (회전 불감대 0.2329 를 확실히 넘는 값)
+DEG_PER_SEC = 8.0       # 그때 실측 회전율 (08-21 M2: 7.5~8.1 °/s)
+MAX_TURN = 45.0         # 안전 상한 — 이보다 크게 돌리려면 여러 번 나눠 친다
+
+
+def turn(node, deg):
+    """제자리 회전. 🔴 무장(z=2.0) 이 아니면 거부한다 — 명령만 나가고 안 도는
+    상태가 가장 헷갈린다(에러도 안 난다)."""
+    if abs(deg) > MAX_TURN:
+        print(f'🔴 {deg:+.1f}° 는 한 번에 너무 크다 (상한 {MAX_TURN}°). 나눠서 돌려라.')
+        return 1
+
+    diag = []
+    node.create_subscription(Vector3, '/drive/diag', lambda m: diag.append(m.z), 10)
+    end = node.get_clock().now().nanoseconds + 3_000_000_000
+    while not diag and node.get_clock().now().nanoseconds < end:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    if not diag:
+        print('🔴 /drive/diag 가 3초간 없다 — 구동부 확인')
+        return 1
+    if abs(diag[-1] - 2.0) > 0.1:
+        print(f'🔴 무장 안 됨 (z={diag[-1]:.1f}, 2.0 이어야 함). 회전하지 않는다.')
+        print('   ros2 service call /drive/enable std_srvs/srv/SetBool "{data: true}"')
+        return 1
+
+    pub = node.create_publisher(Twist, '/cmd_vel', 10)
+    msg = Twist()
+    msg.angular.z = TURN_RATE if deg > 0 else -TURN_RATE
+    sec = abs(deg) / DEG_PER_SEC
+    print(f'🔴 {"반시계" if deg > 0 else "시계"} {abs(deg):.1f}° · '
+          f'{sec:.1f}초 · z={msg.angular.z:+.2f}  — 시작')
+    end = node.get_clock().now().nanoseconds + int(sec * 1e9)
+    while node.get_clock().now().nanoseconds < end:
+        pub.publish(msg)
+        rclpy.spin_once(node, timeout_sec=0.1)
+    stop = Twist()
+    for _ in range(5):
+        pub.publish(stop)
+        rclpy.spin_once(node, timeout_sec=0.05)
+    print('🟢 정지. 다시 재라: python3 tools/wall_align.py')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--watch', action='store_true', help='계속 갱신')
+    ap.add_argument('--turn', type=float, metavar='DEG',
+                    help='제자리 회전 [도]. 양수=반시계. 무장 상태만 실행된다')
     a = ap.parse_args()
 
     rclpy.init()
     node = rclpy.create_node('wall_align')
+    if a.turn is not None:
+        try:
+            return turn(node, a.turn)
+        finally:
+            node.destroy_node()
+            rclpy.try_shutdown()
     got = []
     node.create_subscription(LaserScan, '/scan', lambda m: got.append(m), 10)
 
