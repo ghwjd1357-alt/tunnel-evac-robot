@@ -151,6 +151,14 @@ def make_env(tf_ok=True, state=State.GUIDE):
     node.patrol_idx = 0
     node.gather_wp = None
     node.gather_since = clock.now()
+    # 🆕 08-22 — 사람 판정 게이트의 상태들. ⚠ `make_env` 는 `__new__` 로 만들어
+    #   `__init__` 을 타지 않으므로, 생산 코드가 새 인스턴스 변수를 가지면
+    #   **여기도 같이 늘어난다.** 빠뜨리면 AttributeError 로 드러난다(조용하지 않다).
+    node.person_status = 'stale'
+    node.person_status_t = None
+    node.victim = None
+    node._rescue_logged = False
+    node._no_victim_logged = False
     node._guide_pending = False
     node._escaped_logged = False
     node._cancel_intent = None

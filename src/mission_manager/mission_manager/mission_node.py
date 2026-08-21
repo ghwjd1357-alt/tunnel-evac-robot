@@ -84,6 +84,14 @@ class State(Enum):
     #                       FollowerMonitor 가 이미 쓰는 비대칭과 같은 철학이다 —
     #                       "놓침 선언(비싼 역행 유발)은 신중히, 재발견은 빠르게."
     SEARCH_BACK = auto()  # 놓침 → 마지막 목격 지점으로 역행 재탐색
+    RESCUE = auto()       # 🆕 08-22 — 쓰러진 사람 확정. 관제에 신고하고 **그 자리에 선다.**
+    #                       BLOCKED 과 같은 구조다(새 goal 을 안 낸다 = 정지).
+    #                       탈출은 관제 `reset` 뿐이다 — 로봇이 스스로 "이제 됐다"
+    #                       고 판단할 근거가 없기 때문이다.
+    NO_VICTIM = auto()    # 🆕 08-22 — 집결지에 아무도 없다고 확정. 신고하고 선다.
+    #                       🔴 구판은 이 경우가 **없었다** — gather_wait_sec 타이머만
+    #                       보고 무조건 GUIDE 로 갔다. 즉 아무도 없는 복도를 앞장서서
+    #                       걸어 나갔다(`mission_node.py` GATHER 분기, 08-22 이전).
     ESCAPED = auto()      # 탈출 완료
     FAULT = auto()        # Nav2 실패 → 자동 재시도 → 소진 시 정지
     BLOCKED = auto()      # 🔴 08-21 §83.6 — 안전한 집결지를 못 만들어 사람에게 넘긴 상태.
@@ -101,6 +109,20 @@ class State(Enum):
 #   4초를 서 보는 것은 1/5 값도 안 되는 보험이다. 그리고 `lost` 가 이미 3초
 #   연속 미검출을 요구하므로, 사람이 정말 사라졌다면 여기서 7초를 쓴 셈이 된다.
 HOLD_SEC_DEFAULT = 4.0
+
+# 🆕 08-22 사람 판정 게이트 (`PROJECT_CONTEXT §4.1-b` 를 소비하는 쪽).
+# 🔴 **기본이 꺼짐이어야 한다.** 본편 테이크는 `camera:=false` 라 어댑터가 아예 없고,
+#   그러면 `/person_status` 가 한 건도 안 온다. 게이트를 무조건 걸면 그 상태가
+#   'stale' 로 굳어 **본편이 RESCUE 로 빠진다** — 사람이 멀쩡히 서 있는데도.
+#   예약 61 이 정한 방식과 같다: OR 로만 더하고 **기본 OFF**.
+PERSON_GATE_DEFAULT = False
+# 판정이 안 서는 채로 이만큼 더 기다리면 신고 쪽으로 간다. 🔴 모르면 신고다 —
+# 판정 불가를 '괜찮다'로 접으면 쓰러진 사람을 두고 나간다.
+PERSON_DECIDE_TIMEOUT_DEFAULT = 10.0
+# 🔴 미션 자신의 신선도 가드. 어댑터는 자기 입력이 끊기면 'stale' 을 **말해 주지만**,
+#   어댑터 자체가 죽으면 아무 말도 못 한다. 그때 마지막 'ok' 를 붙들고 있으면
+#   미션은 사람이 있는 줄 안다. 10 Hz 발행이므로 1초면 충분히 관대하다.
+PERSON_STATUS_TIMEOUT_DEFAULT = 1.0
 
 
 def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
@@ -488,6 +510,10 @@ class MissionNode(Node):
         # --- 통신 구성 ---
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.state_pub = self.create_publisher(String, '/mission_state', 10)
+        # 🆕 08-22 — 어댑터가 배달하는 사람 판정 (`PROJECT_CONTEXT §4.1-b`).
+        #   🔵 미션은 어댑터의 존재를 모른다 — `/alarm` 과 같은 방식이다.
+        self.create_subscription(String, '/person_status', self.on_person_status, 10)
+        self.create_subscription(PoseStamped, '/victim', self.on_victim, 10)
         self.siren_pub = self.create_publisher(Bool, '/siren', 10)
         self.create_subscription(PoseStamped, '/alarm', self.on_alarm, 10)
         # 관제 인터페이스 (07-07): reset = 처음부터 / abort = 즉시 정지 (FAULT 유지)
@@ -524,6 +550,12 @@ class MissionNode(Node):
         self.state = State.PATROL
         # 🆕 HOLD 진입 시각. None = HOLD 중이 아니다.
         self.hold_since = None
+        # 🆕 사람 판정 (08-22)
+        self.person_status = 'stale'   # 🔴 기동 직후는 '없음'이 아니라 '못 봤다'
+        self.person_status_t = None    # 마지막 수신 시각 (미션 자체 신선도 가드)
+        self.victim = None             # /victim 좌표 (신고에 싣는다)
+        self._rescue_logged = False
+        self._no_victim_logged = False
         # ★ 직전 tick 이 '실제로 분기시킨' 상태 (08-01 검토 §26 P1 — GUIDE 진입 감지용).
         #   resume_state(FAULT 복귀 목적지)와 혼동 금지: 이건 순수한 전이 감지 재료다.
         self._prev_tick_state = None
@@ -741,10 +773,30 @@ class MissionNode(Node):
                 #   실패(3회/예외/미준비 timeout)면 평시 0.26 으로 유도하는 대신 FAULT.
                 #   확인까지 로봇은 GATHER 로 정지 상태 = 안전.
                 #   서비스 미준비 대기·timeout 판정은 SpeedManager 가 담당.
-                self._guide_pending = True
-                self.get_logger().info(
-                    '집결대기 종료 — GUIDE 저속 적용 요청 (확인 후 유도 시작)')
-                self.speed.request_guide(float(self.wp['guide_speed']))
+                # 🆕 08-22 — 사람 판정 게이트. 🔴 **기본은 꺼짐**이라 본편
+                #   (`camera:=false`, 어댑터 없음)은 구판과 한 글자도 다르지 않게 돈다.
+                if not self.person_gate_on():
+                    self._enter_guide_lowspeed()
+                else:
+                    waited = elapsed - float(self.wp['gather_wait_sec'])
+                    verdict = self.person_verdict(waited)
+                    if verdict == 'guide':
+                        self._enter_guide_lowspeed()
+                    elif verdict == 'rescue':
+                        self.get_logger().error(
+                            f'🔴 집결지 판정 = 쓰러진 사람 → RESCUE '
+                            f'(상태 {self.fresh_person_status()}, 대기 {waited:.1f}s)')
+                        self.enter_rescue()
+                    elif verdict == 'no_victim':
+                        self.get_logger().error(
+                            f'🔴 집결지 판정 = 사람 없음 → NO_VICTIM (대기 {waited:.1f}s)')
+                        self.enter_no_victim()
+                    else:
+                        # 판정 보류 — 🔵 로봇은 GATHER 에 **서 있다**(goal 을 안 낸다).
+                        self.get_logger().warn(
+                            f'집결지 사람 판정 보류 ({self.fresh_person_status()}) '
+                            f'— 대기 {waited:.1f}s',
+                            throttle_duration_sec=3.0)
 
         elif self.state == State.GUIDE:
             # ★ fail-closed 게이트 (07-20 재검토 §11.3 P1) — 저속이 '적용 확인'되기
@@ -909,6 +961,24 @@ class MissionNode(Node):
                     f'관제에서 대피 경로를 판단하고 `reset` 으로 재가동할 것')
                 self._blocked_logged = True
 
+        elif self.state == State.RESCUE:
+            # 🔴 BLOCKED 과 같은 구조 — 새 goal 을 안 낸다. 그것이 정지의 구현이다.
+            #   사이렌은 유지한다(화재는 여전히 있다).
+            if not self._rescue_logged:
+                where = (f'({self.victim[0]:.2f}, {self.victim[1]:.2f})'
+                         if self.victim else '좌표 미수신')
+                self.get_logger().error(
+                    f'🔴 RESCUE — 움직일 수 없는 사람을 발견했다. 자동 주행을 멈췄다. '
+                    f'위치 {where}. 관제가 판단하고 `reset` 으로 재가동할 것')
+                self._rescue_logged = True
+
+        elif self.state == State.NO_VICTIM:
+            if not self._no_victim_logged:
+                self.get_logger().error(
+                    '🔴 NO_VICTIM — 집결지에 사람이 없다. 자동 주행을 멈췄다. '
+                    '관제가 판단하고 `reset` 으로 재가동할 것')
+                self._no_victim_logged = True
+
         elif self.state == State.FAULT:
             if self.fault_retries < self.MAX_RETRIES and self.resume_state is not None:
                 elapsed = (self.get_clock().now() - self.fault_since).nanoseconds / 1e9
@@ -933,6 +1003,68 @@ class MissionNode(Node):
     # ===========================================================
     # SEARCH_BACK 진입 — 안전장치 2개가 여기서 작동
     # ===========================================================
+    def _enter_guide_lowspeed(self):
+        """구판 GATHER→GUIDE 경로를 **그대로** 뽑아낸 것. 동작을 바꾸지 않는다.
+
+        ★ F2 (Codex §12.3): GUIDE 진입은 저속 '적용 확인' 후 — 전환은
+        `_on_guide_speed_ok` 성공 콜백이 한다. 실패(3회/예외/미준비 timeout)면
+        평시 0.26 으로 유도하는 대신 FAULT. 확인까지 로봇은 GATHER 로 정지 = 안전.
+        """
+        self._guide_pending = True
+        self.get_logger().info(
+            '집결대기 종료 — GUIDE 저속 적용 요청 (확인 후 유도 시작)')
+        self.speed.request_guide(float(self.wp['guide_speed']))
+
+    def on_person_status(self, msg: String):
+        self.person_status = msg.data.strip().lower()
+        self.person_status_t = self.get_clock().now()
+
+    def on_victim(self, msg: PoseStamped):
+        self.victim = (msg.pose.position.x, msg.pose.position.y)
+        self.get_logger().error(
+            f'🔴 쓰러진 사람 좌표 수신 ({self.victim[0]:.2f}, {self.victim[1]:.2f})')
+
+    def person_gate_on(self):
+        return bool(self.wp.get('person_gate', PERSON_GATE_DEFAULT))
+
+    def fresh_person_status(self):
+        """미션이 **자기 눈으로** 본 신선도. 어댑터가 죽으면 아무 말도 못 하므로,
+        마지막 값을 그대로 믿으면 사람이 있는 줄 안다."""
+        if self.person_status_t is None:
+            return 'stale'
+        age = (self.get_clock().now() - self.person_status_t).nanoseconds / 1e9
+        timeout = float(self.wp.get('person_status_timeout_sec',
+                                    PERSON_STATUS_TIMEOUT_DEFAULT))
+        return 'stale' if age > timeout else self.person_status
+
+    def person_verdict(self, waited):
+        """집결 대기가 끝난 뒤 어디로 갈지. 'guide'|'rescue'|'no_victim'|'wait'.
+
+        🔴 `unknown`·`stale` 은 **판정 보류**다 — 그동안 로봇은 GATHER 에 서 있다.
+        영원히 서 있을 수는 없으므로 `person_decide_timeout_sec` 뒤에는 **신고**로
+        간다. 모르는 채로 떠나는 것보다 모른다고 신고하는 쪽이 되돌릴 수 있다.
+        """
+        s = self.fresh_person_status()
+        if s == 'ok':
+            return 'guide'
+        if s == 'fallen':
+            return 'rescue'
+        if s == 'none':
+            return 'no_victim'
+        timeout = float(self.wp.get('person_decide_timeout_sec',
+                                    PERSON_DECIDE_TIMEOUT_DEFAULT))
+        return 'rescue' if waited >= timeout else 'wait'
+
+    def enter_rescue(self):
+        self.cancel_current_goal()
+        self._rescue_logged = False
+        self.state = State.RESCUE
+
+    def enter_no_victim(self):
+        self.cancel_current_goal()
+        self._no_victim_logged = False
+        self.state = State.NO_VICTIM
+
     def enter_hold(self):
         """🆕 08-22 — 놓침 확정 직후 제자리 정지. 비싼 역행 앞의 싼 한 걸음.
 
@@ -1225,6 +1357,14 @@ class MissionNode(Node):
             self.blocked_reason = None    # §83.6 — BLOCKED 탈출은 reset 뿐이다
             self._blocked_logged = False
             self.blocked_stop = None      # §84.2
+            # 🆕 08-22 — 사람 판정 잔재. 🔴 `person_status` 를 'stale' 로 되돌리는
+            #   것이 핵심이다. 'none' 으로 두면 다음 임무 첫 판정이 곧바로
+            #   NO_VICTIM 이 되고, 'ok' 로 두면 사람이 없어도 유도가 시작된다.
+            self.person_status = 'stale'
+            self.person_status_t = None
+            self.victim = None
+            self._rescue_logged = False
+            self._no_victim_logged = False
             # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
             # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
             self.speed.cancel_pending('reset')
