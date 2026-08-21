@@ -20,6 +20,7 @@
 
 import argparse
 import math
+import os
 
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
@@ -51,6 +52,11 @@ MAX_TURN = 45.0         # 안전 상한 — 이보다 크게 돌리려면 여러
 #     실제 = DEG_PER_SEC × (명령시간 − TURN_LAG)
 #   ⚠ 그래도 개루프다. 정확히 맞추려면 `--align`(닫힌 루프)을 쓴다.
 TURN_LAG = 0.45
+
+# 🔴 08-21 — 인쇄하는 명령에 상대경로를 썼더니 `~/Desktop` 에서 실행한
+#   사람이 `can't open file` 을 맞았다. **인쇄하는 명령은 어디서 쳐도
+#   되는 형태여야 한다.** 이 파일 자신의 절대경로를 쓴다.
+SELF = os.path.abspath(__file__)
 
 
 def fit(pts):
@@ -123,7 +129,7 @@ def report(scan):
         #   안 됐다. `--turn` 을 넣고도 이 안내문을 안 고쳐서 사람이 같은 자리를
         #   두 번 돌았다. **도구가 스스로 할 수 있으면 스스로 한다.**
         print(f'→ {tag}{turn} {abs(deg):.1f}° · 약 {sec:.1f}초. 이 명령으로 돌린다:')
-        print(f'   python3 tools/wall_align.py --turn {deg:.1f}')
+        print(f'   python3 {SELF} --turn {deg:.1f}')
 
     if len(got) == 2:
         gap = abs(got['좌'] - got['우'])
@@ -178,7 +184,7 @@ def turn(node, deg):
     for _ in range(5):
         pub.publish(stop)
         rclpy.spin_once(node, timeout_sec=0.05)
-    print('🟢 정지. 다시 재라: python3 tools/wall_align.py')
+    print(f'🟢 정지. 다시 재라: python3 {SELF}')
     return 0
 
 
