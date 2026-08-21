@@ -3410,6 +3410,31 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
     `allow_latest_tf_fallback:=false`. M3 자동 추천은 yaml 에 바로 넣지 않는다.
     `BLOCKED` 가 보이면 즉시 abort. yaw 는 x≈7 에서 사람 멈추기 직전에 확인한다.
 
+    ### ✅ 검토 §84 — `a9a5757` §83 반영 묶음 3회차 재검토 (2026-08-21 밤)
+
+    **P0 0 · P1 5 · P2 2.** 🔴 **"8건 전부 닫음" 이 다시 승인되지 않았다.**
+    §83 원입력 중 frame-before-track · walking-chain · M3 tick 표본 · run-count 정렬 ·
+    mode · dir-fsync · yaw 관문 위치는 **닫혔다.** 남은 것은 TF 대기가 실제 executor
+    에서 안 도는 것, BLOCKED 가 정지 종결을 확인 안 하는 것, 재무장 관문과 런타임
+    파라미터의 우회였다. 판정 문장 6줄은 `§8` 마지막에 있고, 서사 전량 =
+    `~/Desktop/개발현황/CODEX 현황/0821검토현황.md §84`.
+
+    🔵 **다섯을 우리가 먼저 재현했다** — `spin_thread=False` 에서 30 ms 뒤 도착 TF 를
+    102 ms LookupException 으로 놓침(True 로는 41 ms 성공) · 만료 seed 가 창 안 5건을
+    지움 · `NOT_PATROL`·`PATROLLING`·`BLOCKED PATROL` 이 재무장 통과 ·
+    런타임 불량 파라미터 4건 전부 저장 · S1-3 이 일반 취소라 종결 미확인.
+
+    🔴 **논증 판정** — ⓐ BLOCKED enum 정책 PASS 이나 *"tick 에 goal 가지 없음=정지"*
+    **기각** · ⓑ 관문 방향 부분 PASS(exact/fresh 아님) · ⓒ **기각**(0.10초가 정상
+    순서를 흡수한다는 주장) · ⓓ 상한 2.0 m 는 sanity cap 으로만 PASS · ⓔ M3 8조합은
+    공개대로 **표본** · ⓕ 하류 0회는 helper fail-closed 증거로 PASS.
+
+    ⚠ **`AGENTS §6` 회차 상한이 여기서 처음 구속됐다** — 같은 사슬 3회차다.
+    규칙은 *"P0 만 반영하고 동결"* 인데, **사용자 결정으로 P1·P2 전량을 반영**했다.
+    대가는 커밋 본문과 `CURRENT_HANDOFF` 역할 교대에 적었다.
+    🔴 **다음 회차가 열리면 P0 만 본다.**
+
+
 - **🔴 예약 40 — 각속도 손실 (2026-08-14 A-10 실측 · **08-18 원인 확정**)**
 
     🟢 **08-18 — 원인은 마찰이다. 제어가 아니다.** 무부하 대조가 갈랐다:
@@ -4898,3 +4923,9 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 | 🔴 **명령을 만든 것과 명령이 닿는 것은 다르다** — `재무장은 API 가 아니라 전달과 상태 관문까지가 계약이다`. §82.5 는 `/adapter_cmd rearm` 을 추가했지만 ⓐ 런북이 `--once` 라 discovery 전에 유실될 수 있었고(`AGENTS §4-2` 위반) ⓑ 미션 상태를 안 봐서 **이미 출동 중일 때 재무장하면 지속 오탐이 다음 테이크를 자동 시작**시켰다 ⓒ 전환 시험이 0건이었다. → PATROL 관문(미수신도 거부) + `REARM_REJECTED` 사유 발행 + 런북을 `-w 1 --times 3` 과 `REARMED` 확인으로. ⚠ 수동 우선권(first-arrival-wins) 근본 수정은 별도 이벤트 계약으로 남긴다 | 08-21 | 검토 §83.4 · `0822_촬영_명령묶음.md` 테이크 절차 ④ |
 | 🔴 **표본을 어디서 뜨느냐가 결론을 바꾼다** — `판정은 콜백 직후가 아니라 mission tick 이 보는 순간이고 안정성은 run 개수가 아니다`. 구판 `replay()` 는 scan 마다 `update()` 한 **뒤에만** `visible()` 을 읽었는데, 실제 미션은 **2 Hz tick** 에서 읽는다. 재현: 검출 10장 뒤 빈 장이면 구판은 run 0 을 냈지만 t=1.0 의 tick 이 빈 콜백보다 먼저 돌면 True 다 — 대조군 오탐을 0 으로 보고하는 방향의 오류다. 그리고 정렬이 `sum(run)` 내림차순이라 **안정 9초(run 1)보다 1.2초 깜빡임(run 7)을 골랐다.** → tick 을 시간축에 합쳐 **위상 4 × 같은시각 순서 2 = 8조합 최악값**으로 보고, 정렬 기준을 **최소 연속 지속시간**으로 바꿨다 | 08-21 | 검토 §83.5 · 논증 ⓔ 부분 기각 |
 | 🔴 **거부를 로그로만 하면 로봇은 계속 달린다** — `거부는 상태 전이여야 한다 — 경고만 찍고 return 하면 로봇은 기존 goal 을 계속 수행한다`. §82.7 의 S1-3 은 안전 집결지가 없을 때 경고 후 `return` 했다. 재현: `state=PATROL` · `cancel_current_goal()` **0회** · siren False — 정본이 적은 *"관제로 넘긴다"* 가 **상태 전이로 존재하지 않았다.** 관제는 raw `/alarm` 마커만 보고 접수됐다고 오해한다. → `BLOCKED` 상태 신설(FAULT 와 달리 **자동 재시도가 없다**) + 활성 goal 취소 + 사유 문자열. 탈출은 관제 `reset` 뿐이다. 📌 그리고 논증 ⓒ 의 근거가 틀렸다 — `min_fire_dist` 미선언은 `validate_waypoints` 가 이미 기동을 막으므로 production 구멍이 아니다 | 08-21 | 검토 §83.6 · 논증 ⓑ 부분 기각 |
+| 🔴 **콜백이 executor 를 붙잡고 기다리면 그 대기는 아무것도 도착시키지 못한다** — `콜백이 executor 를 붙잡고 기다리면 그 대기는 아무것도 도착시키지 못한다`. 08-21 어댑터는 `TransformListener(spin_thread=False)` + 단일 스레드 `rclpy.spin()` 이었다. 탐지 콜백 안의 `lookup_transform(timeout=0.10)` 이 executor 를 점유하는 동안 `/tf` 구독 콜백이 **돌 수 없다.** 실측: 30 ms 뒤 도착한 동일 stamp TF 를 **102 ms LookupException** 으로 놓쳤고, 콜백이 반환한 직후 같은 조회는 성공했다. 즉 "0.10초 기다린다" 가 아니라 "이미 버퍼에 있는 것만 기다린다" 였다. → **`spin_thread=True`** — 리스너에 자기 executor 를 준다(같은 입력 41 ms 성공). ⚠ 대가로 종료 시 stderr 에 `ExternalShutdownException` 역추적이 한 번 찍힌다 | 08-21 | 검토 §84.1 · 논증 ⓒ 기각 |
+| 🔴 **새 goal 을 안 내는 것은 정지가 아니다** — `새 goal 을 안 내는 것은 정지의 필요조건일 뿐이고 기존 goal 의 종결까지 봐야 멈춘 것이다`. §83.6 의 S1-3 거부는 `_cancel_intent` 를 안 세워 **일반 취소**로 들어갔다. 일반 취소는 세대를 stale 로 만들 뿐 cancel 예외·빈 `goals_canceling`·비-CANCELED 종결을 정지 실패로 승격하지 않는다(재현: cancel 응답을 빈 목록으로 주입해도 faults 0 · stop_pending False). 그래서 `/mission_state=BLOCKED` 인데 **Nav2 는 계속 달릴 수 있었다.** → `safety_stop` 의도 신설. `guide_stop` 의 종결 직렬화를 그대로 쓰되 **실패는 FAULT 가 아니라 stop-unconfirmed** 로 올린다(FAULT 는 자동 재시도가 있어 로봇이 스스로 재개한다). `blocked_stop` = none/pending/confirmed/unconfirmed | 08-21 | 검토 §84.2 · 논증 ⓐ 부분 기각 · `FREEZE_MANIFEST §10.30-b` |
+| 🔴 **부분 문자열은 상태 검사가 아니다** — `상태 관문은 완전일치와 신선도를 함께 요구한다 — 부분 문자열과 과거 캐시가 우회로다`. 재무장 관문이 `'PATROL' not in st` 였다. 직접 입력 재현: `NOT_PATROL` · `PATROLLING` · `BLOCKED PATROL` **셋 다 REARMED** 를 냈다. 그리고 `_mission_state` 는 stamp 없는 마지막 문자열 캐시라, 알람 직전 PATROL 을 받고 실제로는 APPROACH 로 바뀐 창에서 **과거를 현재로 승인**한다. → 완전일치 + `mission_state_max_age_sec 1.5`(미션은 2 Hz 로 흘린다) | 08-21 | 검토 §84.3 |
+| 🔴 **기동에서만 검증하면 런타임에 같은 구멍이 다시 열린다** — `런타임 변경도 기동과 같은 검증을 통과해야 하고 파생 상태를 같은 자리에서 갱신해야 한다`. 노드 설명은 전 파라미터를 `ros2 param set` 으로 바꿀 수 있다고 했는데 검증은 `__init__` 한 번뿐이고 콜백이 없었다. 실측: `max_range=-1` · `confirm_assoc_radius_m=1000` · `tf_wait_sec=5` 가 **전부 successful=True** 로 저장됐고, 그중 `max_range`·`tf_wait_sec` 는 다음 콜백이 **바로 썼다.** 반면 tracker 는 초기 객체라 `confirm_frames` 변경이 **전혀 안 먹었다** — 화면은 "적용됨" 인데 하나는 위험하게 적용되고 하나는 무시됐다. → `add_on_set_parameters_callback` 이 제안값을 현재 집합에 합쳐 검증하고, tracker 를 같은 자리에서 재구성한다(누적 관측은 지운다 — 정책이 바뀌었으므로). 📌 `confirm_frames` 하한도 1→2 로 올렸다(1이면 반복 관측이 없는 것이다) | 08-21 | 검토 §84.4 |
+| 🔴 **만료된 근거로 살아 있는 근거를 지우면 안 된다** — `결합은 창을 정리한 뒤에 판정한다 — 만료된 seed 가 창 안의 정상 누적을 지우면 안 된다`. §83.2 가 walking-chain 을 막으려고 seed 기준 결합을 넣었는데, **비교를 prune 보다 먼저** 했다. 재현: `need=5 window=3.0 radius=1.0` 에 `(0,0.0)(2.8,0.9)(2.9,0.9)(3.0,0.9)(3.1,1.8)(3.2,1.8)` 을 넣으면 창 안 5건은 서로 최대 0.9 m 인데 **이미 만료된 x=0 seed** 와 비교해 전부 reset → count 2 · 확정 0. walking-chain 을 막은 대가로 **반대 방향 false negative** 가 생긴 것이다. → prune 먼저, 그 결과의 첫 점을 seed 로 | 08-21 | 검토 §84.5 |
+| 🔴 **판정 불능과 불통과는 다른 종료코드다** — `판정 불능과 불통과는 다른 종료코드다 — 섞으면 기록 해석이 틀어진다`. `yaw_gate` 가 `--tol nan` · `--target nan` · `--tol -0.3` 을 전부 rc=1(*"여기서 멈추지 말 것"*)로 냈다. rc=1 은 **유효한 값의 불통과**이고 rc=2 는 **판정 불능**이라는 머리말 계약과 갈렸다. 현장에서 잘못 준 인자와 진짜 yaw 불통과가 같은 문구로 남으면 나중에 구별할 수 없다. → `check_args` 로 진입에서 막고, 순수 `verdict` 에도 비유한 방어를 둔다. `--tol > π` 도 거부한다(어떤 각도든 통과시키므로 관문이 아니게 된다) | 08-21 | 검토 §84.7 (P2) |

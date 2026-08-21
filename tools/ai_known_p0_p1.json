@@ -868,5 +868,30 @@
     "id": "0821-s13-reject-keeps-patrol-goal-83",
     "path": "src/mission_manager/mission_manager/mission_node.py",
     "anchor": "거부는 상태 전이여야 한다 — 경고만 찍고 return 하면 로봇은 기존 goal 을 계속 수행한다"
+  },
+  {
+    "id": "0821-tf-wait-blocked-by-single-thread-executor-84",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "콜백이 executor 를 붙잡고 기다리면 그 대기는 아무것도 도착시키지 못한다"
+  },
+  {
+    "id": "0821-blocked-without-stop-confirmation-84",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "새 goal 을 안 내는 것은 정지의 필요조건일 뿐이고 기존 goal 의 종결까지 봐야 멈춘 것이다"
+  },
+  {
+    "id": "0821-rearm-gate-substring-and-stale-84",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "상태 관문은 완전일치와 신선도를 함께 요구한다 — 부분 문자열과 과거 캐시가 우회로다"
+  },
+  {
+    "id": "0821-runtime-param-set-bypasses-validation-84",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "런타임 변경도 기동과 같은 검증을 통과해야 하고 파생 상태를 같은 자리에서 갱신해야 한다"
+  },
+  {
+    "id": "0821-seed-expiry-drops-valid-window-84",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "결합은 창을 정리한 뒤에 판정한다 — 만료된 seed 가 창 안의 정상 누적을 지우면 안 된다"
   }
 ]

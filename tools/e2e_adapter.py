@@ -18,6 +18,11 @@
     ② `ros2 topic echo > file` 은 블록 버퍼링이라 kill 하면 버퍼가 날아간다
     ③ pkill 정리가 상위 셸까지 말려들었다 (exit 144)
     → 한 프로세스 안에서 rclpy 로 돌리면 셋이 동시에 사라진다.
+
+⚠ **알려진 종료 잡음** — 08-21 §84.1 로 `TransformListener(spin_thread=True)` 를
+  켠 뒤부터, 케이스마다 노드를 정리할 때 그 리스너 스레드가 `InvalidHandle` /
+  `ExternalShutdownException` 역추적을 stderr 에 찍는다. **판정과 무관하다** —
+  결과는 마지막 "N/N 통과" 줄과 종료코드가 소유한다.
 """
 
 import sys

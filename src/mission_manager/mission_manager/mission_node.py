@@ -522,6 +522,8 @@ class MissionNode(Node):
             self.nav, self.get_logger(),
             on_reached=self.on_reached,
             on_fault=self.enter_fault,
+            on_stop_unconfirmed=self.on_safety_stop_unconfirmed,
+            on_stop_confirmed=self.on_safety_stop_confirmed,
             on_active=lambda v: setattr(self, 'goal_active', v))
         self.gather_since = None
         self._escaped_logged = False
@@ -529,6 +531,13 @@ class MissionNode(Node):
         self.fire = None                # funnel 번역된 화재 정보
         self.blocked_reason = None      # §83.6 BLOCKED 사유 (관제·로그용)
         self._blocked_logged = False
+        # 🔴 §84.2 — BLOCKED 는 "새 goal 을 안 낸다" 만으로 정지가 아니다.
+        #   기존 goal 이 실제로 CANCELED 로 끝났는지까지 봐야 "멈췄다" 이다.
+        #   'none'        취소할 goal 이 애초에 없었다 = 정지 상태
+        #   'pending'     취소는 보냈고 종결 대기 — **아직 멈췄다고 말하지 않는다**
+        #   'confirmed'   CANCELED 종결 관찰 = 정지 완료
+        #   'unconfirmed' 취소가 거절·예외·비-CANCELED 종결 — 🔴 사람이 세워야 한다
+        self.blocked_stop = None
         self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
         # ★ 속도 변경의 비동기 수명주기(요청·확인·3회 재시도·stale 세대 구분·
         #   reconcile)는 전부 SpeedManager 소유 (07-20 구조 분리 1/3).
@@ -823,9 +832,22 @@ class MissionNode(Node):
         elif self.state == State.BLOCKED:
             # 🔴 §83.6 — 아무 goal 도 안 낸다. 자동 복귀도 없다. 관제 `reset` 만이
             #   여기서 나가는 길이다 — 그것이 "사람에게 넘긴다" 의 실제 구현이다.
-            if not self._blocked_logged:
+            # 🔴 §84.2 — 그런데 "새 goal 을 안 낸다" 는 **필요조건일 뿐**이다.
+            #   기존 goal 의 CANCELED 종결까지 봐야 "멈췄다" 라고 말할 수 있다.
+            if self.blocked_stop == 'unconfirmed':
                 self.get_logger().error(
-                    f'🔴 BLOCKED — 자동 주행을 멈췄다. 사유: {self.blocked_reason}. '
+                    f'🔴 BLOCKED · 정지 미확인 — 취소가 종결로 확인되지 않았다. '
+                    f'로봇이 **아직 달리고 있을 수 있다.** 즉시 E-stop 으로 물리 정지를 '
+                    f'확인할 것. 사유: {self.blocked_reason}',
+                    throttle_duration_sec=2.0)
+            elif self.blocked_stop == 'pending':
+                self.get_logger().warn(
+                    '🔶 BLOCKED · 정지 종결 대기 — 아직 "멈췄다" 로 읽지 말 것',
+                    throttle_duration_sec=2.0)
+            elif not self._blocked_logged:
+                self.get_logger().error(
+                    f'🔴 BLOCKED (정지 확인됨) — 자동 주행을 멈췄다. '
+                    f'사유: {self.blocked_reason}. '
                     f'관제에서 대피 경로를 판단하고 `reset` 으로 재가동할 것')
                 self._blocked_logged = True
 
@@ -1041,7 +1063,15 @@ class MissionNode(Node):
                         f'탈출구 근처 화재라 경로가 짧아 집결지가 화재로 끌려왔다. '
                         f'자동 출동하지 않는다 — 관제에서 대피 경로를 판단할 것')
                     self.get_logger().warn(msg_txt)
+                    # 🔴 §84.2 — 일반 취소가 아니라 **안전정지 의도**로 건다.
+                    #   일반 취소는 세대만 stale 로 만들고 종결을 확인하지 않는다
+                    #   (재현: cancel 응답을 빈 목록으로 주입해도 faults 0 ·
+                    #    stop_pending False → 미션은 BLOCKED 인데 Nav2 는 계속 달림).
+                    had_goal = self.goals.active
+                    self._cancel_intent = 'safety_stop'
                     self.cancel_current_goal()
+                    self.blocked_stop = (
+                        'pending' if (had_goal or self.goals.stop_pending) else 'none')
                     self._blocked_logged = False
                     self.blocked_reason = (
                         f'unsafe_gather fire=({fx:.2f},{fy:.2f}) '
@@ -1065,6 +1095,24 @@ class MissionNode(Node):
         self.cancel_current_goal()
         self.set_siren(True)
         self.state = State.APPROACH
+
+    def on_safety_stop_unconfirmed(self, reason):
+        """§84.2 — 안전정지 취소의 종결 확인 실패. **FAULT 로 안 보낸다.**
+
+        FAULT 는 자동 재시도가 있어 로봇이 스스로 재개한다. 안전한 집결지가
+        없어서 멈춘 상황에서는 재시도할 goal 자체가 없다 — 사람이 판단해야 한다."""
+        self.blocked_stop = 'unconfirmed'
+        self.blocked_reason = f'{self.blocked_reason or "안전정지"} · 정지 미확인({reason})'
+        self.get_logger().error(
+            f'🔴 안전정지 종결 확인 실패 — {reason}. 로봇이 아직 달리고 있을 수 '
+            f'있다. **E-stop 으로 물리 정지를 확인할 것.**')
+
+    def on_safety_stop_confirmed(self):
+        """§84.2 — CANCELED 종결 관찰. 이제서야 '멈췄다' 라고 말할 수 있다."""
+        if self.blocked_stop in ('pending', None):
+            self.blocked_stop = 'confirmed'
+            self._blocked_logged = False
+            self.get_logger().warn('🔵 안전정지 CANCELED 종결 확인 — 로봇이 섰다')
 
     def on_cmd(self, msg: String):
         """관제 명령 (07-07). 얇게 유지 — 명령 2개, 나머지는 무시+로그."""
@@ -1093,6 +1141,7 @@ class MissionNode(Node):
             self._guide_pending = False   # F2: 응답 유실로 남은 게이트 잔재 청소
             self.blocked_reason = None    # §83.6 — BLOCKED 탈출은 reset 뿐이다
             self._blocked_logged = False
+            self.blocked_stop = None      # §84.2
             # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
             # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
             self.speed.cancel_pending('reset')

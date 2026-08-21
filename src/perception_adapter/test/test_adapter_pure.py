@@ -349,3 +349,40 @@ def test_params_assoc_radius_upper_bound_is_two_metres():
     화재는 정지 물체이므로 map 좌표에서 그보다 크게 튀면 같은 대상이 아니다."""
     assert validate_params({**GOOD, 'confirm_assoc_radius_m': 2.0}) == []
     assert validate_params({**GOOD, 'confirm_assoc_radius_m': 2.01}) != []
+
+
+# ── §84.5 재현본: 만료된 seed 가 창 안 누적을 지우면 안 된다 ────────────
+
+def test_tracker_expired_seed_does_not_reset_valid_window():
+    """🔴 재현 — 창(3.0s) 안 2.8~3.2 의 5건은 서로 최대 0.9m 다.
+
+    §83.2 가 seed 결합을 넣으면서 **비교를 prune 보다 먼저** 했다. 그래서 이미
+    만료된 x=0 seed 와 비교해 전부 reset 됐고 count 2 · 확정 0 이었다.
+    walking-chain 을 막은 대가로 반대 방향 false negative 가 생긴 것이다."""
+    t = ConfirmTracker(need=5, window_sec=3.0, assoc_radius=1.0)
+    seq = [(0.0, 0.0), (2.8, 0.9), (2.9, 0.9), (3.0, 0.9), (3.1, 1.8), (3.2, 1.8)]
+    got = [t.add(tt, tt, (x, 0.0, 0.0)) for tt, x in seq]
+    assert got[-1] is True, (got, t.count())
+    assert t.count() == 5, t.count()
+
+
+def test_tracker_still_rejects_walking_chain_after_prune_fix():
+    """🟢 회귀 방지 — §83.2 가 막은 것을 §84.5 수정이 되살리면 안 된다."""
+    t = ConfirmTracker(need=5, window_sec=10.0, assoc_radius=1.0)
+    pts = [(0.0, 0, 0), (0.9, 0, 0), (1.8, 0, 0), (2.7, 0, 0), (3.6, 0, 0)]
+    assert not any(t.add(i * 0.1, float(i), q) for i, q in enumerate(pts))
+
+
+def test_tracker_boundary_exactly_at_window_edge():
+    """창 경계 정확히 위의 hit 는 살아 있다 (`>=` 계약)."""
+    t = ConfirmTracker(need=2, window_sec=1.0, assoc_radius=1.0)
+    t.add(0.0, 0.0, (0.0, 0, 0))
+    assert t.add(1.0, 1.0, (0.0, 0, 0)) is True, t.count()
+
+
+# ── §84.4: confirm_frames 하한 ─────────────────────────────────────────
+
+def test_params_reject_confirm_frames_one():
+    """🔴 need=1 이면 '반복 관측' 이 한 장이라 억제가 없다 — 존재 이유가 사라진다."""
+    assert validate_params({**GOOD, 'confirm_frames': 1}) != []
+    assert validate_params({**GOOD, 'confirm_frames': 2}) == []

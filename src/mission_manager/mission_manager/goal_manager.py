@@ -74,7 +74,8 @@ class GoalManager:
     CANCEL_STOP_MAX_BLOCKS = 60
 
     def __init__(self, action_client, logger, *,
-                 on_reached, on_fault, on_active):
+                 on_reached, on_fault, on_active,
+                 on_stop_unconfirmed=None, on_stop_confirmed=None):
         """action_client = NavigateToPose ActionClient (노드가 만들어 줌).
         on_reached() / on_fault() / on_active(bool) = 노드의 정책 콜백.
         (SpeedManager 와 달리 시계가 필요 없다 — 예산이 '시도 횟수' 기반이라
@@ -84,6 +85,10 @@ class GoalManager:
         self._on_reached = on_reached
         self._on_fault = on_fault
         self._on_active = on_active
+        # §84.2 — 안전정지 종결 확인 실패 신호 (없으면 FAULT 로 떨어진다).
+        self._on_stop_unconfirmed = on_stop_unconfirmed or (lambda reason: None)
+        # §84.2 — 안전정지 CANCELED 종결 확인 신호.
+        self._on_stop_confirmed = on_stop_confirmed or (lambda: None)
 
         # --- 세대 토큰 + 현재 goal ---
         self._seq = 0             # send_goal/cancel 마다 +1 (stale 판별 기준)
@@ -98,6 +103,11 @@ class GoalManager:
         self._stop_pending = False   # CANCELED 종결 대기 중 — 신규 goal 전면 보류
         self._stop_seq = None        # 종결을 기다리는 그 goal 의 세대
         self._stop_blocks = 0        # 보류 중 '보내려던 시도' 누적 (예산 소진 판정)
+        # 🔴 08-21 §84.2 — 정지 직렬화를 **누가 걸었는지**를 기억한다.
+        #   'guide_stop' 실패는 FAULT(자동 재시도 경로)로 가지만,
+        #   'safety_stop'(S1-3 안전 거부) 실패는 **재시도할 대상이 없다** —
+        #   사람이 판단해야 하므로 별도 신호로 올린다.
+        self._stop_intent = None
 
     # ===========================================================
     # 공개 API — MissionNode 가 위임하는 2개
@@ -116,9 +126,11 @@ class GoalManager:
             self._stop_blocks += 1
             if self._stop_blocks >= self.CANCEL_STOP_MAX_BLOCKS:
                 self._log.error(
-                    f'★ 유도정지 취소가 {self.CANCEL_STOP_MAX_BLOCKS} tick 내 '
-                    f'CANCELED 종결 실패 — 정지 확인 불가, FAULT (재전송 금지)')
-                self._on_fault()           # 재전송 금지: _stop_pending 은 유지
+                    f'★ 정지 취소가 {self.CANCEL_STOP_MAX_BLOCKS} tick 내 '
+                    f'CANCELED 종결 실패 — 정지 확인 불가 (재전송 금지)')
+                # §84.2 — 의도별 귀속. safety_stop 은 FAULT 자동복귀로 안 보낸다.
+                self._stop_failed(
+                    f'{self.CANCEL_STOP_MAX_BLOCKS} tick 내 종결 실패')
             else:
                 self._log.warn(
                     '⚠ 유도정지 취소 종결 대기 — 신규 goal 보류',
@@ -160,7 +172,7 @@ class GoalManager:
         stopped_seq = self._seq
         self._seq += 1
 
-        if intent == 'guide_stop':
+        if intent in ('guide_stop', 'safety_stop'):
             # ★ P1 보완(§2): 멈출 대상은 '수락된 핸들'만이 아니다. 요청은 나갔지만
             #   수락 응답만 늦는 goal(_response_pending_seq)도 서버에선 이미 주행
             #   중일 수 있다 — 그 세대도 B 정지 대상으로 무장한다. 요청조차 없고
@@ -170,6 +182,7 @@ class GoalManager:
                 self._stop_pending = True
                 self._stop_seq = stopped_seq
                 self._stop_blocks = 0
+                self._stop_intent = intent
         elif intent == 'hard':
             self._clear_stop()
 
@@ -178,7 +191,8 @@ class GoalManager:
             # 경로(_on_goal_response stale)에서 취소·감시가 이어진다.
             self._cancel_with_confirm(
                 self._handle, f'현재 목표(seq={stopped_seq})',
-                stop_seq=(stopped_seq if intent == 'guide_stop' else None))
+                stop_seq=(stopped_seq
+                          if intent in ('guide_stop', 'safety_stop') else None))
             self._handle = None
         self._set(False)
 
@@ -195,6 +209,27 @@ class GoalManager:
         self._stop_pending = False
         self._stop_seq = None
         self._stop_blocks = 0
+        self._stop_intent = None
+
+    @property
+    def stop_pending(self):
+        """§84.2 — 정지 종결을 아직 기다리는가 (미션이 읽는다)."""
+        return self._stop_pending
+
+    def _stop_failed(self, reason):
+        """🔴 §84.2 — 정지 확인 실패의 귀속처를 **의도로** 가른다.
+
+        `guide_stop` — 저속 상실에 의한 유도정지. FAULT 로 올려 기존 재시도
+                       정책에 맡긴다(그 경로는 재시도가 의미 있다).
+        `safety_stop` — S1-3 안전 거부. **재시도할 대상이 자체가 없다** —
+                       안전한 집결지가 없어서 멈춘 것이므로 다시 보낼 goal 이
+                       없다. FAULT 자동복귀와 섞으면 로봇이 스스로 재개한다.
+                       → 별도 신호로 사람에게 올린다. `_stop_pending` 은 유지.
+        """
+        if self._stop_intent == 'safety_stop':
+            self._on_stop_unconfirmed(reason)
+        else:
+            self._on_fault()
 
     def _clear_response_pending(self, seq):
         """자기 seq 의 '수락응답 대기' 표시만 비운다 — 오래된 응답이 새 요청의
@@ -217,13 +252,16 @@ class GoalManager:
             return False
         if status == GoalStatus.STATUS_CANCELED:
             self._log.info(
-                f'유도정지 취소 CANCELED 종결 확인(seq={seq}) — 신규 goal 허용')
+                f'정지 취소 CANCELED 종결 확인(seq={seq}) — 신규 goal 허용')
+            safety = self._stop_intent == 'safety_stop'
             self._clear_stop()
+            if safety:
+                self._on_stop_confirmed()      # §84.2 — 정지 완료를 미션에 알린다
         else:
             self._log.error(
-                f'★ 유도정지 취소가 CANCELED 아닌 status={status} 로 '
-                f'종결(seq={seq}) — 정지 확인 불가, FAULT (재전송 금지)')
-            self._on_fault()               # _stop_pending 유지 = 재전송 금지
+                f'★ 정지 취소가 CANCELED 아닌 status={status} 로 '
+                f'종결(seq={seq}) — 정지 확인 불가 (재전송 금지)')
+            self._stop_failed(f'status={status} 종결 (seq={seq})')
         return True
 
     def _stop_target_terminal_lost(self, seq):
@@ -236,8 +274,8 @@ class GoalManager:
         if not self._is_stop_target(seq):
             return False
         self._log.error(
-            f'★ 유도정지 대상(seq={seq}) 종결 확인 불가 — FAULT (재전송 금지)')
-        self._on_fault()                   # _stop_pending 유지 = 재전송 금지
+            f'★ 정지 대상(seq={seq}) 종결 확인 불가 (재전송 금지)')
+        self._stop_failed(f'종결 확인 불가 (seq={seq})')   # _stop_pending 유지
         return True
 
     # ===========================================================
@@ -259,9 +297,9 @@ class GoalManager:
             elif self._is_stop_target(seq):
                 # ★ P1: B 대상의 응답 자체가 예외 = 수락 여부 불명 → 정지 확인 불가.
                 self._log.error(
-                    f'★ 유도정지 대상(seq={seq}) 응답 예외 — 수락 여부 불명, '
-                    f'FAULT (재전송 금지)')
-                self._on_fault()               # _stop_pending 유지 = 재전송 금지
+                    f'★ 정지 대상(seq={seq}) 응답 예외 — 수락 여부 불명 '
+                    f'(재전송 금지)')
+                self._stop_failed(f'응답 예외 (seq={seq})')   # _stop_pending 유지
             return
         self._clear_response_pending(seq)
         if seq != self._seq:
@@ -352,7 +390,7 @@ class GoalManager:
         except Exception as e:
             self._log.error(f'★ {tag} 취소 요청 실패: {e} — 정지 미보장')
             if stop_seq is not None and self._is_stop_target(stop_seq):
-                self._on_fault()        # 재전송 금지: _stop_pending 유지
+                self._stop_failed(f'취소 요청 실패: {e}')
             return
         fut.add_done_callback(
             partial(self._on_cancel_response, tag, stop_seq))

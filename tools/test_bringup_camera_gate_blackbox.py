@@ -52,33 +52,49 @@ def count(tmp, name):
     return len(open(f).read()) if os.path.exists(f) else 0
 
 
-def build(tmp, camera, camera_rc=0, sensors_rc=0):
+# 🔴 08-21 §84.6 — production 의 **직계 하류 전량**을 여기에 적는다.
+#   구판 가짜 build 는 camera 성공 하류를 `[slam]` 하나로만 재구성했다. 실제
+#   `real_bringup` 은 `[slam, gate_localized]` 두 개다. 그래서 production 에서
+#   `gate_localized` 하나가 사슬에서 빠져도 black-box 와 구조 검사가 **둘 다
+#   통과**할 수 있었다. 아래 목록이 그 폐포(closure)를 고정한다.
+#   ⚠ production 사슬을 바꾸면 이 목록도 같이 고쳐야 한다 —
+#     `test_downstream_list_matches_production` 이 그것을 강제한다.
+SENSOR_DOWNSTREAM = ('slam', 'gate_localized')
+
+
+def build(tmp, camera, camera_rc=0, sensors_rc=0, downstream=SENSOR_DOWNSTREAM):
     """real_bringup 과 **같은 합성 규칙**으로 사슬을 만든다."""
     gate_sensors = proc(tmp, 'gate_sensors', sensors_rc)
     gate_camera = proc(tmp, 'gate_camera', camera_rc)
-    slam = proc(tmp, 'slam')
+    after = [proc(tmp, name) for name in downstream]
     return LaunchDescription([
         gate_sensors,
         GroupAction(
             actions=[
                 when_ready(gate_sensors, [gate_camera], '카메라 depth 스트림 확인'),
-                when_ready(gate_camera, [slam], '위치추정(slam_toolbox)'),
+                when_ready(gate_camera, after, '위치추정(slam_toolbox)'),
             ],
             condition=IfCondition(LaunchConfiguration('camera')),
         ),
         GroupAction(
-            actions=[when_ready(gate_sensors, [slam], '위치추정(slam_toolbox)')],
+            actions=[when_ready(gate_sensors, after, '위치추정(slam_toolbox)')],
             condition=UnlessCondition(LaunchConfiguration('camera')),
         ),
     ])
 
 
-def run(tmp, camera, camera_rc=0, sensors_rc=0):
+def run(tmp, camera, camera_rc=0, sensors_rc=0, downstream=SENSOR_DOWNSTREAM):
     """LaunchService 로 실제 실행하고 종료코드를 돌려준다."""
     ls = LaunchService(noninteractive=True)
     ls.context.launch_configurations['camera'] = 'true' if camera else 'false'
-    ls.include_launch_description(build(tmp, camera, camera_rc, sensors_rc))
+    ls.include_launch_description(
+        build(tmp, camera, camera_rc, sensors_rc, downstream))
     return ls.run(shutdown_when_idle=True)
+
+
+def all_downstream(tmp):
+    """직계 하류 전원의 기동 횟수."""
+    return {n: count(tmp, n) for n in SENSOR_DOWNSTREAM}
 
 
 def test_camera_true_runs_depth_gate_then_slam(tmp_path):
@@ -86,7 +102,8 @@ def test_camera_true_runs_depth_gate_then_slam(tmp_path):
     t = str(tmp_path)
     rc = run(t, camera=True, camera_rc=0)
     assert count(t, 'gate_camera') == 1
-    assert count(t, 'slam') == 1
+    # 🔴 §84.6 — slam 하나가 아니라 **직계 하류 전원**이 정확히 1회여야 한다
+    assert all_downstream(t) == {n: 1 for n in SENSOR_DOWNSTREAM}, all_downstream(t)
     assert rc == 0
 
 
@@ -97,7 +114,8 @@ def test_camera_true_depth_failure_shuts_down_without_slam(tmp_path):
     t = str(tmp_path)
     rc = run(t, camera=True, camera_rc=1)
     assert count(t, 'gate_camera') == 1
-    assert count(t, 'slam') == 0, 'depth 실패인데 slam 이 떴다'
+    assert all_downstream(t) == {n: 0 for n in SENSOR_DOWNSTREAM}, \
+        f'depth 실패인데 하류가 떴다 {all_downstream(t)}'
     # ⚠ rc 를 fail-closed 신호로 쓰지 않는다 — `Shutdown` 은 런치를 **정상**
     #   종료시켜 rc=0 이다(실측). 증거는 "하류가 0회" 쪽이다.
     assert rc == 0, rc
@@ -108,7 +126,7 @@ def test_camera_false_skips_the_depth_gate_entirely(tmp_path):
     t = str(tmp_path)
     rc = run(t, camera=False)
     assert count(t, 'gate_camera') == 0
-    assert count(t, 'slam') == 1
+    assert all_downstream(t) == {n: 1 for n in SENSOR_DOWNSTREAM}, all_downstream(t)
     assert rc == 0
 
 
@@ -118,6 +136,32 @@ def test_sensor_gate_failure_stops_everything_in_both_modes(tmp_path):
         t = str(tmp_path / f'sensors_{cam}')
         os.makedirs(t, exist_ok=True)
         rc = run(t, camera=cam, sensors_rc=1)
-        assert count(t, 'slam') == 0, cam
+        assert all_downstream(t) == {n: 0 for n in SENSOR_DOWNSTREAM}, cam
         assert count(t, 'gate_camera') == 0, cam
         assert rc == 0, (cam, rc)      # ⚠ 위와 같은 이유 — rc 는 신호가 아니다
+
+
+def test_downstream_list_matches_production():
+    """🔴 §84.6 — 이 파일의 하류 목록이 실제 런치와 갈리면 검사가 무의미하다.
+
+    production `launch_setup` 을 돌려 `gate_sensors`(camera=false) /
+    `gate_camera`(camera=true) 의 **직계 하류 이름 집합**을 뽑아 대조한다.
+    한쪽이 빠지면 여기서 FAIL 한다 — 구판은 그 소실을 못 잡았다."""
+    import test_bringup_camera_gate as S
+    for cam, gate in ((True, 'readiness_gate_camera'),
+                      (False, 'readiness_gate_sensors')):
+        actions, ctx = S._actions(camera=cam)
+        chain = S._chain(actions, ctx)
+        got = set(chain[gate])
+        want = {'slam_toolbox', 'readiness_gate_localized'}
+        assert got == want, (cam, got, want)
+    # 이 파일이 세는 표식 이름과 개수가 그 집합과 대응해야 한다
+    assert len(SENSOR_DOWNSTREAM) == 2, SENSOR_DOWNSTREAM
+
+
+def test_a_missing_downstream_is_caught():
+    """하류 하나를 빼면 black-box 가 죽어야 한다 (검사의 검사)."""
+    import tempfile
+    t = tempfile.mkdtemp()
+    run(t, camera=True, camera_rc=0, downstream=('slam',))
+    assert all_downstream(t) != {n: 1 for n in SENSOR_DOWNSTREAM}

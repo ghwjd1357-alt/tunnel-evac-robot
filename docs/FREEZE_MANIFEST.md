@@ -1708,3 +1708,35 @@ FAULT 와 다름   FAULT 는 Nav2 실패이고 MAX_RETRIES 자동 재시도가 �
 - **관제 UI 는 아직 `BLOCKED` 를 모른다.** `/mission_state` 로 문자열은 나가지만
   브라우저 표시는 안 고쳤다 — 런북 중단 신호에 문장으로만 넣었다.
 - **실차 검증 0회.** 단위 재현 10건뿐이다.
+
+### 10.30-b. 아홉 번째 예외 **2차 확장** — 검토 §84 반영 (2026-08-21, 같은 날 밤)
+
+| | |
+|---|---|
+| 승인 | 사용자, 2026-08-21 (*"마지막 7건 다 보완 진행해보고 다시 검토받고 판단하자"*) |
+| 추가 범위 | `goal_manager.py` — `safety_stop` 의도 + 정지 확인 실패의 별도 귀속 |
+| 왜 새 예외를 안 열었나 | §10.30-a 가 만든 BLOCKED 의 **완결**이다. "거부한다" → "실제로 섰다" 까지가 한 결함(§82.7 → §83.6 → §84.2)이고, 새 표면을 열지 않는다 |
+| 변경 안 함 (경계) | `guide_stop` 정책 · FAULT 재시도 · `send_goal` 예산 · 상태 전이 나머지 전량 |
+| 회귀 | `pytest src/mission_manager` **199**(신규 5) · 기존 `guide_stop` 회귀 전량 불변 |
+
+**무엇이 바뀌었나** — §10.30-a 의 S1-3 거부는 `_cancel_intent` 를 안 세워 **일반
+취소**로 들어갔다. 일반 취소는 세대를 stale 로 만들 뿐, cancel 예외·빈
+`goals_canceling`·비-CANCELED 종결을 **정지 실패로 승격하지 않는다.**
+
+```
+safety_stop   guide_stop 의 종결 직렬화를 그대로 쓴다(_stop_pending·_stop_seq).
+              다른 것은 **실패의 귀속처**뿐이다:
+                guide_stop  실패 → FAULT (자동 재시도 경로가 의미 있다)
+                safety_stop 실패 → stop-unconfirmed (재시도할 goal 이 없다.
+                                   FAULT 로 보내면 로봇이 스스로 재개한다)
+blocked_stop  none / pending / confirmed / unconfirmed
+              🔴 `pending` 과 `unconfirmed` 에서는 "멈췄다" 라고 말하지 않는다.
+```
+
+### 🔴 이 확장이 덮지 않는 것
+
+- **관제 UI 는 `blocked_stop` 을 모른다.** `/mission_state` 는 여전히 `BLOCKED`
+  하나이고 세부는 로그와 `blocked_reason` 에만 있다. 런북이 문장으로 든다.
+- **`unconfirmed` 에서 로봇을 물리적으로 세우는 것은 사람이다** — E-stop 이다.
+  소프트웨어가 더 할 수 있는 것이 없다는 것이 이 상태의 정의다.
+- **실차 검증 0회.** 단위 재현 5건뿐이다.

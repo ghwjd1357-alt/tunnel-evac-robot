@@ -68,3 +68,37 @@ def test_quaternion_to_yaw_round_trips():
         th = math.radians(deg)
         q = (0.0, 0.0, math.sin(th / 2), math.cos(th / 2))
         assert abs(wrap(yaw_from_quaternion(*q) - th)) < 1e-9, deg
+
+
+# ── §84.7: 판정 불능(rc=2) 과 불통과(rc=1) 를 가른다 ────────────────────
+
+def test_check_args_rejects_nonfinite_and_out_of_range():
+    """🔴 재현본 — 구판은 이 셋을 전부 rc=1("멈추지 말 것")로 냈다."""
+    from yaw_gate import check_args
+    assert check_args(float('nan'), 0.3, 5.0)
+    assert check_args(PI, float('nan'), 5.0)
+    assert check_args(PI, -0.3, 5.0)
+    assert check_args(PI, 0.0, 5.0)
+    assert check_args(PI, 0.3, -1.0)
+    assert check_args(PI, 0.3, float('inf'))
+
+
+def test_check_args_rejects_tolerance_wider_than_pi():
+    """허용오차가 π 를 넘으면 어떤 각도든 통과한다 — 관문이 아니게 된다."""
+    from yaw_gate import check_args
+    assert check_args(PI, 4.0, 5.0)
+    assert check_args(PI, PI, 5.0) == []      # 정확히 π 는 아직 의미가 있다
+
+
+def test_check_args_accepts_the_shipping_defaults():
+    from yaw_gate import check_args
+    assert check_args(PI, 0.3, 5.0) == []
+
+
+def test_verdict_defends_nonfinite_even_if_check_args_is_bypassed():
+    """`check_args` 를 안 부르는 호출자가 생겨도 NaN 이 '불통과' 로 안 둔갑한다."""
+    for args in ((float('nan'), PI, 0.3), (PI, float('nan'), 0.3),
+                 (PI, PI, float('nan'))):
+        ok, gap = verdict(*args)
+        assert ok is None, args
+        assert math.isnan(gap)

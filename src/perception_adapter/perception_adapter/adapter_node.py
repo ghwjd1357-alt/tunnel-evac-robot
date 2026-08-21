@@ -38,6 +38,11 @@
 ⚠ 그걸 쓰면 정본과 영상 서술에 "거리는 고정값을 썼다" 를 반드시 남긴다.
 
 정본 = `docs/MASTER_PLAN.md §7` 예약 60 · 역할 A 9차 회신 §3.
+
+⚠ **알려진 로그 잡음** — Ctrl+C 종료 시 `tf2_ros` 리스너 스레드가
+`ExternalShutdownException` 역추적을 stderr 에 한 번 찍는다(§84.1 로 `spin_thread=True`
+를 켠 대가다). 기능 영향은 없고 종료 경로에서만 난다 — **촬영 중 이 문구를 고장으로
+읽지 않는다.**
 """
 
 import math
@@ -172,11 +177,20 @@ class ConfirmTracker:
         #   재현: 0.0→0.9→1.8→2.7→3.6 m 로 걸어가면 매 걸음이 1.0 m 안이라
         #   첫 점과 3.6 m 떨어졌는데도 확정됐다. 이어 붙기만 하면 복도 끝까지
         #   같은 화재가 된다. → **seed(첫 hit) 기준 반경**으로 잠근다.
+        #
+        # 🔴 08-21 §84.5 — 그런데 **prune 보다 먼저 비교**하고 있었다. 그래서
+        #   창 밖으로 만료된 seed 가 창 안의 정상 누적을 통째로 지웠다.
+        #   재현: need=5 window=3.0 radius=1.0 에
+        #     (t,x) = (0,0.0) (2.8,0.9) (2.9,0.9) (3.0,0.9) (3.1,1.8) (3.2,1.8)
+        #   → 창 안 2.8~3.2 의 5건은 서로 최대 0.9 m 라 계약상 한 seed 반경인데,
+        #     이미 만료된 x=0 seed 와 비교해 전부 reset → count 2 · 확정 0.
+        #   walking-chain 은 계속 막고 **창 안의 정상 5건은 살려야** 한다.
+        #   → **창을 먼저 정리하고, 그 결과의 첫 점을 seed 로 쓴다.**
+        self._prune(t)
         if self._hits and self._far(pos, self._hits[0][2], self.assoc_radius):
             self._hits = []              # 다른 대상 — 누적을 합치지 않는다
         self._last_stamp = s
         self._hits.append((t, s, pos))
-        self._prune(t)
         return len(self._hits) >= self.need
 
     def _prune(self, t):
@@ -225,7 +239,9 @@ def validate_params(vals):
             out.append(f'{k}: {hi} 초과 ({v!r})')
 
     num('min_confidence', lo=0.0, hi=1.0)
-    num('confirm_frames', lo=1, integer=True)
+    # 🔴 §84.4 — 하한이 1 이면 "반복 관측" 이 한 장이라는 뜻이라 억제가 **없다.**
+    #   ConfirmTracker 가 존재하는 이유 자체가 한 프레임 오탐이므로 2 부터 받는다.
+    num('confirm_frames', lo=2, integer=True)
     num('confirm_window_sec', positive=True)
     num('max_stamp_age_sec', positive=True)
     num('max_range', positive=True)
@@ -332,6 +348,8 @@ class PerceptionAdapter(Node):
         #   **거부**한다 — fail-closed. 미션 없이 어댑터만 시험할 때만 끈다.
         self.declare_parameter('mission_state_topic', '/mission_state')
         self.declare_parameter('rearm_requires_patrol', True)
+        # 🔴 §84.3 — 미션 상태의 신선도 상한. 미션은 2 Hz 로 흘린다.
+        self.declare_parameter('mission_state_max_age_sec', 1.5)
 
         p = self.get_parameter
         self.detections_topic = p('detections_topic').value
@@ -340,7 +358,17 @@ class PerceptionAdapter(Node):
 
         # ── TF ─────────────────────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        # 🔴 08-21 §84.1 — `spin_thread=True` 가 **필수다.**
+        #   구판은 기본 False 였고 `main()` 은 단일 스레드 `rclpy.spin()` 을 쓴다.
+        #   그래서 탐지 콜백 안의 `lookup_transform(timeout=0.10)` 이 executor 를
+        #   붙잡고 있는 동안 `/tf` 구독 콜백이 **돌 수 없었다.** 즉 "0.10초 기다린다"
+        #   가 아니라 "이미 버퍼에 있는 것만 0.10초 기다린다" 였다.
+        #   실측: 30 ms 뒤 도착한 동일 stamp TF 를 102 ms LookupException 으로 놓쳤고,
+        #        콜백이 반환한 직후 같은 조회는 성공했다. spin_thread=True 로는 41 ms 성공.
+        #   → 리스너에 자기 executor 스레드를 준다. 버퍼는 콜백과 무관하게 채워진다.
+        #   ⚠ 버퍼는 스레드 안전하다(tf2 설계). 우리 쪽 상태는 안 건드린다.
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer, self, spin_thread=True)
 
         # ── 입출력 ──────────────────────────────────────────────────────
         # 🔴 QoS 는 계약이 고정했다 (Detection3DArray.msg 머리말):
@@ -388,6 +416,18 @@ class PerceptionAdapter(Node):
         self._last_reason = '아직 프레임 없음'
         self._tf_degraded = False
 
+        # 🔴 08-21 §84.4 — **런타임 변경도 같은 검증을 통과해야 한다.**
+        #   구판은 `__init__` 에서 한 번만 검증했고 parameter callback 이 없었다.
+        #   실측: 노드가 뜬 뒤 `ros2 param set` 으로 `max_range=-1` ·
+        #   `confirm_frames=1` · `confirm_assoc_radius_m=1000` · `tf_wait_sec=5` 를
+        #   넣자 **네 건 다 successful=True** 로 저장됐다. 그런데 적용은 갈렸다 —
+        #   `max_range`·`tf_wait_sec` 는 다음 콜백이 **바로 쓰고**, tracker 는 초기
+        #   객체라 `confirm_frames`·radius 변경이 **전혀 안 먹었다.**
+        #   즉 화면은 "적용됨" 인데 일부는 위험하게 적용되고 일부는 무시됐다.
+        #   → 제안값을 현재 집합에 합쳐 `validate_params` 로 보고, 통과할 때만 받는다.
+        #     그리고 tracker 파생 상태를 **같은 자리에서** 다시 만든다.
+        self.add_on_set_parameters_callback(self._on_set_params)
+
         # §82.5 재무장 — 촬영은 3~5 테이크다. 구판은 refire_cooldown_sec=-1 이라
         #   **프로세스 평생 1회**였고, 미션 reset 을 보지 않아 두 번째 테이크부터
         #   어댑터가 조용히 안 쐈다. 단순 쿨다운은 이전 테이크의 지속 오탐이 새
@@ -395,6 +435,7 @@ class PerceptionAdapter(Node):
         self.create_subscription(
             String, p('cmd_topic').value, self.on_cmd, 10)
         self._mission_state = None
+        self._mission_state_t = None
         self.create_subscription(
             String, p('mission_state_topic').value, self.on_mission_state, 10)
 
@@ -411,9 +452,66 @@ class PerceptionAdapter(Node):
                 f'{p("fixed_range").value} m 로 강제한다. 기록에 남길 것.')
 
     # ------------------------------------------------------------------
+    #: §84.4 — 런타임 변경을 지원하는 수치 파라미터. 여기 없는 수치는 재기동 전용.
+    RUNTIME_NUMERIC = (
+        'min_confidence', 'confirm_frames', 'confirm_window_sec',
+        'max_stamp_age_sec', 'max_range', 'fixed_range',
+        'refire_cooldown_sec', 'confirm_assoc_radius_m', 'tf_wait_sec',
+    )
+    #: tracker 를 다시 만들어야 하는 것들 (파생 상태)
+    TRACKER_KEYS = ('confirm_frames', 'confirm_window_sec', 'confirm_assoc_radius_m')
+
+    def _current_numeric(self):
+        return {k: self.get_parameter(k).value for k in self.RUNTIME_NUMERIC}
+
+    def _on_set_params(self, params):
+        """§84.4 — 런타임 set 을 원자적으로 검증하고, 통과분만 파생 상태에 반영한다.
+
+        ⚠ 이 콜백은 값이 **저장되기 전에** 불린다. 그래서 제안값을 현재 집합에
+          합쳐서 본다 — 한 건만 보면 상호관계(예: guide<normal)를 못 본다.
+        🔴 tracker 를 다시 만들면 **누적 관측이 사라진다.** 그것이 옳다 —
+          확정 정책이 바뀌었는데 옛 정책으로 모은 근거를 이어 쓰면 안 된다.
+        """
+        from rcl_interfaces.msg import SetParametersResult
+        proposed = {}
+        for pr in params:
+            if pr.name in self.RUNTIME_NUMERIC:
+                proposed[pr.name] = pr.value
+        if not proposed:
+            return SetParametersResult(successful=True)
+
+        cand = self._current_numeric()
+        cand.update(proposed)
+        bad = validate_params(cand)
+        if bad:
+            for m in bad:
+                self.get_logger().error(f'🔴 런타임 파라미터 거부 — {m}')
+            return SetParametersResult(
+                successful=False,
+                reason=f'perception_adapter 파라미터 불량: {bad}')
+
+        if any(k in proposed for k in self.TRACKER_KEYS):
+            self.tracker = ConfirmTracker(cand['confirm_frames'],
+                                          cand['confirm_window_sec'],
+                                          cand['confirm_assoc_radius_m'])
+            self._last_reason = '확정 정책 변경 — 누적 관측 초기화'
+            self.get_logger().warn(
+                f'🔵 tracker 재구성 need={cand["confirm_frames"]} '
+                f'window={cand["confirm_window_sec"]}s '
+                f'radius={cand["confirm_assoc_radius_m"]}m — 누적 관측을 지웠다')
+            self.say('TRACKER_RECONFIGURED')
+        self.get_logger().warn(f'🔵 런타임 파라미터 적용: {sorted(proposed)}')
+        return SetParametersResult(successful=True)
+
     def on_mission_state(self, msg: String):
-        """§83.4 — 재무장 관문에 쓸 미션 상태. 판정은 on_cmd 가 한다."""
+        """§83.4 — 재무장 관문에 쓸 미션 상태. 판정은 on_cmd 가 한다.
+
+        🔴 §84.3 — 값과 함께 **관측 시각**을 남긴다. 마지막 문자열만 들고 있으면
+        "알람 직전 PATROL 을 받았고 그 뒤 실제로는 APPROACH 로 바뀌었지만 다음
+        tick 이 아직 안 온" 창에서 **과거 상태를 현재로 승인**한다.
+        """
         self._mission_state = (msg.data or '').strip().upper()
+        self._mission_state_t = self.now_sec()
 
     def on_cmd(self, msg: String):
         """§82.5 — 테이크 사이 재무장.
@@ -438,12 +536,26 @@ class PerceptionAdapter(Node):
                     '확인할 것 (미션 없이 시험하려면 rearm_requires_patrol:=false)')
                 self.say('REARM_REJECTED (미션 상태 없음)')
                 return
-            if 'PATROL' not in st:
+            # 🔴 §84.3 — **완전일치**로 좁힌다. 구판 `'PATROL' not in st` 는
+            #   `NOT_PATROL` · `PATROLLING` · `BLOCKED PATROL` 을 전부 통과시켰다
+            #   (직접 입력 재현: 셋 다 REARMED 를 냈다).
+            if st != 'PATROL':
                 self.get_logger().error(
-                    f'🔴 재무장 거부 — 미션이 {st} 다(PATROL 아님). 지금 재무장하면 '
-                    f'지속 오탐이 다음 출동을 자동으로 시작시킨다. '
+                    f'🔴 재무장 거부 — 미션이 "{st}" 다(PATROL 완전일치 아님). '
+                    f'지금 재무장하면 지속 오탐이 다음 출동을 자동으로 시작시킨다. '
                     f'미션을 reset 해 PATROL 로 돌린 뒤 다시 보낼 것')
                 self.say(f'REARM_REJECTED ({st})')
+                return
+            # 🔴 §84.3 — **신선도**. 마지막 관측이 오래됐으면 그건 과거다.
+            #   미션은 2 Hz 로 상태를 흘리므로 1.5초면 세 번 놓친 것이다.
+            age = self.now_sec() - (self._mission_state_t or 0.0)
+            max_age = self.get_parameter('mission_state_max_age_sec').value
+            if age > max_age:
+                self.get_logger().error(
+                    f'🔴 재무장 거부 — 미션 상태가 {age:.1f}s 전 값이다 '
+                    f'(허용 {max_age}s). 지금 PATROL 인지 증명할 수 없다. '
+                    f'/mission_state 가 흐르는지 확인하고 다시 보낼 것')
+                self.say(f'REARM_REJECTED (상태 {age:.1f}s 낡음)')
                 return
 
         self.fired_at = None

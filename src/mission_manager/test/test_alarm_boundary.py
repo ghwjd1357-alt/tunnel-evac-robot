@@ -178,17 +178,30 @@ def assert_blocked(node, keyword):
     assert node.fire is None
     assert not node.siren_on
     assert node._cancels == 1, f'활성 goal 취소가 {node._cancels}회'
+    # 🔴 §84.2 — 일반 취소면 종결을 확인하지 않는다. 의도가 safety_stop 이어야 한다.
+    assert node._intents == ['safety_stop'], node._intents
+    assert node.blocked_stop == 'pending', node.blocked_stop
     assert node.blocked_reason and 'unsafe_gather' in node.blocked_reason
     assert any('알람 거부' in m and keyword in m for m in node._logs), node._logs
 
 
-def h_node(min_fire_dist=1.5):
+def h_node(min_fire_dist=1.5, goal_active=True):
     """실제 촬영 좌표(H자)를 쓰는 껍데기 — 아래 복도 서쪽이 탈출구."""
     node = bare_node(with_graph=False)
     node._cancels = 0
-    node.cancel_current_goal = lambda: setattr(node, '_cancels', node._cancels + 1)
+    node._cancel_intent = None
+    node._intents = []
+
+    def _cancel():
+        node._cancels += 1
+        node._intents.append(node._cancel_intent)
+        node._cancel_intent = None
+    node.cancel_current_goal = _cancel
     node.blocked_reason = None          # MissionNode.__init__ 이 세우는 자리
     node._blocked_logged = False
+    node.blocked_stop = None
+    # §84.2 — GoalManager 대역. `active` 는 "취소할 goal 이 있었나" 를 준다.
+    node.goals = types.SimpleNamespace(active=goal_active, stop_pending=False)
     node.wp = {
         'escape': {'x': 0.50, 'y': -10.65},
         'gather': {'x': 6.0, 'y': -10.65, 'yaw': 3.14},
@@ -299,3 +312,54 @@ def test_s13_accepted_fire_does_not_touch_blocked_fields():
     node.on_alarm(fake_alarm(12.5, -0.1))
     assert node.state == State.APPROACH
     assert node.blocked_reason is None
+
+
+# ── §84.2: BLOCKED 는 "새 goal 0" 만으로 정지가 아니다 ──────────────────
+
+def test_s13_no_active_goal_reports_stop_as_none():
+    """취소할 goal 이 애초에 없었으면 그것 자체가 정지 상태다."""
+    node = h_node(goal_active=False)
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert node.state == State.BLOCKED
+    assert node.blocked_stop == 'none', node.blocked_stop
+
+
+def test_s13_stop_unconfirmed_is_not_stopped():
+    """🔴 재현본 — 취소가 종결로 확인 안 되면 로봇은 아직 달릴 수 있다.
+
+    구판은 일반 취소라 이 신호 자체가 없었다(cancel 응답을 빈 목록으로 주입해도
+    faults 0 · stop_pending False). 그래서 `/mission_state=BLOCKED` 인데 Nav2 는
+    계속 주행하는 상태가 만들어졌다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert node.blocked_stop == 'pending'
+    node.on_safety_stop_unconfirmed('취소 요청 실패: injected')
+    assert node.blocked_stop == 'unconfirmed'
+    assert '정지 미확인' in node.blocked_reason
+    assert any('E-stop' in m for m in node._logs), node._logs
+
+
+def test_s13_stop_confirmed_only_after_canceled_terminal():
+    """CANCELED 종결을 관찰한 뒤에만 '정지 확인됨' 이 된다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert node.blocked_stop == 'pending'
+    node.on_safety_stop_confirmed()
+    assert node.blocked_stop == 'confirmed'
+
+
+def test_s13_unconfirmed_is_not_overwritten_by_late_confirm():
+    """미확인으로 올라간 뒤 늦은 confirm 이 와도 '멈췄다' 로 되돌리지 않는다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    node.on_safety_stop_unconfirmed('injected')
+    node.on_safety_stop_confirmed()
+    assert node.blocked_stop == 'unconfirmed'
+
+
+def test_s13_accepted_fire_uses_no_cancel_intent():
+    """🟢 정상 화재의 재지정 취소는 여전히 일반 취소다 (거동 불변)."""
+    node = h_node()
+    node.on_alarm(fake_alarm(12.5, -0.1))
+    assert node.state == State.APPROACH
+    assert node._intents == [None], node._intents   # 일반 취소(의도 없음)

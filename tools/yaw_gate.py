@@ -22,8 +22,9 @@
 
 판정:
     rc=0  🟢 진입해도 된다 — 약 180° 가 나온다
-    rc=1  🔴 그 자리에서 사람을 멈추지 말 것 (회전량이 180° 가 아니다)
-    rc=2  🔴 TF 를 못 읽었다 — 판정 불능. 통과로 읽지 않는다
+    rc=1  🔴 **유효한 값의 불통과** — 그 자리에서 사람을 멈추지 말 것
+    rc=2  🔴 **판정 불능** — TF 를 못 읽었거나 인자가 비유한·범위 밖이다.
+          통과로 읽지 않는다. (§84.7 — 구판은 잘못된 인자도 rc=1 로 섞었다)
 """
 
 import argparse
@@ -41,8 +42,34 @@ def angle_gap(yaw, target):
     return abs(wrap(yaw - target))
 
 
+def check_args(target, tol, timeout):
+    """🔴 §84.7 — 인자 자체가 판정 불능이면 rc=1 이 아니라 rc=2 다.
+
+    구판은 `--tol nan` · `--target nan` · `--tol -0.3` 을 전부 *"여기서 멈추지
+    말 것"*(rc=1)으로 끝냈다. rc=1 은 **유효한 값의 불통과**이고 rc=2 는
+    **판정 불능**이라는 머리말 계약과 갈렸다 — 촬영 기록 해석이 틀어진다.
+    반환: 사유 목록(빈 목록 = 통과)."""
+    out = []
+    if not math.isfinite(target):
+        out.append(f'--target 이 유한값이 아니다 ({target!r})')
+    if not math.isfinite(tol):
+        out.append(f'--tol 이 유한값이 아니다 ({tol!r})')
+    elif tol <= 0:
+        out.append(f'--tol 은 양수여야 한다 ({tol!r})')
+    elif tol > math.pi:
+        out.append(f'--tol {tol!r} 은 π 를 넘어 어떤 각도든 통과시킨다 (무의미)')
+    if not math.isfinite(timeout) or timeout <= 0:
+        out.append(f'--timeout 은 양수 유한값이어야 한다 ({timeout!r})')
+    return out
+
+
 def verdict(yaw, target, tol):
-    """(통과?, 차이[rad]). 순수 함수 — 이 자리가 단위시험 대상이다."""
+    """(통과?, 차이[rad]). 순수 함수 — 이 자리가 단위시험 대상이다.
+
+    🔴 §84.7 — 비유한 입력은 여기서도 방어한다. `check_args` 를 우회해 부르는
+    호출자가 생겨도 NaN 이 조용히 '불통과' 로 둔갑하지 않게."""
+    if not (math.isfinite(yaw) and math.isfinite(target) and math.isfinite(tol)):
+        return None, float('nan')
     gap = angle_gap(yaw, target)
     return gap <= tol, gap
 
@@ -91,6 +118,13 @@ def main():
                     help='TF 대신 이 값으로 판정 (시험·연습용)')
     a = ap.parse_args()
 
+    bad = check_args(a.target, a.tol, a.timeout)
+    if bad:
+        for m in bad:
+            print(f'🔴 인자 거부 — {m}')
+        print('   판정 불능(rc=2). **통과로 읽지 말 것.**')
+        return 2
+
     yaw = a.yaw if a.yaw is not None else read_yaw(a.frame, a.child, a.timeout)
     if yaw is None or not math.isfinite(yaw):
         print(f'🔴 TF 를 못 읽었다 ({a.frame}→{a.child}, {a.timeout}s). '
@@ -98,6 +132,9 @@ def main():
         return 2
 
     ok, gap = verdict(yaw, a.target, a.tol)
+    if ok is None:
+        print('🔴 판정 불능 — 비유한 입력. **통과로 읽지 말 것.**')
+        return 2
     deg = math.degrees(gap)
     print(f'현재 yaw = {yaw:+.3f} rad ({math.degrees(yaw):+.1f}°) · '
           f'목표 {a.target:+.3f} · 차이 {gap:.3f} rad ({deg:.1f}°) · 허용 {a.tol}')
