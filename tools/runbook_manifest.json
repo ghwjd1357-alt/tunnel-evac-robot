@@ -5,15 +5,19 @@
     {
       "path": "Desktop/0821_명령묶음.md",
       "role": "08-21 오전 실차 측정 (배포·M1~M4)",
-      "sha256": "54e11c7ad10ebaff6cd95dcac366fc3ab70b6afc2e0116832eb3b0f7e3f43352",
-      "bytes": 13084,
+      "sha256": "4f1f0d45db4f37fb24be4910686024b57a662af864bf9cae8c3555ad9311e7f0",
+      "bytes": 16812,
       "required_gates": [
         "colcon build --symlink-install",
         "/drive/diag",
         "z: 2.0",
         "--segments",
         "대조군 visible run == 0",
-        "scp -r hanhan@jetson.local"
+        "scp -r hanhan@jetson.local",
+        "mission_manager tunnel_bringup",
+        "-w 1 --times 3 /alarm",
+        "BLOCKED",
+        "즉시 E-stop"
       ]
     },
     {
