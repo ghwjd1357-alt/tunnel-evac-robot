@@ -131,8 +131,20 @@ controller_server:
     min_theta_velocity_threshold: 0.001
     progress_checker_plugin: "progress_checker"
     progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
+      # 🔴 08-21 실차 — 제자리 회전이 **구조적으로 절대 못 끝났다.**
+      #   `SimpleProgressChecker` 는 **위치만** 본다(euclidean_distance). 제자리
+      #   회전은 위치가 0 cm 움직이므로, 아무리 열심히 돌아도 30초 뒤 반드시
+      #   "진전 없음" → goal ABORT → 미션 재시도 → 다시 회전 → 또 ABORT.
+      #   현장에서 **"회전하다가 말다가"** 로 보였고 집결지에서 미션이 멈췄다.
+      #   실측: 명령 -0.500 을 부호전환 0 으로 8.4초 유지 → 41.0°(4.88°/s).
+      #   180° 에 **37초** 가 드는데 허용이 30초였다 — 7초가 모자랐다.
+      #   ⚠ 부호전환은 주범이 아니었다. 전환 0 인 구간에서도 못 끝난다.
+      # → `PoseProgressChecker` 는 **회전도 진전으로 센다.** 28.6°(0.5 rad)를
+      #   돌면 인정하므로 4.88°/s 에서 5.9초면 통과한다. 타임아웃 자체가 안 걸린다.
+      #   진짜로 끼인 상태(회전도 이동도 없음)는 여전히 30초에 잡힌다.
+      plugin: "nav2_controller::PoseProgressChecker"
       required_movement_radius: 0.3
+      required_movement_angle: 0.5        # rad. 28.6° — 제자리 회전을 진전으로 인정
       movement_time_allowance: 30.0       # 🔴 db판: 20.0→30.0 — 느린 보정을 abort 로 죽이지 않게
     general_goal_checker:
       stateful: true
