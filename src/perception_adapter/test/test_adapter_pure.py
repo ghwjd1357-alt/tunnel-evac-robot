@@ -223,7 +223,7 @@ GOOD = {
     'min_confidence': 0.4, 'confirm_frames': 5, 'confirm_window_sec': 3.0,
     'max_stamp_age_sec': 1.0, 'max_range': 5.0, 'fixed_range': 2.0,
     'refire_cooldown_sec': -1.0, 'confirm_assoc_radius_m': 1.0,
-    'tf_wait_sec': 0.10, 'rearm_ack_timeout_sec': 3.0,
+    'tf_wait_sec': 0.10, 'rearm_ack_timeout_sec': 3.0, 'rearm_dedup_sec': 5.0,
 }
 
 
@@ -391,3 +391,20 @@ def test_params_reject_confirm_frames_one():
     """🔴 need=1 이면 '반복 관측' 이 한 장이라 억제가 없다 — 존재 이유가 사라진다."""
     assert validate_params({**GOOD, 'confirm_frames': 1}) != []
     assert validate_params({**GOOD, 'confirm_frames': 2}) == []
+
+
+def test_tracker_seed_rollover_does_not_merge_two_targets():
+    """🔴 §85.6 재현본 — 저장소 회귀가 **없던** 자리다 (§86.6 P2 지적).
+
+    prune 으로 seed 가 0 → −1 로 바뀌는데 생존 hit 중 +1 이 남아, 반경 1 m
+    클러스터에 **2 m 떨어진 점**이 증거로 들어갔다. 어느 한 위치도 5회를
+    못 채웠는데 두 표적의 관측이 합쳐져 확정됐다.
+    ⚠ 구현은 §85 에서 고쳤지만 이 입력을 시험에 안 넣었다 —
+      "세 방향을 같은 커밋에 넣었다" 는 주장이 그만큼 거짓이었다."""
+    t = ConfirmTracker(need=5, window_sec=3.0, assoc_radius=1.0)
+    seq = [(0.0, 0.0), (0.2, -1.0), (2.9, 1.0),
+           (3.10, -1.0), (3.11, -1.0), (3.12, -1.0)]
+    got = [t.add(tt, tt, (x, 0.0, 0.0)) for tt, x in seq]
+    assert not any(got), (got, [h[2][0] for h in t._hits])
+    assert all(abs(h[2][0] - (-1.0)) < 1e-9 for h in t._hits), \
+        f'seed 밖 표적이 생존했다: {[h[2][0] for h in t._hits]}'

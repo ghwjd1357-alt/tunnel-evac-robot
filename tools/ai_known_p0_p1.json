@@ -923,5 +923,25 @@
     "id": "0821-review-85-zero-new-p0-85",
     "path": "src/perception_adapter/perception_adapter/adapter_node.py",
     "anchor": "§85 판정은 P0 0 이며 본편 수동 경로는 네 회차 내내 위협받지 않았다"
+  },
+  {
+    "id": "0821-startup-validation-after-resources-hangs-86",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "기동 검증은 자원을 만들기 전에 한다 — 뒤에 두면 거부해도 프로세스가 안 죽는다"
+  },
+  {
+    "id": "0821-delivery-retry-treated-as-separate-intents-86",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "전달용 중복 전송은 하나의 의도다 — 따로 세면 늦은 중복이 진행 중인 관측을 지운다"
+  },
+  {
+    "id": "0821-stop-failure-class-not-closed-by-count-86",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "호출 개수 대조는 실패 클래스의 전수 증거가 아니다 — 호출이 아예 없는 경로를 못 센다"
+  },
+  {
+    "id": "0821-schema-gap-declared-vs-validated-86",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "선언과 목록의 차집합만 잠그면 validator 실제 판정·비수치·동적 선언은 여전히 밖이다"
   }
 ]

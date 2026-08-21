@@ -19,6 +19,14 @@ from perception_adapter.adapter_node import PerceptionAdapter   # noqa: E402
 
 
 @pytest.fixture
+def ros():
+    """노드를 만들지 않는 시험용 — 기동 실패 경로를 보는 자리."""
+    rclpy.init()
+    yield
+    rclpy.shutdown()
+
+
+@pytest.fixture
 def node():
     rclpy.init()
     n = PerceptionAdapter()
@@ -177,3 +185,84 @@ def test_startup_refuses_when_a_numeric_param_is_unlisted(node, monkeypatch):
     monkeypatch.setattr(PA, 'RUNTIME_NUMERIC', short)
     with pytest.raises(ValueError, match='검증 목록 밖'):
         PA()
+
+
+# ── §86.3 기동 실패는 자원을 만들기 전에 ────────────────────────────────
+
+def test_bad_override_raises_before_creating_the_aux_node(ros):
+    """🔴 재현본 — 검증이 보조 노드·스레드 **뒤**면 프로세스가 안 죽는다.
+
+    구판은 `_tf_node` 와 non-daemon 리스너 스레드를 만든 뒤 검증해서,
+    `max_range=-1` 기동이 `ValueError` 를 내고도 **자발 종료하지 않았다**
+    (실측: timeout 이 SIGTERM 으로 죽였다). `/adapter_status` 없는 반쪽 노드가
+    남아 node-list 준비 판정을 오도한다 — 08-20 무증상 실패와 같은 형태다."""
+    import threading
+    before = threading.active_count()
+    with pytest.raises(ValueError):
+        PerceptionAdapter(parameter_overrides=[Parameter('max_range', value=-1.0)])
+    assert threading.active_count() == before, '거부됐는데 스레드가 남았다'
+
+
+def test_unlisted_numeric_also_raises_before_resources(ros, monkeypatch):
+    """목록 누락도 같은 자리에서 막혀야 한다 (자원 생성 전)."""
+    import threading
+    from perception_adapter.adapter_node import PerceptionAdapter as PA
+    short = tuple(x for x in PA.RUNTIME_NUMERIC if x != 'max_range')
+    monkeypatch.setattr(PA, 'RUNTIME_NUMERIC', short)
+    before = threading.active_count()
+    with pytest.raises(ValueError, match='검증 목록 밖'):
+        PA()
+    assert threading.active_count() == before
+
+
+# ── §86.4 전달용 중복은 하나의 의도다 ──────────────────────────────────
+
+def test_triple_send_produces_exactly_one_rearm(node):
+    """🔴 재현본 — 런북이 `-w 1 --times 3` 을 시킨다. 셋은 **한 의도**다.
+
+    구판은 셋을 서로 다른 요청으로 봐서 `REARMED` 가 3번, tracker reset 도 3회였다."""
+    state(node, 'PATROL')
+    for _ in range(3):
+        rearm(node)
+        state(node, 'PATROL')
+    assert node._said.count('REARMED') == 1, node._said
+    assert node._said.count('REARM_DUP_IGNORED') == 2, node._said
+
+
+def test_late_duplicate_does_not_wipe_accumulated_hits(node):
+    """🔴 가장 나쁜 경로 — 장면이 시작된 뒤 3발째가 늦게 도착한다.
+
+    구판에서는 누적 관측이 2 → 0 으로 지워졌다. 진짜 화재를 보고 있던 증거가
+    사라진다는 뜻이다."""
+    state(node, 'PATROL')
+    rearm(node)
+    state(node, 'PATROL')                       # 정상 재무장
+    node.tracker.add(1.0, 1.0, (2.0, 0.0, 0.0))
+    node.tracker.add(1.1, 2.0, (2.0, 0.0, 0.0))
+    assert node.tracker.count() == 2
+    rearm(node)                                 # 늦게 도착한 중복
+    state(node, 'PATROL')
+    assert node.tracker.count() == 2, '늦은 중복이 누적을 지웠다'
+
+
+def test_a_genuine_next_take_still_rearms_after_the_dedup_window(node):
+    """🟢 진짜 다음 테이크는 재무장돼야 한다 — 병합이 영구가 아니다."""
+    state(node, 'PATROL')
+    rearm(node)
+    state(node, 'PATROL')
+    assert node._said.count('REARMED') == 1
+    node._last_rearm_t = node.now_sec() - 99.0   # 창 밖
+    node.fired_at = 123.0
+    rearm(node)
+    state(node, 'PATROL')
+    assert node._said.count('REARMED') == 2, node._said
+    assert node.fired_at is None
+
+
+def test_duplicate_while_pending_does_not_open_a_second_handshake(node):
+    """요청이 열려 있는 동안의 중복도 새 handshake 를 만들지 않는다."""
+    state(node, 'PATROL')
+    rearm(node)
+    rearm(node)
+    rearm(node)
+    assert node._said.count('REARM_PENDING (다음 PATROL 관측 대기)') == 1, node._said

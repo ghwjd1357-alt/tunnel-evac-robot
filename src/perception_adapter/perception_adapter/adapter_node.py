@@ -269,6 +269,8 @@ def validate_params(vals):
     #   `inf` 를 넣으면 비교가 전부 거짓이 되어 관문이 무기한 열렸다.
     #   상한 10.0 = 사람이 명령을 보내고 기다릴 수 있는 현실적 최대치.
     num('rearm_ack_timeout_sec', positive=True, hi=10.0)
+    # §86.4 — 0 은 '중복 병합 안 함' 이라는 뜻이라 허용한다.
+    num('rearm_dedup_sec', lo=0.0, hi=30.0)
     # refire_cooldown_sec 은 0 이하가 "평생 1회" 라는 뜻이라 부호를 안 막는다.
     # 다만 NaN/Inf 는 비교가 전부 False 가 되어 억제가 조용히 사라진다.
     num('refire_cooldown_sec')
@@ -373,6 +375,13 @@ class PerceptionAdapter(Node):
         #   → 재무장은 **요청 이후에 새로 관측한** PATROL 에만 성립한다.
         #     이 값은 그 새 관측을 기다리는 상한이다(2 Hz 면 여섯 주기).
         self.declare_parameter('rearm_ack_timeout_sec', 3.0)
+        # 🔴 §86.4 — 런북은 전달 유실을 막으려 `-w 1 --times 3` 으로 **같은 의도를
+        #   세 번** 보낸다(§83.4). 구판은 그 셋을 **서로 다른 요청**으로 봤다.
+        #   재현: rearm→PATROL 쌍 3회에 `REARMED` 가 **3번**, tracker reset 도 3회.
+        #   더 나쁜 것은 늦게 도착한 3발째다 — 장면이 시작돼 hits 가 2 였는데
+        #   **0 으로 지워졌다.** 즉 런북이 시키는 그대로 하면 매 테이크에 난다.
+        #   → 성공 직후 이 시간 안의 재요청은 **같은 의도**로 보고 무시한다.
+        self.declare_parameter('rearm_dedup_sec', 5.0)
 
         p = self.get_parameter
         self.detections_topic = p('detections_topic').value
@@ -381,6 +390,47 @@ class PerceptionAdapter(Node):
 
         # ── TF ─────────────────────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
+        # 🔴 08-21 §86.3 — **검증이 보조 노드·스레드보다 먼저**여야 한다.
+        #   구판은 `_tf_node` 와 non-daemon 리스너 스레드를 만든 **뒤에** 검증했다.
+        #   그래서 `max_range=-1` 같은 불량 override 로 기동하면 `ValueError` 는
+        #   나오는데 **프로세스가 자발 종료하지 않는다**(실측: timeout 이 SIGTERM
+        #   으로 죽였다). 생성자가 반환을 못 하니 `main()` 의 `finally` 에도 못 닿고,
+        #   `/adapter_status` 없는 **반쪽 노드**만 남아 node-list 준비 판정을 오도한다.
+        #   08-20 에 세 번 당한 무증상 실패와 같은 형태다.
+        #   → 자원을 하나도 만들기 전에 거른다.
+        # 🔴 §82.4 — 수치 파라미터를 기동 시 한 곳에서 검증하고, 실패하면
+        #    **크게 죽는다.** 재현: max_range=-1 이면 clamp_range 가 (2,0,0) 을
+        #    (-1,0,0) 으로 뒤집어 로봇 **뒤쪽** 좌표를 만들었다. 조용히 도는 것보다
+        #    안 뜨는 편이 낫다 — 안 뜨면 관제 수동 클릭이라는 후퇴로가 살아 있다.
+        bad = validate_params({
+            'min_confidence': p('min_confidence').value,
+            'confirm_frames': p('confirm_frames').value,
+            'confirm_window_sec': p('confirm_window_sec').value,
+            'max_stamp_age_sec': p('max_stamp_age_sec').value,
+            'max_range': p('max_range').value,
+            'fixed_range': p('fixed_range').value,
+            'refire_cooldown_sec': p('refire_cooldown_sec').value,
+            'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
+            'tf_wait_sec': p('tf_wait_sec').value,
+            'rearm_ack_timeout_sec': p('rearm_ack_timeout_sec').value,
+            'rearm_dedup_sec': p('rearm_dedup_sec').value,
+        })
+        if bad:
+            for m in bad:
+                self.get_logger().error(f'🔴 파라미터 거부 — {m}')
+            raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
+
+        # 🔴 §85.5 **패턴 수정** — 목록을 손으로 관리하면 다음 파라미터에서 또 샌다.
+        #   실제로 §84.4("모든 수치를 검증한다")를 넣은 **바로 그 커밋**에서
+        #   `mission_state_max_age_sec` 를 목록에 안 넣었다.
+        #   → 선언된 수치 파라미터와 검증 목록의 **차집합을 기계가 0으로 만든다.**
+        #     새 수치를 선언하고 목록에 안 넣으면 **기동이 안 된다.**
+        missed = self.unvalidated_numeric_params()
+        if missed:
+            raise ValueError(
+                f'🔴 수치 파라미터 {sorted(missed)} 가 검증 목록 밖이다. '
+                f'RUNTIME_NUMERIC 과 validate_params 에 함께 넣을 것 (§85.5)')
+
         # 🔴 08-21 §85.2 — `spin_thread=True` **만으로는 안 된다.**
         #   §84.1 에서 리스너에 전용 executor 를 줬는데, 그 뒤 `main()` 의
         #   `rclpy.spin(node)` 가 **같은 노드를 도로 가져간다.**
@@ -420,38 +470,6 @@ class PerceptionAdapter(Node):
         # 관제·기록용 상태 문자열. 왜 안 쐈는지가 여기 남는다.
         self.status_pub = self.create_publisher(String, '/adapter_status', 10)
 
-        # 🔴 §82.4 — 수치 파라미터를 기동 시 한 곳에서 검증하고, 실패하면
-        #    **크게 죽는다.** 재현: max_range=-1 이면 clamp_range 가 (2,0,0) 을
-        #    (-1,0,0) 으로 뒤집어 로봇 **뒤쪽** 좌표를 만들었다. 조용히 도는 것보다
-        #    안 뜨는 편이 낫다 — 안 뜨면 관제 수동 클릭이라는 후퇴로가 살아 있다.
-        bad = validate_params({
-            'min_confidence': p('min_confidence').value,
-            'confirm_frames': p('confirm_frames').value,
-            'confirm_window_sec': p('confirm_window_sec').value,
-            'max_stamp_age_sec': p('max_stamp_age_sec').value,
-            'max_range': p('max_range').value,
-            'fixed_range': p('fixed_range').value,
-            'refire_cooldown_sec': p('refire_cooldown_sec').value,
-            'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
-            'tf_wait_sec': p('tf_wait_sec').value,
-            'rearm_ack_timeout_sec': p('rearm_ack_timeout_sec').value,
-        })
-        if bad:
-            for m in bad:
-                self.get_logger().error(f'🔴 파라미터 거부 — {m}')
-            raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
-
-        # 🔴 §85.5 **패턴 수정** — 목록을 손으로 관리하면 다음 파라미터에서 또 샌다.
-        #   실제로 §84.4("모든 수치를 검증한다")를 넣은 **바로 그 커밋**에서
-        #   `mission_state_max_age_sec` 를 목록에 안 넣었다.
-        #   → 선언된 수치 파라미터와 검증 목록의 **차집합을 기계가 0으로 만든다.**
-        #     새 수치를 선언하고 목록에 안 넣으면 **기동이 안 된다.**
-        missed = self.unvalidated_numeric_params()
-        if missed:
-            raise ValueError(
-                f'🔴 수치 파라미터 {sorted(missed)} 가 검증 목록 밖이다. '
-                f'RUNTIME_NUMERIC 과 validate_params 에 함께 넣을 것 (§85.5)')
-
         # ── 상태 ────────────────────────────────────────────────────────
         self.tracker = ConfirmTracker(p('confirm_frames').value,
                                       p('confirm_window_sec').value,
@@ -482,6 +500,7 @@ class PerceptionAdapter(Node):
         self._mission_state = None
         self._mission_state_t = None
         self._rearm_pending_since = None       # §85.4 handshake 진행 중 표식
+        self._last_rearm_t = None              # §86.4 중복 병합 기준 시각
         self.create_subscription(
             String, p('mission_state_topic').value, self.on_mission_state, 10)
 
@@ -511,7 +530,7 @@ class PerceptionAdapter(Node):
         'min_confidence', 'confirm_frames', 'confirm_window_sec',
         'max_stamp_age_sec', 'max_range', 'fixed_range',
         'refire_cooldown_sec', 'confirm_assoc_radius_m', 'tf_wait_sec',
-        'rearm_ack_timeout_sec',
+        'rearm_ack_timeout_sec', 'rearm_dedup_sec',
     )
     #: tracker 를 다시 만들어야 하는 것들 (파생 상태)
     TRACKER_KEYS = ('confirm_frames', 'confirm_window_sec', 'confirm_assoc_radius_m')
@@ -628,6 +647,22 @@ class PerceptionAdapter(Node):
                     f'미션을 reset 해 PATROL 로 돌린 뒤 다시 보낼 것')
                 self.say(f'REARM_REJECTED ({st})')
                 return
+            # 🔴 §86.4 — 전달용 중복은 **하나의 의도**다. 성공 직후의 재요청과
+            #   이미 열려 있는 요청을 새 handshake 로 만들지 않는다.
+            dedup = self.get_parameter('rearm_dedup_sec').value
+            if (self._last_rearm_t is not None
+                    and self.now_sec() - self._last_rearm_t <= dedup):
+                self.get_logger().info(
+                    '🔵 재무장 중복 무시 — 방금 재무장했다(전달용 재전송으로 본다)',
+                    throttle_duration_sec=2.0)
+                self.say('REARM_DUP_IGNORED')
+                return
+            if self._rearm_pending_since is not None:
+                self.get_logger().info(
+                    '🔵 재무장 요청이 이미 열려 있다 — 중복 무시',
+                    throttle_duration_sec=2.0)
+                self.say('REARM_DUP_IGNORED')
+                return
             # 🔴 §85.4 — 캐시가 PATROL 이어도 **지금** PATROL 이라는 뜻은 아니다.
             #   여기서 끝내지 않고, **요청 이후에 새로 오는 관측**을 기다린다.
             #   그 관측이 PATROL 이면 그때 재무장한다(`on_mission_state` 가 마무리).
@@ -645,6 +680,7 @@ class PerceptionAdapter(Node):
         self.fired_at = None
         self.tracker.reset()
         self._last_reason = '재무장됨 — 다음 테이크 대기'
+        self._last_rearm_t = self.now_sec()      # §86.4 중복 병합 기준
         self.get_logger().warn('🔵 재무장 — 발사 이력과 누적 관측을 지웠다')
         self.say('REARMED')
 
