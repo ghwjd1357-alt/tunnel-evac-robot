@@ -41,6 +41,10 @@ LEFT = (55.0, 125.0)
 RIGHT = (-125.0, -55.0)
 MAX_R = 4.0        # 이보다 먼 점은 벽으로 안 본다 (반대편 복도)
 
+TURN_RATE = 0.45        # rad/s 명령 (회전 불감대 0.2329 를 확실히 넘는 값)
+DEG_PER_SEC = 8.0       # 그때 실측 회전율 (08-21 M2: 7.5~8.1 °/s)
+MAX_TURN = 45.0         # 안전 상한 — 이보다 크게 돌리려면 여러 번 나눠 친다
+
 
 def fit(pts):
     """y = m*x + c 최소제곱. 반환 (기울기, 거리중앙값, 표본수)."""
@@ -95,15 +99,14 @@ def report(scan):
         if abs(deg) < 1.0:
             print(f'🟢 {tag}정렬됨 (±1° 이내)')
             return
-        sec = max(abs(deg) / 8.0, 0.3)
-        ccw = deg > 0
-        turn = '반시계(z 양수)' if ccw else '시계(z 음수)'
-        sign = '' if ccw else '-'
-        print(f'→ {tag}{turn} 로 약 {sec:.1f}초:')
-        print(f"   M='{{angular: {{z: {sign}0.45}}}}'")
-        print(f'   timeout {sec:.1f} ros2 topic pub -r 10 /cmd_vel '
-              f'geometry_msgs/msg/Twist "$M"')
-        print('   🔴 위 두 줄을 순서대로. M= 을 먼저 안 치면 빈 메시지가 나간다.')
+        sec = max(abs(deg) / DEG_PER_SEC, 0.3)
+        turn = '반시계' if deg > 0 else '시계'
+        # 🔴 08-21 — 여기서 CLI 두 줄(topic pub)을 안내했었다. 그런데 실차의 그
+        #   CLI 가 `rcl node's context is invalid` 로 죽어 있어서 안내대로 쳐도
+        #   안 됐다. `--turn` 을 넣고도 이 안내문을 안 고쳐서 사람이 같은 자리를
+        #   두 번 돌았다. **도구가 스스로 할 수 있으면 스스로 한다.**
+        print(f'→ {tag}{turn} {abs(deg):.1f}° · 약 {sec:.1f}초. 이 명령으로 돌린다:')
+        print(f'   python3 tools/wall_align.py --turn {deg:.1f}')
 
     if len(got) == 2:
         gap = abs(got['좌'] - got['우'])
@@ -121,11 +124,6 @@ def report(scan):
     err = sum(got.values()) / len(got)
     print(f'\n🔴 로봇이 벽에서 {err:+.2f}° 틀어져 있다')
     advise(err)
-
-
-TURN_RATE = 0.45        # rad/s 명령 (회전 불감대 0.2329 를 확실히 넘는 값)
-DEG_PER_SEC = 8.0       # 그때 실측 회전율 (08-21 M2: 7.5~8.1 °/s)
-MAX_TURN = 45.0         # 안전 상한 — 이보다 크게 돌리려면 여러 번 나눠 친다
 
 
 def turn(node, deg):
