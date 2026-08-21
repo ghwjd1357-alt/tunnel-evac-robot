@@ -893,5 +893,35 @@
     "id": "0821-seed-expiry-drops-valid-window-84",
     "path": "src/perception_adapter/perception_adapter/adapter_node.py",
     "anchor": "결합은 창을 정리한 뒤에 판정한다 — 만료된 seed 가 창 안의 정상 누적을 지우면 안 된다"
+  },
+  {
+    "id": "0821-spin-thread-stolen-by-main-executor-85",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "TF 리스너는 spin 에 넘기지 않는 전용 노드에 붙인다 — 같은 노드를 spin 하면 전용 executor 를 도로 빼앗긴다"
+  },
+  {
+    "id": "0821-safety-stop-exits-leak-to-fault-85",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "정지 실패 출구는 전수여야 하고 그 개수를 기계가 센다 — 손으로 세면 남는다"
+  },
+  {
+    "id": "0821-rearm-cache-is-not-live-state-85",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "마지막으로 받은 상태는 지금 상태가 아니다 — 요청 이후에 새로 관측한 것만 근거가 된다"
+  },
+  {
+    "id": "0821-new-numeric-param-escaped-validation-85",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "손으로 관리하는 검증 목록은 다음 파라미터에서 샌다 — 선언과 목록의 차집합을 기동이 강제한다"
+  },
+  {
+    "id": "0821-seed-rollover-merges-two-targets-85",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "seed 가 바뀌면 생존 hit 도 새 seed 로 다시 걸러야 한다 — 안 그러면 두 표적의 관측이 합쳐진다"
+  },
+  {
+    "id": "0821-review-85-zero-new-p0-85",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "§85 판정은 P0 0 이며 본편 수동 경로는 네 회차 내내 위협받지 않았다"
   }
 ]

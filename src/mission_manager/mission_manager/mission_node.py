@@ -1067,17 +1067,23 @@ class MissionNode(Node):
                     #   일반 취소는 세대만 stale 로 만들고 종결을 확인하지 않는다
                     #   (재현: cancel 응답을 빈 목록으로 주입해도 faults 0 ·
                     #    stop_pending False → 미션은 BLOCKED 인데 Nav2 는 계속 달림).
+                    # 🔴 08-21 §85.3 — **취소 전에** 사유와 pending 을 세운다.
+                    #   구판은 취소 뒤에 썼다. 그래서 `cancel_goal_async()` 가
+                    #   **동기 예외**를 던지는 입력에서 `_stop_failed` 가 잠깐
+                    #   `unconfirmed` 로 올려놨는데, 돌아온 뒤 이 줄들이 그걸
+                    #   `pending` 과 원래 사유로 **덮었다**(재현 최종값
+                    #   `BLOCKED/pending/unsafe_gather…`). E-stop 을 요구하는
+                    #   신호가 사라진 것이다 — 순서가 곧 계약이다.
                     had_goal = self.goals.active
-                    self._cancel_intent = 'safety_stop'
-                    self.cancel_current_goal()
-                    self.blocked_stop = (
-                        'pending' if (had_goal or self.goals.stop_pending) else 'none')
                     self._blocked_logged = False
                     self.blocked_reason = (
                         f'unsafe_gather fire=({fx:.2f},{fy:.2f}) '
                         f'gather=({float(eff["x"]):.2f},{float(eff["y"]):.2f}) '
                         f'dist={d_fire:.2f}<{float(min_fd):.2f}')
+                    self.blocked_stop = 'pending' if had_goal else 'none'
                     self.state = State.BLOCKED
+                    self._cancel_intent = 'safety_stop'
+                    self.cancel_current_goal()
                     return
 
         self.fire = {
@@ -1101,6 +1107,11 @@ class MissionNode(Node):
 
         FAULT 는 자동 재시도가 있어 로봇이 스스로 재개한다. 안전한 집결지가
         없어서 멈춘 상황에서는 재시도할 goal 자체가 없다 — 사람이 판단해야 한다."""
+        # 🔴 §85.3 — 한 번 unconfirmed 로 올라가면 같은 세대에서 내려오지 않는다.
+        #   순서 수정으로 덮어쓰기는 사라졌지만, 늦은 콜백이 또 오는 경로가 있어
+        #   **여기서도** 잠근다(방어 두 겹).
+        if self.blocked_stop == 'unconfirmed':
+            return
         self.blocked_stop = 'unconfirmed'
         self.blocked_reason = f'{self.blocked_reason or "안전정지"} · 정지 미확인({reason})'
         self.get_logger().error(

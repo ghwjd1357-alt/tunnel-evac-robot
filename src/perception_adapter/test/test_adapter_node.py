@@ -54,10 +54,14 @@ def test_rearm_rejects_anything_that_is_not_exactly_patrol(node, bad):
     assert any('REARM_REJECTED' in s for s in node._said), node._said
 
 
-def test_rearm_accepts_exact_patrol(node):
+def test_rearm_needs_a_new_observation_after_the_request(node):
+    """🔴 §85.4 — 요청 시점 캐시만으로는 재무장하지 않는다 (handshake)."""
     state(node, 'PATROL')
     node.fired_at = 123.0
     rearm(node)
+    assert node.fired_at == 123.0, '캐시만 보고 재무장했다'
+    assert any('REARM_PENDING' in s for s in node._said), node._said
+    state(node, 'PATROL')                      # 요청 **뒤** 새 관측
     assert node.fired_at is None
     assert 'REARMED' in node._said, node._said
 
@@ -70,14 +74,28 @@ def test_rearm_rejects_when_state_never_seen(node):
     assert any('REARM_REJECTED' in s for s in node._said)
 
 
-def test_rearm_rejects_stale_state(node):
-    """🔴 §84.3 — 마지막 관측이 오래됐으면 그건 현재가 아니다."""
+def test_rearm_rejects_when_state_changed_right_after_the_request(node):
+    """🔴 §85.4 재현본 — 요청 0.1초 전 PATROL, 실제로는 APPROACH.
+
+    §84.3 은 캐시에 수신시각만 붙여서 이 창을 못 막았다 — age 도 1.5초 이하이고
+    문자열도 exact PATROL 이라 그대로 REARMED 가 났다."""
     state(node, 'PATROL')
-    node._mission_state_t = node.now_sec() - 5.0      # 5초 전 값
+    node.fired_at = 123.0
+    rearm(node)                                 # 캐시는 PATROL
+    state(node, 'APPROACH')                     # 그런데 지금은 APPROACH
+    assert node.fired_at == 123.0, '요청 뒤 APPROACH 인데 재무장됐다'
+    assert any('요청 뒤 APPROACH' in s for s in node._said), node._said
+
+
+def test_rearm_request_expires_without_a_new_observation(node):
+    """새 관측이 안 오면 요청을 버린다 — REARMED 를 영원히 기다리지 않게."""
+    state(node, 'PATROL')
     node.fired_at = 123.0
     rearm(node)
-    assert node.fired_at == 123.0, '과거 PATROL 로 재무장됐다'
-    assert any('낡음' in s for s in node._said), node._said
+    node._rearm_pending_since = node.now_sec() - 99.0
+    node.tick()
+    assert node.fired_at == 123.0
+    assert any('만료' in s for s in node._said), node._said
 
 
 def test_rearm_opt_out_still_works_for_bench_testing(node):
@@ -94,6 +112,7 @@ def test_rearm_opt_out_still_works_for_bench_testing(node):
     ('max_range', -1.0), ('max_range', 0.0), ('max_range', float('nan')),
     ('confirm_assoc_radius_m', 1000.0), ('confirm_assoc_radius_m', -1.0),
     ('tf_wait_sec', 5.0), ('tf_wait_sec', -0.1),
+    ('rearm_ack_timeout_sec', float('inf')), ('rearm_ack_timeout_sec', 0.0),
     ('confirm_frames', 1), ('confirm_frames', 0),
     ('min_confidence', 1.5), ('min_confidence', -0.1),
     ('confirm_window_sec', 0.0), ('fixed_range', -2.0),
@@ -138,3 +157,23 @@ def test_runtime_set_is_atomic_across_the_batch(node):
     r = node.set_parameters([Parameter('max_range', value=-5.0)])[0]
     assert not r.successful
     assert node.get_parameter('max_range').value == before
+
+
+# ── §85.5 패턴 수정: 목록 대조를 기계가 한다 ────────────────────────────
+
+def test_no_declared_numeric_param_escapes_validation(node):
+    """🔴 §85.5 — 선언된 수치 파라미터와 검증 목록의 차집합이 0 이어야 한다.
+
+    §84.4("모든 수치를 검증한다")를 넣은 **바로 그 커밋**에서 새 수치를 목록에
+    안 넣었다. 손으로 관리하는 목록은 다음 파라미터에서 또 샌다 —
+    그래서 기동이 이 차집합을 강제한다."""
+    assert node.unvalidated_numeric_params() == set()
+
+
+def test_startup_refuses_when_a_numeric_param_is_unlisted(node, monkeypatch):
+    """목록에서 하나를 빼면 **기동이 막혀야** 한다 (검사의 검사)."""
+    from perception_adapter.adapter_node import PerceptionAdapter as PA
+    short = tuple(x for x in PA.RUNTIME_NUMERIC if x != 'max_range')
+    monkeypatch.setattr(PA, 'RUNTIME_NUMERIC', short)
+    with pytest.raises(ValueError, match='검증 목록 밖'):
+        PA()

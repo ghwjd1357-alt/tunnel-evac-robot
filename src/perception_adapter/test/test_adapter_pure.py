@@ -223,7 +223,7 @@ GOOD = {
     'min_confidence': 0.4, 'confirm_frames': 5, 'confirm_window_sec': 3.0,
     'max_stamp_age_sec': 1.0, 'max_range': 5.0, 'fixed_range': 2.0,
     'refire_cooldown_sec': -1.0, 'confirm_assoc_radius_m': 1.0,
-    'tf_wait_sec': 0.10,
+    'tf_wait_sec': 0.10, 'rearm_ack_timeout_sec': 3.0,
 }
 
 
@@ -254,6 +254,11 @@ def test_params_reject_bad_values():
         ('confirm_assoc_radius_m', 1000.0), ('confirm_assoc_radius_m', 2.5),
         ('tf_wait_sec', -0.1), ('tf_wait_sec', 5.0),
         ('tf_wait_sec', float('nan')),
+        # 🔴 §85.5 — 이 수치가 검증 밖이라 `inf` 로 관문을 무기한 열 수 있었다
+        ('rearm_ack_timeout_sec', float('inf')),
+        ('rearm_ack_timeout_sec', float('nan')),
+        ('rearm_ack_timeout_sec', 0.0), ('rearm_ack_timeout_sec', -1.0),
+        ('rearm_ack_timeout_sec', 30.0),
         ('min_confidence', 'x'), ('max_range', None),
     ]
     for k, v in bad:

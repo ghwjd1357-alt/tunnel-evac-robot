@@ -1740,3 +1740,32 @@ blocked_stop  none / pending / confirmed / unconfirmed
 - **`unconfirmed` 에서 로봇을 물리적으로 세우는 것은 사람이다** — E-stop 이다.
   소프트웨어가 더 할 수 있는 것이 없다는 것이 이 상태의 정의다.
 - **실차 검증 0회.** 단위 재현 5건뿐이다.
+
+### 10.30-c. 아홉 번째 예외 **3차 확장** — 검토 §85 반영 (2026-08-21, 같은 날 밤)
+
+| | |
+|---|---|
+| 승인 | 사용자, 2026-08-21 (*"P1 다섯 다 고치고 마지막 검토 받고 거기에서 나오는거 분석해서 동결시키자"*) |
+| 추가 범위 | `goal_manager.py` — 정지 실패 출구 2개를 `_stop_failed` 로 합침 + `STOP_FAILURE_EXITS` 상수 · `mission_node.py` — 취소 **전에** 사유·상태를 세우는 순서 |
+| 왜 새 예외를 안 열었나 | §10.30-b 가 만든 `safety_stop` 의 **완결**이다. 코드 표면은 그대로이고 **누수 출구 2개와 순서**만 닫는다 |
+| 변경 안 함 (경계) | `guide_stop` 정책 · FAULT 재시도 · `send_goal` 예산 · 상태 전이 나머지 전량 |
+| 회귀 | `pytest src/mission_manager` **199** 불변 · `tools/test_stop_exits.py` **4** 신설 |
+
+**무엇이 바뀌었나** — §10.30-b 는 실패 출구 **3개**만 `_stop_failed` 로 보냈다.
+남은 둘(`_on_cancel_response` 의 응답 예외 · 빈 `goals_canceling`)이 `_on_fault()` 를
+직접 불러 **안전정지가 FAULT 자동재시도로 샜다.** 그리고 미션이 취소 **뒤에**
+`blocked_stop='pending'` 을 써서, 동기 예외로 올라간 `unconfirmed` 를 **덮었다.**
+
+```
+출구 전량 → _stop_failed   STOP_FAILURE_EXITS = 7 을 tools/test_stop_exits.py 가
+                           실제 `self._stop_failed(` 호출 수와 대조한다.
+                           🔴 출구를 늘리고 상수를 안 고치면 게이트가 죽는다.
+순서                       사유·blocked_stop 을 **취소 전에** 세운다.
+                           unconfirmed 는 같은 세대에서 다시 안 내려간다(이중 방어).
+```
+
+### 🔴 이 확장이 덮지 않는 것
+
+- **`STOP_FAILURE_EXITS` 는 개수만 센다.** 각 출구가 옳은 사유 문자열을 넘기는지는
+  `test_alarm_boundary.py` 의 전이 검사 몫이고, 그것은 **전수가 아니다.**
+- **실차 검증 0회.** 단위 재현뿐이다.

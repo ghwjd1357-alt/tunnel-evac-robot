@@ -216,6 +216,11 @@ class GoalManager:
         """§84.2 — 정지 종결을 아직 기다리는가 (미션이 읽는다)."""
         return self._stop_pending
 
+    #: 🔴 §85.3 **패턴 수정** — 정지 실패 출구의 **개수를 계약으로 고정**한다.
+    #:   §84.2 는 출구 3개만 바꾸고 2개를 놓쳤다. 손으로 세면 또 놓친다.
+    #:   `tools/test_stop_exits.py` 가 이 값과 실제 `_stop_failed(` 호출 수를 대조한다.
+    STOP_FAILURE_EXITS = 7
+
     def _stop_failed(self, reason):
         """🔴 §84.2 — 정지 확인 실패의 귀속처를 **의도로** 가른다.
 
@@ -401,7 +406,9 @@ class GoalManager:
         except Exception as e:      # 통신 실패 — 취소 접수 여부 자체를 모름
             self._log.error(f'★ {tag} 취소 응답 수신 실패: {e} — 정지 미보장')
             if stop_seq is not None and self._is_stop_target(stop_seq):
-                self._on_fault()
+                # 🔴 §85.3 — 여기가 `_on_fault()` 직접 호출로 남아 있었다.
+                #   safety_stop 이 FAULT 자동재시도로 새는 두 출구 중 하나다.
+                self._stop_failed(f'취소 응답 수신 실패: {e}')
             return
         if res.goals_canceling:
             self._log.info(f'{tag} 취소 접수 확인 (Nav2 정지 진행)')
@@ -413,9 +420,9 @@ class GoalManager:
             #   terminal 이 이미 왔다면 _is_stop_target 이 거짓) 정지 확인 불가.
             if stop_seq is not None and self._is_stop_target(stop_seq):
                 self._log.error(
-                    '★ 유도정지 취소 접수 안 됨 — 정지 확인 불가, '
-                    'FAULT (재전송 금지)')
-                self._on_fault()
+                    '★ 정지 취소 접수 안 됨 — 정지 확인 불가 (재전송 금지)')
+                # 🔴 §85.3 — 두 번째 누수 출구. 의도별 귀속으로 합친다.
+                self._stop_failed('취소 접수 안 됨 (빈 goals_canceling)')
 
     def _on_stale_result(self, seq, future):
         """stale(뒤늦게 수락돼 즉시 취소한) goal 의 최종결과 감시 — CANCELED 정상.

@@ -19,11 +19,12 @@
     {
       "path": "Desktop/0822_촬영_명령묶음.md",
       "role": "08-22~23 촬영 테이크 절차",
-      "sha256": "e9e8880cdc6f667209ce8127c96ab9b087365d4f7cb92ef05f44e922be2e2a05",
-      "bytes": 9192,
+      "sha256": "d94afe815005f53c8c8c14eeff6defbe8d3715edfaaca2b7f76e8c57e33044f4",
+      "bytes": 9958,
       "required_gates": [
         "ros2 topic pub -w 1 --times 3 /adapter_cmd",
         "어댑터 재무장",
+        "REARM_PENDING",
         "REARMED",
         "python3 tools/yaw_gate.py",
         "사람을 멈추기 직전",

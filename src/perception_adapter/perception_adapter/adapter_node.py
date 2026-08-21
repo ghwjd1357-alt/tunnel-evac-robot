@@ -49,6 +49,7 @@ import math
 
 import rclpy
 import rclpy.duration
+import rclpy.node
 from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
@@ -187,6 +188,18 @@ class ConfirmTracker:
         #   walking-chain 은 계속 막고 **창 안의 정상 5건은 살려야** 한다.
         #   → **창을 먼저 정리하고, 그 결과의 첫 점을 seed 로 쓴다.**
         self._prune(t)
+        # 🔴 08-21 §85.6 — prune 으로 **seed 가 바뀌면** 생존 hit 들도 새 seed
+        #   기준으로 다시 걸러야 한다. §84.5 는 incoming 한 점만 새 seed 와
+        #   비교했다. 재현: (0,0)(0.2,-1)(2.9,+1)(3.10,-1)(3.11,-1)(3.12,-1) 에서
+        #   t=3.10 에 seed 가 0 → -1 로 바뀌는데 +1 이 생존해, 반경 1 m 클러스터에
+        #   **2 m 떨어진 점**이 증거로 남고 마지막 입력에 확정됐다.
+        #   어느 한 위치도 5회를 못 채웠는데 두 표적의 관측이 합쳐진 것이다.
+        #   → 만료된 anchor 를 붙잡지 않으면서(그건 §84.5 의 false negative)
+        #     **현재 창의 seed 로 생존분을 재필터**한다.
+        if self._hits:
+            seed = self._hits[0][2]
+            self._hits = [h for h in self._hits
+                          if not self._far(h[2], seed, self.assoc_radius)]
         if self._hits and self._far(pos, self._hits[0][2], self.assoc_radius):
             self._hits = []              # 다른 대상 — 누적을 합치지 않는다
         self._last_stamp = s
@@ -252,6 +265,10 @@ def validate_params(vals):
     #   물체이므로 map 좌표에서 그보다 크게 튀면 같은 대상이 아니다.
     num('confirm_assoc_radius_m', positive=True, hi=2.0)
     num('tf_wait_sec', lo=0.0, hi=1.0)
+    # 🔴 §85.5 — 이 수치가 검증 밖이었다(구 이름 `mission_state_max_age_sec`).
+    #   `inf` 를 넣으면 비교가 전부 거짓이 되어 관문이 무기한 열렸다.
+    #   상한 10.0 = 사람이 명령을 보내고 기다릴 수 있는 현실적 최대치.
+    num('rearm_ack_timeout_sec', positive=True, hi=10.0)
     # refire_cooldown_sec 은 0 이하가 "평생 1회" 라는 뜻이라 부호를 안 막는다.
     # 다만 NaN/Inf 는 비교가 전부 False 가 되어 억제가 조용히 사라진다.
     num('refire_cooldown_sec')
@@ -348,8 +365,14 @@ class PerceptionAdapter(Node):
         #   **거부**한다 — fail-closed. 미션 없이 어댑터만 시험할 때만 끈다.
         self.declare_parameter('mission_state_topic', '/mission_state')
         self.declare_parameter('rearm_requires_patrol', True)
-        # 🔴 §84.3 — 미션 상태의 신선도 상한. 미션은 2 Hz 로 흘린다.
-        self.declare_parameter('mission_state_max_age_sec', 1.5)
+        # 🔴 §85.4 — **캐시 나이가 아니라 handshake 다.**
+        #   §84.3 은 마지막 상태에 수신시각을 붙였는데, 그건 "그 뒤로 바뀌지
+        #   않았다" 를 증명하지 못한다. 재현: 미션이 PATROL 을 발행한 0.10초 뒤
+        #   실제로 APPROACH 가 됐고 다음 2 Hz tick 이 아직 안 온 창에서, 캐시는
+        #   exact PATROL 이고 age 도 1.5초 이하라 그대로 REARMED 가 났다.
+        #   → 재무장은 **요청 이후에 새로 관측한** PATROL 에만 성립한다.
+        #     이 값은 그 새 관측을 기다리는 상한이다(2 Hz 면 여섯 주기).
+        self.declare_parameter('rearm_ack_timeout_sec', 3.0)
 
         p = self.get_parameter
         self.detections_topic = p('detections_topic').value
@@ -358,17 +381,27 @@ class PerceptionAdapter(Node):
 
         # ── TF ─────────────────────────────────────────────────────────
         self.tf_buffer = tf2_ros.Buffer()
-        # 🔴 08-21 §84.1 — `spin_thread=True` 가 **필수다.**
-        #   구판은 기본 False 였고 `main()` 은 단일 스레드 `rclpy.spin()` 을 쓴다.
-        #   그래서 탐지 콜백 안의 `lookup_transform(timeout=0.10)` 이 executor 를
-        #   붙잡고 있는 동안 `/tf` 구독 콜백이 **돌 수 없었다.** 즉 "0.10초 기다린다"
-        #   가 아니라 "이미 버퍼에 있는 것만 0.10초 기다린다" 였다.
-        #   실측: 30 ms 뒤 도착한 동일 stamp TF 를 102 ms LookupException 으로 놓쳤고,
-        #        콜백이 반환한 직후 같은 조회는 성공했다. spin_thread=True 로는 41 ms 성공.
-        #   → 리스너에 자기 executor 스레드를 준다. 버퍼는 콜백과 무관하게 채워진다.
-        #   ⚠ 버퍼는 스레드 안전하다(tf2 설계). 우리 쪽 상태는 안 건드린다.
+        # 🔴 08-21 §85.2 — `spin_thread=True` **만으로는 안 된다.**
+        #   §84.1 에서 리스너에 전용 executor 를 줬는데, 그 뒤 `main()` 의
+        #   `rclpy.spin(node)` 가 **같은 노드를 도로 가져간다.**
+        #   실측: `before_main_spin: nodes=1` → `during_main_spin: nodes=0`.
+        #   즉 실제 구독 콜백에서는 detection 과 `/tf` 가 다시 한 executor 에
+        #   놓이고, detection 이 `lookup_transform` 을 잡은 동안 늦은 TF 콜백은
+        #   돌지 못한다. 🔴 **§84.1 의 "41 ms 성공" 검산은 `main()` 을 안 돌린
+        #   구성의 값이었다** — 존재하지 않는 형상을 시험한 것이다.
+        #
+        #   → 리스너를 **어댑터가 아닌 전용 노드**에 붙인다. 그 노드는 절대
+        #     `rclpy.spin` 에 넘기지 않으므로 누가 executor 를 빼앗을 수 없다.
+        #   ⚠ 같은 노드를 multi-thread executor 로 바꾸는 길도 있으나, 그러면
+        #     parameter·detection 상태에 동시성이 열려 callback group 과 tracker
+        #     잠금까지 새 계약이 된다 — 촬영 전날에 열 표면이 아니다.
+        self._tf_node = rclpy.node.Node(
+            'perception_adapter_tf',
+            namespace=self.get_namespace(),
+            start_parameter_services=False,
+            enable_rosout=False)
         self.tf_listener = tf2_ros.TransformListener(
-            self.tf_buffer, self, spin_thread=True)
+            self.tf_buffer, self._tf_node, spin_thread=True)
 
         # ── 입출력 ──────────────────────────────────────────────────────
         # 🔴 QoS 는 계약이 고정했다 (Detection3DArray.msg 머리말):
@@ -401,11 +434,23 @@ class PerceptionAdapter(Node):
             'refire_cooldown_sec': p('refire_cooldown_sec').value,
             'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
             'tf_wait_sec': p('tf_wait_sec').value,
+            'rearm_ack_timeout_sec': p('rearm_ack_timeout_sec').value,
         })
         if bad:
             for m in bad:
                 self.get_logger().error(f'🔴 파라미터 거부 — {m}')
             raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
+
+        # 🔴 §85.5 **패턴 수정** — 목록을 손으로 관리하면 다음 파라미터에서 또 샌다.
+        #   실제로 §84.4("모든 수치를 검증한다")를 넣은 **바로 그 커밋**에서
+        #   `mission_state_max_age_sec` 를 목록에 안 넣었다.
+        #   → 선언된 수치 파라미터와 검증 목록의 **차집합을 기계가 0으로 만든다.**
+        #     새 수치를 선언하고 목록에 안 넣으면 **기동이 안 된다.**
+        missed = self.unvalidated_numeric_params()
+        if missed:
+            raise ValueError(
+                f'🔴 수치 파라미터 {sorted(missed)} 가 검증 목록 밖이다. '
+                f'RUNTIME_NUMERIC 과 validate_params 에 함께 넣을 것 (§85.5)')
 
         # ── 상태 ────────────────────────────────────────────────────────
         self.tracker = ConfirmTracker(p('confirm_frames').value,
@@ -436,6 +481,7 @@ class PerceptionAdapter(Node):
             String, p('cmd_topic').value, self.on_cmd, 10)
         self._mission_state = None
         self._mission_state_t = None
+        self._rearm_pending_since = None       # §85.4 handshake 진행 중 표식
         self.create_subscription(
             String, p('mission_state_topic').value, self.on_mission_state, 10)
 
@@ -452,14 +498,36 @@ class PerceptionAdapter(Node):
                 f'{p("fixed_range").value} m 로 강제한다. 기록에 남길 것.')
 
     # ------------------------------------------------------------------
+    def destroy_node(self):
+        """§85.2 — 전용 TF 노드를 함께 내린다. 안 그러면 리스너 스레드가 남는다."""
+        try:
+            self._tf_node.destroy_node()
+        except Exception:
+            pass
+        return super().destroy_node()
+
     #: §84.4 — 런타임 변경을 지원하는 수치 파라미터. 여기 없는 수치는 재기동 전용.
     RUNTIME_NUMERIC = (
         'min_confidence', 'confirm_frames', 'confirm_window_sec',
         'max_stamp_age_sec', 'max_range', 'fixed_range',
         'refire_cooldown_sec', 'confirm_assoc_radius_m', 'tf_wait_sec',
+        'rearm_ack_timeout_sec',
     )
     #: tracker 를 다시 만들어야 하는 것들 (파생 상태)
     TRACKER_KEYS = ('confirm_frames', 'confirm_window_sec', 'confirm_assoc_radius_m')
+
+    def unvalidated_numeric_params(self):
+        """§85.5 — 선언은 됐는데 검증 목록에 없는 수치 파라미터 집합.
+
+        빈 집합이어야 한다. 이 함수가 계약의 **기계 대조**이고, 기동이 그것을
+        강제한다. `bool` 은 `int` 의 하위 타입이라 명시적으로 제외한다."""
+        declared = set()
+        for name, pv in self.get_parameters_by_prefix('').items():
+            v = pv.value
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                continue
+            declared.add(name)
+        return declared - set(self.RUNTIME_NUMERIC)
 
     def _current_numeric(self):
         return {k: self.get_parameter(k).value for k in self.RUNTIME_NUMERIC}
@@ -503,6 +571,19 @@ class PerceptionAdapter(Node):
         self.get_logger().warn(f'🔵 런타임 파라미터 적용: {sorted(proposed)}')
         return SetParametersResult(successful=True)
 
+    def _finish_or_reject_rearm(self, st):
+        """§85.4 — 요청 **이후에 새로 온** 관측으로 handshake 를 끝낸다."""
+        if self._rearm_pending_since is None:
+            return
+        self._rearm_pending_since = None
+        if st == 'PATROL':
+            self._do_rearm()
+        else:
+            self.get_logger().error(
+                f'🔴 재무장 거부 — 요청 뒤 관측한 상태가 "{st}" 다. '
+                f'요청 시점의 캐시는 PATROL 이었지만 지금은 아니다')
+            self.say(f'REARM_REJECTED (요청 뒤 {st})')
+
     def on_mission_state(self, msg: String):
         """§83.4 — 재무장 관문에 쓸 미션 상태. 판정은 on_cmd 가 한다.
 
@@ -512,6 +593,7 @@ class PerceptionAdapter(Node):
         """
         self._mission_state = (msg.data or '').strip().upper()
         self._mission_state_t = self.now_sec()
+        self._finish_or_reject_rearm(self._mission_state)
 
     def on_cmd(self, msg: String):
         """§82.5 — 테이크 사이 재무장.
@@ -546,18 +628,20 @@ class PerceptionAdapter(Node):
                     f'미션을 reset 해 PATROL 로 돌린 뒤 다시 보낼 것')
                 self.say(f'REARM_REJECTED ({st})')
                 return
-            # 🔴 §84.3 — **신선도**. 마지막 관측이 오래됐으면 그건 과거다.
-            #   미션은 2 Hz 로 상태를 흘리므로 1.5초면 세 번 놓친 것이다.
-            age = self.now_sec() - (self._mission_state_t or 0.0)
-            max_age = self.get_parameter('mission_state_max_age_sec').value
-            if age > max_age:
-                self.get_logger().error(
-                    f'🔴 재무장 거부 — 미션 상태가 {age:.1f}s 전 값이다 '
-                    f'(허용 {max_age}s). 지금 PATROL 인지 증명할 수 없다. '
-                    f'/mission_state 가 흐르는지 확인하고 다시 보낼 것')
-                self.say(f'REARM_REJECTED (상태 {age:.1f}s 낡음)')
-                return
+            # 🔴 §85.4 — 캐시가 PATROL 이어도 **지금** PATROL 이라는 뜻은 아니다.
+            #   여기서 끝내지 않고, **요청 이후에 새로 오는 관측**을 기다린다.
+            #   그 관측이 PATROL 이면 그때 재무장한다(`on_mission_state` 가 마무리).
+            self._rearm_pending_since = self.now_sec()
+            self.get_logger().warn(
+                '🔶 재무장 요청 접수 — 다음 /mission_state 관측을 기다린다. '
+                'REARMED 를 보기 전에는 다음 단계로 가지 말 것')
+            self.say('REARM_PENDING (다음 PATROL 관측 대기)')
+            return
 
+        self._do_rearm()
+
+    def _do_rearm(self):
+        """실제 재무장 — 관문을 통과한 자리에서만 부른다."""
         self.fired_at = None
         self.tracker.reset()
         self._last_reason = '재무장됨 — 다음 테이크 대기'
@@ -572,6 +656,20 @@ class PerceptionAdapter(Node):
         m.data = text
         self.status_pub.publish(m)
 
+    def _expire_rearm(self):
+        """§85.4 — 새 관측이 상한 안에 안 오면 요청을 버린다. 조용히 두면
+        운영자가 REARMED 를 영원히 기다린다."""
+        if self._rearm_pending_since is None:
+            return
+        limit = self.get_parameter('rearm_ack_timeout_sec').value
+        if self.now_sec() - self._rearm_pending_since <= limit:
+            return
+        self._rearm_pending_since = None
+        self.get_logger().error(
+            f'🔴 재무장 만료 — {limit}s 안에 새 /mission_state 관측이 없었다. '
+            f'미션이 살아 있는지 확인하고 다시 보낼 것')
+        self.say('REARM_REJECTED (관측 없음 — 만료)')
+
     def tick(self):
         """2초마다 현재 상태를 흘린다.
 
@@ -580,6 +678,7 @@ class PerceptionAdapter(Node):
           로그가 없으면 둘이 똑같이 보인다. 08-20 에 우리가 세 번 당한 그 형태다.
         """
         t = self.now_sec()
+        self._expire_rearm()          # §85.4 — handshake 대기 상한
         if self.fired_at is not None:
             self.say(f'FIRED at t={self.fired_at:.1f}')
             return
@@ -780,7 +879,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
+        node.destroy_node()          # §85.2 — 전용 TF 노드까지 여기서 정리된다
         if rclpy.ok():
             rclpy.shutdown()
 
