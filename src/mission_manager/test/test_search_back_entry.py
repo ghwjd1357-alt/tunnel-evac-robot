@@ -37,6 +37,12 @@ test_search_back_entry.py — SEARCH_BACK 진입 봉인 (예약 16 ①+②′, 0
 
 [실행]
   cd ~/ros2_ws && python3 -m pytest src/mission_manager/test/ -q
+
+🔴 **08-22 — 놓침이 역행까지 가는 시간이 늘었다.** `GUIDE → SEARCH_BACK` 사이에
+`HOLD`(제자리 재수집, `search_back.hold_sec` 기본 4.0s)가 들어갔기 때문이다.
+그래서 아래 회귀 10곳의 EMPTY 구간에 **각각 4.0초를 더했다** — 기대 동작을 바꾼
+것이 아니라, 같은 결론에 도달하는 데 필요한 시간이 `lost_sec(3.0) + hold_sec(4.0)`
+로 늘어난 것이다. HOLD 자체의 회귀는 `test_hold.py` 가 따로 본다.
 """
 
 import ast
@@ -245,7 +251,7 @@ def test_sb1_flicker_loss_actually_reaches_search_back():
     env = make_env()
     run(env, 0.1, PERSON)          # ① 검출 1장 (visible 은 seen_sec 1.0 미달로 False)
     assert not env.node.monitor.visible('any')
-    run(env, 3.6, EMPTY)           # ②③④⑤
+    run(env, 7.6, EMPTY)           # ②③④⑤
 
     assert env.node.last_seen is not None, \
         '소비 술어(lost)와 같은 타이머로 기록되지 않았다 — ②′ 불변조건 위반'
@@ -276,7 +282,24 @@ def test_sb3_tf_dead_reaches_report_instead_of_silent_loop():
     보완 전: give_up False 고정 → FAIL."""
     env = make_env(tf_ok=False)
     run(env, 0.1, PERSON)
-    run(env, 6.0, EMPTY)
+    # 🔴 08-22 — 여기는 단순히 4초를 더한 자리가 아니다. 이 시험은 역행이 **매번
+    #   거부되는**(TF 사망 → last_seen None) 경로가 max_attempts 를 소진해 관제
+    #   보고까지 가는지를 본다. HOLD 가 들어가면서 **시도 한 번의 값이
+    #   lost_sec(3.0) + hold_sec(4.0) 로 2.3배가 됐다.**
+    #   ⚠ 이건 실차에서도 그렇다 — 라이다로 못 찾는 상황에서 "추종자 확인 불가"
+    #     보고가 그만큼 늦어진다. 그 대가로 흔한 경우의 22초 역행을 아낀다.
+    #     보고가 늦는 동안 로봇은 **서 있다**(HOLD 는 goal 을 안 낸다) — 위험이
+    #     늘어나는 방향은 아니다.
+    #   실측 전개(08-22): 3.6 HOLD → 7.6 attempts=1 → 11.1 HOLD → 15.1 attempts=2
+    #                      → 18.6 HOLD → **22.6 give_up**.
+    #   시도 한 번이 7.5s 인 이유는 hold_sec(4.0) 만이 아니다 — `HOLD → GUIDE`
+    #   복귀가 `[reset-role] guide-entry` 를 타서 놓침 타이머가 재무장되므로
+    #   lost_sec(3.5) 를 매번 다시 채운다. 🔵 그 자리를 특례로 빼지 않는다:
+    #   복귀 뒤 3.5초는 "사람이 돌아왔나" 를 다시 보는 시간이고, 그동안 사람이
+    #   보이면 record_last_seen 이 살아나 역행 자체가 필요 없어진다.
+    #   ⚠ 숫자를 넉넉히가 아니라 **실측+여유**로 박는다 — 이 값이 늘어나면
+    #     보고가 늦어진 것이므로 그때 이 시험이 깨져서 알려주는 편이 낫다.
+    run(env, 25.0, EMPTY)
 
     assert env.node.last_seen is None            # TF 가 죽었으니 기록은 여전히 불가
     assert env.node.give_up, \
@@ -346,7 +369,7 @@ def test_sb8_short_flicker_below_lost_sec_does_not_reverse():
     assert env.node.state == State.GUIDE, '깜빡임만으로 비싼 역행이 발동했다'
     assert env.node.search_attempts == 0
 
-    run(env, 1.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
+    run(env, 5.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 1
 
@@ -378,7 +401,7 @@ def test_sb10_record_stops_at_loss_declaration():
     assert env.node.last_seen == (1.0, 2.0)
 
     env.tf.pose = (7.0, 7.0)
-    run(env, 0.6, EMPTY)                   # t=3.6 — 3.5 tick 에서 놓침 확정
+    run(env, 4.6, EMPTY)                   # t=3.6 — 3.5 tick 에서 놓침 확정
     assert env.node.state == State.SEARCH_BACK
     assert env.node.last_seen == (1.0, 2.0), '놓침 확정 tick 에서 기록이 또 갱신됐다'
     assert env.node.search_goal == {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
@@ -428,7 +451,7 @@ def test_sb12_prelost_gather_to_guide_does_not_burn_budget_without_search_back()
     assert not any('역행 불가' in m for m in msgs(env)), \
         'TF 실패가 아닌데 "역행 불가"로 예산을 태웠다'
 
-    run(env, 3.5, EMPTY)           # 이제 이 세대에서 lost_sec 를 채운다
+    run(env, 7.5, EMPTY)           # 이제 이 세대에서 lost_sec 를 채운다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 1
     assert env.node.search_goal == {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
@@ -481,7 +504,7 @@ def test_sb14_fault_resume_to_guide_rearms_generation():
     run(env, 2.0, EMPTY)                   # 복귀 후 2.5s < lost_sec 3.0
     assert env.node.state == State.GUIDE
     assert env.node.search_attempts == 0
-    run(env, 2.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
+    run(env, 6.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 1
 
@@ -495,7 +518,7 @@ def test_sb15_control_reset_does_not_leak_old_generation_into_next_mission():
       APPROACH→GATHER 는 진짜 `on_reached()`, GATHER→GUIDE 는 진짜 콜백이 한다."""
     env = make_env()
     run(env, 0.1, PERSON)
-    run(env, 5.0, EMPTY)                   # 놓침 → 역행 (이전 임무)
+    run(env, 9.0, EMPTY)                   # 놓침 → 역행 (이전 임무)
     assert env.node.search_attempts == 1
 
     env.node.on_cmd(types.SimpleNamespace(data='reset'))
@@ -514,7 +537,7 @@ def test_sb15_control_reset_does_not_leak_old_generation_into_next_mission():
 
     run(env, 2.5, EMPTY)
     assert env.node.state == State.GUIDE, '새 세대의 lost_sec 를 안 채우고 열렸다'
-    run(env, 1.0, EMPTY)
+    run(env, 5.0, EMPTY)                   # +4.0 = hold_sec
     assert env.node.state == State.SEARCH_BACK   # 반대 방향 경계
     assert env.node.search_attempts == 1
 
@@ -533,7 +556,7 @@ def test_sb16_refind_return_to_guide_does_not_relose_immediately():
     assert env.node.state == State.GUIDE
     assert env.node.search_attempts == 1
 
-    run(env, 3.5, EMPTY)                   # 진짜로 다시 놓치면 2회차는 열린다
+    run(env, 7.5, EMPTY)                   # 진짜로 다시 놓치면 2회차는 열린다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 2
 
@@ -556,7 +579,7 @@ def test_sb17_refind_timeout_return_to_guide_does_not_relose_immediately():
     #   늦추는데, 그 차이에 단언을 걸면 앵커가 부정 회귀로 둔갑한다.
     run(env, 1.5, EMPTY)                   # 복귀 후 ~2s < lost_sec 3.0
     assert env.node.state == State.GUIDE
-    run(env, 2.0, EMPTY)                   # 넘김 → 양쪽 다 열려야 한다
+    run(env, 6.0, EMPTY)                   # 넘김 → 양쪽 다 열려야 한다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 2
 
@@ -637,7 +660,7 @@ def test_sb20_first_valid_scan_after_dead_start_does_not_declare_loss():
     assert env.node.state == State.GUIDE, '새 세대의 lost_sec 를 안 채우고 열렸다'
     assert env.node.search_attempts == 0
 
-    run(env, 1.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
+    run(env, 5.0, EMPTY)                   # 넘김 → 이제는 열려야 한다
     assert env.node.state == State.SEARCH_BACK
     assert env.node.search_attempts == 1
     assert env.node.search_goal == {'x': 1.0, 'y': 2.0, 'yaw': 0.0}, \

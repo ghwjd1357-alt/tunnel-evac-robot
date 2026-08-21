@@ -71,6 +71,9 @@ normal_speed: 0.26
 search_back:
   cone_half_deg: 60.0
   detect_range: 2.5
+  # 🆕 08-22 — 놓침 뒤 **제자리에서** 다시 찾아보는 시간 [s]. 이 시간을 넘겨야
+  #   비싼 역행(180° 약 22초)으로 넘어간다. 선택 키 — 없으면 4.0.
+  hold_sec: 4.0
   lost_sec: 3.0
   seen_sec: 1.0
   cluster_max_width: 0.8

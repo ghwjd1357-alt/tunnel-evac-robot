@@ -75,6 +75,14 @@ class State(Enum):
     APPROACH = auto()     # 화재 → 집결지 이동 (싸이렌 ON)
     GATHER = auto()       # T초 집결 대기
     GUIDE = auto()        # 저속 선행 유도 + 후방 추종감시
+    HOLD = auto()         # 🆕 08-22 — 놓침 확정 직후 **제자리에 서서** 라이다 재수집.
+    #                       비싼 행동(역행) 전에 싼 행동(기다리기)을 먼저 한다.
+    #                       근거: 08-21 21:32 리허설에서 SEARCH_BACK 이 두 번 떴고
+    #                       **두 번 다 15초 만에** GUIDE 로 복귀했다(339.0→353.5 ·
+    #                       365.5→381.0). 사람이 잠깐 안 보였을 뿐인데 180° 역행을
+    #                       시작했다 취소한 것이다. 그 21초가 통째로 낭비였다.
+    #                       FollowerMonitor 가 이미 쓰는 비대칭과 같은 철학이다 —
+    #                       "놓침 선언(비싼 역행 유발)은 신중히, 재발견은 빠르게."
     SEARCH_BACK = auto()  # 놓침 → 마지막 목격 지점으로 역행 재탐색
     ESCAPED = auto()      # 탈출 완료
     FAULT = auto()        # Nav2 실패 → 자동 재시도 → 소진 시 정지
@@ -83,6 +91,16 @@ class State(Enum):
     #                       재시도**가 있다. BLOCKED 는 계산이 안전 조건을 못 채운
     #                       것이라 재시도할 대상이 없다 — 사람이 판단할 때까지 선다.
     #                       tick 에 새 goal 을 내는 가지가 없으므로 로봇은 정지한다.
+
+
+# 🆕 08-22 — HOLD 대기 시간의 기본값 [s]. `waypoints.yaml` 의
+#   `search_back.hold_sec` 로 덮어쓴다. 🔵 `.get(기본값)` 으로 읽는 **선택 키**이므로
+#   `validate_waypoints()` 의 필수 목록에 넣지 않는다 (그 함수 머리말의 규약).
+#   ⚠ 촬영 중 키 하나가 없어서 미션 노드가 죽는 것보다, 의도한 값으로 도는 편이 낫다.
+# 왜 4초인가: 역행 한 번이 180° 회전 약 22초 + 되돌아가는 거리를 쓴다. 그 앞에
+#   4초를 서 보는 것은 1/5 값도 안 되는 보험이다. 그리고 `lost` 가 이미 3초
+#   연속 미검출을 요구하므로, 사람이 정말 사라졌다면 여기서 7초를 쓴 셈이 된다.
+HOLD_SEC_DEFAULT = 4.0
 
 
 def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
@@ -504,6 +522,8 @@ class MissionNode(Node):
 
         # --- 상태머신 내부 변수 ---
         self.state = State.PATROL
+        # 🆕 HOLD 진입 시각. None = HOLD 중이 아니다.
+        self.hold_since = None
         # ★ 직전 tick 이 '실제로 분기시킨' 상태 (08-01 검토 §26 P1 — GUIDE 진입 감지용).
         #   resume_state(FAULT 복귀 목적지)와 혼동 금지: 이건 순수한 전이 감지 재료다.
         self._prev_tick_state = None
@@ -781,9 +801,47 @@ class MissionNode(Node):
                 #     'not lost' 만으로 쓰면 라이다가 죽은 동안 목격 지점이 로봇을
                 #     따라 계속 전진해 역행 목표가 무의미해진다.
                 if self.monitor.lost(zone='any'):
-                    self.enter_search_back()      # 놓침 확정 → 역행
+                    # 🆕 08-22 — 곧바로 역행하지 않는다. 먼저 **제자리에 서서** 본다.
+                    #   `record_last_seen` 이 바로 위에서 멈췄으므로 목격 지점은
+                    #   HOLD 동안 그대로 유지된다 — 로봇이 안 움직이니 오히려 정확하다.
+                    self.enter_hold()
                 elif not stale:
                     self.record_last_seen()       # 놓치기 전까지 위치 갱신
+
+        elif self.state == State.HOLD:
+            # 🆕 08-22 — 로봇은 이미 서 있다(`enter_hold` 가 goal 을 취소했다).
+            #   🔴 여기서는 goal 을 하나도 내지 않는다 — 그것이 '정지'의 구현이다
+            #   (`BLOCKED` 과 같은 구조. 검증된 패턴이다).
+            if self.monitor.visible(zone='any'):
+                # 🎯 역행을 안 하고 끝났다. 08-21 리허설의 두 번이 이 가지로 왔을 것이다.
+                self.get_logger().info('★ 제자리에서 재발견 → GUIDE 복귀 (역행 안 함)')
+                self.monitor.reset('any')   # [reset-role] hold-return — 복귀 즉시 재-놓침 방지
+                self.hold_since = None
+                self.state = State.GUIDE
+            elif self.monitor.scan_stale():
+                # ⚠ 라이다가 죽은 동안은 **시간을 세지 않는다.** 안 그러면 센서가
+                #   죽었다는 이유로 역행이 시작된다 — 그때 역행은 눈 감고 도는 것이다.
+                #   같은 취지의 보류가 GUIDE 의 `record_last_seen` 에도 걸려 있다.
+                self.hold_since = self.get_clock().now()
+                self.get_logger().warn(
+                    '⚠ /scan 끊김 — HOLD 대기시간 보류 (역행으로 넘어가지 않는다)',
+                    throttle_duration_sec=5.0)
+            else:
+                waited = (self.get_clock().now()
+                          - self.hold_since).nanoseconds / 1e9
+                hold_sec = float(self.wp['search_back'].get(
+                    'hold_sec', HOLD_SEC_DEFAULT))
+                if waited >= hold_sec:
+                    self.get_logger().info(
+                        f'제자리 {waited:.1f}초 재수집 실패 → 역행 시작')
+                    self.enter_search_back()
+                    # 🔴 `enter_search_back` 은 시도 소진·give_up 이면 **상태를 안 바꾸고
+                    #   그냥 돌아온다.** 구판에서는 호출자가 GUIDE 였으므로 그대로
+                    #   단독 탈출로 이어졌다. HOLD 에서 부르면 그 경로가 **HOLD 에
+                    #   갇힌다** — 로봇이 영원히 서 있는다. 그래서 되돌린다.
+                    if self.state == State.HOLD:
+                        self.hold_since = None
+                        self.state = State.GUIDE
 
         elif self.state == State.SEARCH_BACK:
             # 재발견은 zone='any'(전방위) — 역행 중엔 사람이 로봇 '앞'에 있으므로!
@@ -875,6 +933,20 @@ class MissionNode(Node):
     # ===========================================================
     # SEARCH_BACK 진입 — 안전장치 2개가 여기서 작동
     # ===========================================================
+    def enter_hold(self):
+        """🆕 08-22 — 놓침 확정 직후 제자리 정지. 비싼 역행 앞의 싼 한 걸음.
+
+        goal 을 취소하는 것이 곧 '정지'다 — tick 의 HOLD 가지가 새 goal 을 내지
+        않으므로 로봇은 그 자리에 선다.
+        ⚠ `search_attempts` 를 여기서 올리지 않는다. HOLD 는 역행이 아니고,
+          역행 예산(`max_attempts`)은 실제로 되돌아간 횟수여야 한다.
+        """
+        self.cancel_current_goal()
+        self.hold_since = self.get_clock().now()
+        self.get_logger().info(
+            '추종자 놓침 → 제자리 정지하고 재수집 (역행 전 단계)')
+        self.state = State.HOLD
+
     def enter_search_back(self):
         sb = self.wp['search_back']
         # 안전장치 ①: 시도 횟수 제한 → 초과 시 보고 후 단독 탈출
