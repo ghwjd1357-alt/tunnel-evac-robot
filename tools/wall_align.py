@@ -63,29 +63,53 @@ def report(scan):
     if fl is None and fr is None:
         print('🔴 좌우 어느 쪽에서도 벽을 못 찾았다 (표본 부족)')
         return
-    angs = []
+    got = {}
     for name, f in (('좌', fl), ('우', fr)):
         if f is None:
             print(f'  {name}벽  표본 부족')
             continue
         m, d, n = f
         deg = math.degrees(math.atan(m))
-        angs.append(deg)
+        got[name] = deg
         print(f'  {name}벽  거리 {d:5.2f} m · 기울기 {deg:+6.2f}° · 점 {n:3d}개')
 
-    err = sum(angs) / len(angs)
+    # 🔴 08-21 실차 — 부호를 한 번 뒤집어 놨었다. 근거를 남긴다.
+    #   복도축을 월드 X 로 두고 로봇 yaw 를 θ(반시계 +) 라 하면, 벽 위의 점은
+    #   월드 (X, C) 이고 로봇 좌표로는
+    #       x_r =  X·cosθ + C·sinθ ,  y_r = -X·sinθ + C·cosθ
+    #   → dy_r/dx_r = -tanθ.  즉 **기울기 deg = -θ** 다.
+    #   틀어진 각 θ 를 0 으로 만들려면 -θ = +deg 만큼 돌린다.
+    #   ⇒ deg 가 양수면 **반시계(z 양수)**. (검증 = cluster_none_pass_0821)
+    def advise(deg, tag=''):
+        if abs(deg) < 1.0:
+            print(f'🟢 {tag}정렬됨 (±1° 이내)')
+            return
+        sec = max(abs(deg) / 8.0, 0.3)
+        ccw = deg > 0
+        turn = '반시계(z 양수)' if ccw else '시계(z 음수)'
+        sign = '' if ccw else '-'
+        print(f'→ {tag}{turn} 로 약 {sec:.1f}초:')
+        print(f"   M='{{angular: {{z: {sign}0.45}}}}'")
+        print(f'   timeout {sec:.1f} ros2 topic pub -r 10 /cmd_vel '
+              f'geometry_msgs/msg/Twist "$M"')
+        print('   🔴 위 두 줄을 순서대로. M= 을 먼저 안 치면 빈 메시지가 나간다.')
+
+    if len(got) == 2:
+        gap = abs(got['좌'] - got['우'])
+        if gap > 3.0:
+            print(f'\n🔴 좌우 벽이 {gap:.1f}° 어긋난다 — 평균은 양쪽 다 아닌 값이다.')
+            print('   한쪽이 곧은 벽이 아니다(문·기둥·벽감, 벽 근처 사람·장비).')
+            print('   🔵 깨끗한 쪽 하나만 골라 그 값으로 맞춰라. 둘 다 인쇄한다:')
+            for name in ('좌', '우'):
+                print(f'\n[{name}벽 기준 {got[name]:+.2f}°]')
+                advise(got[name], tag='')
+            return
+        if gap > 1.5:
+            print(f'\n⚠ 좌우가 {gap:.1f}° 어긋난다 — 평균이 그만큼 흔들린다.')
+
+    err = sum(got.values()) / len(got)
     print(f'\n🔴 로봇이 벽에서 {err:+.2f}° 틀어져 있다')
-    if abs(err) < 1.0:
-        print('🟢 정렬됨 (±1° 이내)')
-        return
-    # 실측 회전율 약 8°/s (명령 0.45 rad/s) 기준 필요 시간
-    sec = abs(err) / 8.0
-    turn = '반시계(z 양수)' if err < 0 else '시계(z 음수)'
-    sign = '' if err < 0 else '-'
-    print(f'→ {turn} 로 약 {sec:.1f}초 돌린다:')
-    print(f'   M=\'{{angular: {{z: {sign}0.45}}}}\'')
-    print(f'   timeout {max(sec,0.3):.1f} ros2 topic pub -r 10 /cmd_vel '
-          f'geometry_msgs/msg/Twist "$M"')
+    advise(err)
 
 
 def main():
