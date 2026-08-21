@@ -207,7 +207,11 @@ def launch_setup(context, *_):
         executable='ekf_node',
         name='ekf_filter_node',        # ekf_real.yaml 최상단 키와 일치해야 파라미터가 붙는다
         output='screen',
-        parameters=[PathJoinSubstitution([pkg_share, 'config', 'ekf_real.yaml'])],
+        # 🔵 08-21 — 파일명을 인자로 뺐다. 그전엔 여기 하드코딩이라 EKF 를 바꿔 보려면
+        #   정본 파일을 직접 고치는 수밖에 없었다 — 되돌리기가 없는 방식이다.
+        #   `nav2_params` 와 같은 방식이다: 기본값은 그대로이니 부르는 쪽은 안 바뀐다.
+        parameters=[PathJoinSubstitution(
+            [pkg_share, 'config', LaunchConfiguration('ekf_params')])],
     )
 
     # ── 게이트 A: 센서가 '흐르고' EKF 가 TF 를 세웠는가 ────────────────
@@ -374,6 +378,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'slam_params', default_value='slam_real_localization.yaml',
             description='config/ 안의 slam_toolbox 파라미터 파일명'),
+        DeclareLaunchArgument(
+            'ekf_params', default_value='ekf_real.yaml',
+            description='config/ 안의 EKF 파라미터 파일명'),
         DeclareLaunchArgument(
             'lidar', default_value='true',
             description='false = 라이다 드라이버 미기동 (bag 으로 /scan 을 흘릴 때)'),
