@@ -24,7 +24,17 @@ import math
 import rclpy
 from geometry_msgs.msg import Twist, Vector3
 from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
+
+# 🔴 08-21 실차 — 기본 QoS(RELIABLE)로 `/drive/diag` 를 구독했다가 한 건도
+#   못 받았다. 구동부(micro-ROS)가 BEST_EFFORT 로 발행하는데, RELIABLE 구독자는
+#   BEST_EFFORT 발행자에서 **아무것도 못 받는다**(호환 불가). `ros2 topic echo`
+#   는 상대 QoS 를 맞춰주므로 사람이 칠 땐 나왔고, 그래서 더 헷갈렸다.
+#   BEST_EFFORT 구독자는 양쪽 다 받으므로 이걸 쓴다.
+#   같은 패턴 = `tools/nav2_preflight.py:48`. 그게 이미 있었는데 안 따랐다.
+BEST_EFFORT = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
+                         history=HistoryPolicy.KEEP_LAST)
 
 # 벽으로 볼 빔의 각도 범위 [deg] — 정면·후면은 사람·개구부가 섞여 제외한다
 LEFT = (55.0, 125.0)
@@ -126,7 +136,8 @@ def turn(node, deg):
         return 1
 
     diag = []
-    node.create_subscription(Vector3, '/drive/diag', lambda m: diag.append(m.z), 10)
+    node.create_subscription(Vector3, '/drive/diag',
+                             lambda m: diag.append(m.z), BEST_EFFORT)
     end = node.get_clock().now().nanoseconds + 3_000_000_000
     while not diag and node.get_clock().now().nanoseconds < end:
         rclpy.spin_once(node, timeout_sec=0.1)
@@ -172,7 +183,7 @@ def main():
             node.destroy_node()
             rclpy.try_shutdown()
     got = []
-    node.create_subscription(LaserScan, '/scan', lambda m: got.append(m), 10)
+    node.create_subscription(LaserScan, '/scan', lambda m: got.append(m), BEST_EFFORT)
 
     try:
         while True:
