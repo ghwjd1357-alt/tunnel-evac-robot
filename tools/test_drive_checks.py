@@ -129,7 +129,6 @@ class EncoderCheckTest(unittest.TestCase):
         # 이 도구는 `/odom` 을 되짚는 도구다 → odom 계열 상수를 써야 한다.
         self.assertEqual(firmware_double('ODOM_WHEEL_BASE'), ec.ODOM_WHEEL_BASE_M)
         self.assertEqual(firmware_double('ODOM_WHEEL_RADIUS'), ec.ODOM_WHEEL_RADIUS_M)
-
         # 명령 경로 상수는 **이 도구가 쓰면 안 되는 값**이다. 둘이 서로 달라야 한다.
         self.assertNotEqual(firmware_double('CMD_WHEEL_BASE'),
                             firmware_double('ODOM_WHEEL_BASE'))
@@ -145,6 +144,64 @@ class EncoderCheckTest(unittest.TestCase):
 
         # 🔴 지면 리포터에는 윤거 상수가 없어야 한다 — 안 쓰는데 들고 있던 잔재였다.
         self.assertFalse(hasattr(gr, 'WHEEL_BASE_M'))
+
+    # ── 08-21 · 한 바퀴만 굴린 bag ────────────────────────────────────────
+    # 🔴 왜 열었나: 21:32 리허설 bag 에서 오른쪽 계수가 **0.525(≈절반)** 로 나왔다.
+    #   펌웨어가 한쪽당 엔코더 2개를 평균하므로(deltaRight = 0.5*(dFR+dRR)) 하나가
+    #   0 이면 그 쪽이 절반이 된다. 그런데 죽은 바퀴는 굴려도 `/odom` 이 미동도 안 해
+    #   **구간이 아예 안 생기고**, 도구는 "구간이 3개다" 로만 끝났다 — 범인을 못 냈다.
+    #   우전·우후는 기대 부호가 같아 남은 부호로도 못 가른다. 한 바퀴씩 찍으면 갈린다.
+
+    def test_08_one_wheel_alone_is_judged_by_its_own_sign(self):
+        """부분집합은 **그 바퀴의** 기대 부호로 판정해야 한다."""
+        rows = quiet(0, 0.0, 0.0, 0.0, seconds=2.0)
+        seg = roll_segment(rows[-1][0] + NS // 20, +1)   # 우측으로 적분되는 바퀴
+        rows += seg
+        v = ec.analyze(rows, ec.segments(rows), wheels=[ec.WHEEL_KEYS.index('FR')])
+        self.assertTrue(v['ok'], v)
+        self.assertEqual(['ok'], v['verdicts'])
+
+    def test_09_a_silent_wheel_is_named_not_shrugged_off(self):
+        """🔴 부정 회귀 — 굴렸는데 아무 반응이 없으면 **그 바퀴 이름**이 나와야 한다.
+
+        구판은 여기서 `reason='굴림 구간이 0개다'` 로 끝났다. 그건 "모르겠다" 이지
+        판정이 아니다. 한 바퀴만 굴린 bag 에서는 침묵 자체가 답이다.
+        """
+        rows = quiet(0, 0.0, 0.0, 0.0, seconds=6.0)      # 완전 침묵
+        self.assertEqual([], ec.segments(rows))
+        v = ec.analyze(rows, ec.segments(rows), wheels=[ec.WHEEL_KEYS.index('RR')])
+        self.assertFalse(v['ok'])
+        self.assertEqual(['dead'], v['verdicts'])
+        self.assertEqual([ec.WHEEL_KEYS.index('RR')], v['bad'])
+        self.assertNotIn('reason', v)                     # 포기가 아니라 판정이다
+
+    def test_10_a_right_wheel_wired_to_the_left_is_caught_alone(self):
+        """🔴 부정 회귀 — 부분집합이 **위치**가 아니라 **바퀴**로 색인되는지.
+
+        기대 부호표를 `EXPECTED_SIGNS[0]` 처럼 위치로 읽으면, 우전륜 단독 bag 의
+        올바른 `+` 가 좌전륜의 `-` 와 대조돼 **정상이 반전으로 보고된다.**
+        """
+        rows = quiet(0, 0.0, 0.0, 0.0, seconds=2.0)
+        rows += roll_segment(rows[-1][0] + NS // 20, -1)  # 우전륜인데 좌측으로 적분
+        v = ec.analyze(rows, ec.segments(rows), wheels=[ec.WHEEL_KEYS.index('FR')])
+        self.assertFalse(v['ok'])
+        self.assertEqual(['flipped'], v['verdicts'])
+
+    def test_11_a_missing_segment_still_refuses_to_guess(self):
+        """네 바퀴를 주장했는데 구간이 3개면 **여전히 판정 불가** 여야 한다."""
+        rows = four_wheel_bag((-1, -1, +1, +1))
+        groups = ec.segments(rows)[:3]
+        v = ec.analyze(rows, groups)
+        self.assertFalse(v['ok'])
+        self.assertIn('reason', v)
+        self.assertIn('--wheels=', v['reason'])           # 빠져나갈 길을 알려준다
+
+    def test_12_a_bad_wheels_option_is_rejected_before_the_bag(self):
+        """오타난 `--wheels` 는 bag 을 열기 전에 rc=2 로 끝나야 한다."""
+        for bad in ('--wheels=FX', '--wheels=', '--wheels=FR,FR'):
+            rc = ec.main(['drive_encoder_check.py', '/없는/경로', bad])
+            self.assertEqual(2, rc, bad)
+
 
 
 # ── 지면 주행 리포터 ────────────────────────────────────────────────────
