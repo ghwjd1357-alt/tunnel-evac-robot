@@ -168,9 +168,27 @@ def test_alarm_ignored_outside_patrol():
 # [규율] S1-1 과 같다 — 거부는 상태를 아무것도 바꾸지 않는다.
 # ============================================================
 
+def assert_blocked(node, keyword):
+    """🔴 §83.6 — 안전 집결지 없음의 계약은 "조용한 무시" 가 아니다.
+
+    구판은 경고만 찍고 return 해서 state=PATROL · cancel 0회 였다. 즉 로봇이
+    **기존 순찰 goal 을 계속 수행**했고, 정본이 적은 "관제로 넘긴다" 는 상태
+    전이로 존재하지 않았다. 계약 = **멈추고 · 사유를 남기고 · 사람을 기다린다.**"""
+    assert node.state == State.BLOCKED, node.state
+    assert node.fire is None
+    assert not node.siren_on
+    assert node._cancels == 1, f'활성 goal 취소가 {node._cancels}회'
+    assert node.blocked_reason and 'unsafe_gather' in node.blocked_reason
+    assert any('알람 거부' in m and keyword in m for m in node._logs), node._logs
+
+
 def h_node(min_fire_dist=1.5):
     """실제 촬영 좌표(H자)를 쓰는 껍데기 — 아래 복도 서쪽이 탈출구."""
     node = bare_node(with_graph=False)
+    node._cancels = 0
+    node.cancel_current_goal = lambda: setattr(node, '_cancels', node._cancels + 1)
+    node.blocked_reason = None          # MissionNode.__init__ 이 세우는 자리
+    node._blocked_logged = False
     node.wp = {
         'escape': {'x': 0.50, 'y': -10.65},
         'gather': {'x': 6.0, 'y': -10.65, 'yaw': 3.14},
@@ -197,7 +215,7 @@ def test_s13_fire_near_escape_rejected_not_approached():
     """🔴 재현본 — 탈출구 0.5m 옆 화재. 수정 전엔 집결지 0.50m 로 출동했다."""
     node = h_node()
     node.on_alarm(fake_alarm(1.0, -10.65))
-    assert_rejected(node, '최소 안전거리')
+    assert_blocked(node, '최소 안전거리')
     assert node.gather_wp is None
 
 
@@ -205,7 +223,7 @@ def test_s13_fire_almost_on_escape_rejected():
     """0.10m — 경계가 아니라 완전히 안쪽."""
     node = h_node()
     node.on_alarm(fake_alarm(0.6, -10.65))
-    assert_rejected(node, '최소 안전거리')
+    assert_blocked(node, '최소 안전거리')
 
 
 def test_s13_boundary_exactly_min_fire_dist_accepted():
@@ -241,7 +259,7 @@ def test_s13_fire_equals_escape_rejected_via_fixed_gather():
     node = h_node()
     node.wp['gather'] = {'x': 0.50, 'y': -10.65, 'yaw': 3.14}   # 고정값도 화재 위
     node.on_alarm(fake_alarm(0.50, -10.65))
-    assert_rejected(node, '최소 안전거리')
+    assert_blocked(node, '최소 안전거리')
 
 
 def test_s13_no_min_fire_dist_declared_keeps_old_behaviour():
@@ -250,3 +268,34 @@ def test_s13_no_min_fire_dist_declared_keeps_old_behaviour():
     node.on_alarm(fake_alarm(1.0, -10.65))
     assert node.state == State.APPROACH
     assert abs(node.gather_wp['x'] - 0.50) < 1e-6
+
+
+def test_s13_blocked_issues_no_new_goal_and_needs_reset():
+    """🔴 §83.6 재현본 — BLOCKED 는 스스로 빠져나오지 않는다.
+
+    tick 이 BLOCKED 가지에서 goal 을 하나도 안 내야 하고, 탈출은 관제 `reset`
+    뿐이다. FAULT 와 다른 점이 이것이다 — FAULT 는 자동 재시도가 있다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    assert node.state == State.BLOCKED
+    # BLOCKED 는 tick 이 새 goal 을 내는 가지가 없다 — 상태 목록으로 고정한다
+    goal_issuing = {State.PATROL, State.APPROACH, State.GUIDE, State.SEARCH_BACK}
+    assert State.BLOCKED not in goal_issuing
+
+
+def test_s13_blocked_reason_carries_the_numbers():
+    """사유에 화재·집결지·거리가 다 들어가야 관제가 판단할 수 있다."""
+    node = h_node()
+    node.on_alarm(fake_alarm(1.0, -10.65))
+    r = node.blocked_reason
+    assert 'fire=(1.00,-10.65)' in r, r
+    assert 'gather=(0.50,-10.65)' in r, r
+    assert 'dist=0.50<1.50' in r, r
+
+
+def test_s13_accepted_fire_does_not_touch_blocked_fields():
+    """🟢 정상 화재는 BLOCKED 경로를 건드리지 않는다 (회귀 방지)."""
+    node = h_node()
+    node.on_alarm(fake_alarm(12.5, -0.1))
+    assert node.state == State.APPROACH
+    assert node.blocked_reason is None

@@ -108,6 +108,8 @@ def test_real_manifest_covers_the_shoot_runbook():
     paths = [e['path'] for e in man['runbooks']]
     assert any('0822_촬영_명령묶음' in p for p in paths), paths
     shoot = next(e for e in man['runbooks'] if '0822_촬영_명령묶음' in e['path'])
-    joined = ' '.join(shoot['required_gates'])
+    joined = ' '.join(shoot['required_gates']).lower()
     assert 'rearm' in joined, shoot['required_gates']
     assert 'yaw' in joined, shoot['required_gates']
+    # §83.4 — 전달 방식까지 관문이다. --once 는 discovery 전에 유실된다.
+    assert '--times' in joined, shoot['required_gates']

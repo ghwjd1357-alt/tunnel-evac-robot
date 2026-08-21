@@ -78,6 +78,11 @@ class State(Enum):
     SEARCH_BACK = auto()  # 놓침 → 마지막 목격 지점으로 역행 재탐색
     ESCAPED = auto()      # 탈출 완료
     FAULT = auto()        # Nav2 실패 → 자동 재시도 → 소진 시 정지
+    BLOCKED = auto()      # 🔴 08-21 §83.6 — 안전한 집결지를 못 만들어 사람에게 넘긴 상태.
+    #                       FAULT 와 다르다: FAULT 는 Nav2 가 실패한 것이고 **자동
+    #                       재시도**가 있다. BLOCKED 는 계산이 안전 조건을 못 채운
+    #                       것이라 재시도할 대상이 없다 — 사람이 판단할 때까지 선다.
+    #                       tick 에 새 goal 을 내는 가지가 없으므로 로봇은 정지한다.
 
 
 def clamp_to_fire_min_dist(gx, gy, fx, fy, dmin):
@@ -522,6 +527,8 @@ class MissionNode(Node):
         self._escaped_logged = False
         self.siren_on = False
         self.fire = None                # funnel 번역된 화재 정보
+        self.blocked_reason = None      # §83.6 BLOCKED 사유 (관제·로그용)
+        self._blocked_logged = False
         self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
         # ★ 속도 변경의 비동기 수명주기(요청·확인·3회 재시도·stale 세대 구분·
         #   reconcile)는 전부 SpeedManager 소유 (07-20 구조 분리 1/3).
@@ -813,6 +820,15 @@ class MissionNode(Node):
                 self.get_logger().info('★ 탈출 완료 — 임무 종료.')
                 self._escaped_logged = True
 
+        elif self.state == State.BLOCKED:
+            # 🔴 §83.6 — 아무 goal 도 안 낸다. 자동 복귀도 없다. 관제 `reset` 만이
+            #   여기서 나가는 길이다 — 그것이 "사람에게 넘긴다" 의 실제 구현이다.
+            if not self._blocked_logged:
+                self.get_logger().error(
+                    f'🔴 BLOCKED — 자동 주행을 멈췄다. 사유: {self.blocked_reason}. '
+                    f'관제에서 대피 경로를 판단하고 `reset` 으로 재가동할 것')
+                self._blocked_logged = True
+
         elif self.state == State.FAULT:
             if self.fault_retries < self.MAX_RETRIES and self.resume_state is not None:
                 elapsed = (self.get_clock().now() - self.fault_since).nanoseconds / 1e9
@@ -998,8 +1014,12 @@ class MissionNode(Node):
         #   **자동 출동하지 않고** 관제 판단으로 넘긴다. 조용히 가까이 가는 것보다
         #   안 가고 사람이 아는 편이 낫다.
         #
-        #   ⚠ min_fire_dist 미선언이면 이 불변조건을 요구하지 않은 설정이므로 건너뛴다
-        #     (기존 yaml · 기존 테스트 하네스가 그 경우다 — 거동 불변).
+        #   ⚠ min_fire_dist 미선언이면 이 불변조건을 요구하지 않은 설정이므로 건너뛴다.
+        #     🔵 08-21 §83.6 정정 — 이 경로는 **production 에 없다.**
+        #     `validate_waypoints()` 가 `search_back.min_fire_dist` 를 필수로 요구해
+        #     기동 자체를 막는다(실측: 키를 지우면 `['search_back.min_fire_dist']`).
+        #     열리는 것은 `on_alarm` 만 직접 부르는 불완전 객체(단위 시험)뿐이다.
+        #     구판 주석이 "기존 yaml 보호" 라고 적은 것은 근거가 틀렸다.
         sb = self.wp.get('search_back') or {}
         min_fd = sb.get('min_fire_dist')
         if min_fd is not None:
@@ -1007,11 +1027,27 @@ class MissionNode(Node):
             if eff is not None:
                 d_fire = math.hypot(float(eff['x']) - fx, float(eff['y']) - fy)
                 if d_fire < float(min_fd):
-                    self.get_logger().warn(
-                        f'알람 거부: 계산된 집결지 ({float(eff["x"]):.2f},{float(eff["y"]):.2f}) 가 '
-                        f'화재에서 {d_fire:.2f}m — 최소 안전거리 {float(min_fd):.2f}m 미만. '
+                    # 🔴 08-21 §83.6 재현 반영 — 구판은 경고만 찍고 `return` 했다.
+                    #   그래서 state=PATROL · cancel 0회 · siren False 로 **로봇이
+                    #   기존 순찰 goal 을 그대로 계속 수행**했다. 정본은 "관제로
+                    #   넘긴다" 라고 적었는데 그 이관이 **상태 전이로 존재하지
+                    #   않았다.** 관제는 raw /alarm 마커만 보고 접수됐다고 오해한다.
+                    #   → 활성 goal 을 취소하고 BLOCKED 를 발행해 **멈춘 뒤 사람에게
+                    #     넘긴다.** 자동 순찰 재개는 하지 않는다(fail-closed).
+                    msg_txt = (
+                        f'알람 거부: 계산된 집결지 '
+                        f'({float(eff["x"]):.2f},{float(eff["y"]):.2f}) 가 화재에서 '
+                        f'{d_fire:.2f}m — 최소 안전거리 {float(min_fd):.2f}m 미만. '
                         f'탈출구 근처 화재라 경로가 짧아 집결지가 화재로 끌려왔다. '
                         f'자동 출동하지 않는다 — 관제에서 대피 경로를 판단할 것')
+                    self.get_logger().warn(msg_txt)
+                    self.cancel_current_goal()
+                    self._blocked_logged = False
+                    self.blocked_reason = (
+                        f'unsafe_gather fire=({fx:.2f},{fy:.2f}) '
+                        f'gather=({float(eff["x"]):.2f},{float(eff["y"]):.2f}) '
+                        f'dist={d_fire:.2f}<{float(min_fd):.2f}')
+                    self.state = State.BLOCKED
                     return
 
         self.fire = {
@@ -1055,6 +1091,8 @@ class MissionNode(Node):
             self.fault_since = None
             self.resume_state = None
             self._guide_pending = False   # F2: 응답 유실로 남은 게이트 잔재 청소
+            self.blocked_reason = None    # §83.6 — BLOCKED 탈출은 reset 뿐이다
+            self._blocked_logged = False
             # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
             # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
             self.speed.cancel_pending('reset')

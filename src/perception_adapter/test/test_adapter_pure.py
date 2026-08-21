@@ -171,6 +171,26 @@ def test_tracker_nonfinite_stamp_rejected():
     assert t.count() == 0
 
 
+def test_tracker_walking_chain_does_not_confirm():
+    """🔴 08-21 §83.2 재현본 — 0.9 m 씩 걸어가면 매 걸음은 반경 안이다.
+
+    구판은 **직전 점과만** 비교하는 single-link 라 첫 점과 3.6 m 떨어졌는데도
+    확정됐다. 이어 붙기만 하면 복도 끝까지 한 화재가 된다.
+    → seed(첫 hit) 기준 반경으로 잠갔다."""
+    t = ConfirmTracker(need=5, window_sec=10.0, assoc_radius=1.0)
+    pts = [(0.0, 0, 0), (0.9, 0, 0), (1.8, 0, 0), (2.7, 0, 0), (3.6, 0, 0)]
+    got = [t.add(i * 0.1, float(i), q) for i, q in enumerate(pts)]
+    assert not any(got), got
+
+
+def test_tracker_seed_radius_allows_wander_within_the_circle():
+    """🟢 seed 반경 **안**에서 흔들리는 것은 같은 대상이다 — 끊으면 안 된다."""
+    t = ConfirmTracker(need=4, window_sec=10.0, assoc_radius=1.0)
+    pts = [(2.0, 0.0, 0), (2.4, 0.3, 0), (1.7, -0.4, 0), (2.2, 0.2, 0)]
+    got = [t.add(i * 0.1, float(i), q) for i, q in enumerate(pts)]
+    assert got[-1] is True, got
+
+
 def test_tracker_spatially_separated_hits_do_not_accumulate():
     """🔴 서로 다른 자리의 한-프레임 오탐 5개 — 한 화재가 아니다."""
     t = ConfirmTracker(need=3, window_sec=10.0, assoc_radius=1.0)
@@ -203,6 +223,7 @@ GOOD = {
     'min_confidence': 0.4, 'confirm_frames': 5, 'confirm_window_sec': 3.0,
     'max_stamp_age_sec': 1.0, 'max_range': 5.0, 'fixed_range': 2.0,
     'refire_cooldown_sec': -1.0, 'confirm_assoc_radius_m': 1.0,
+    'tf_wait_sec': 0.10,
 }
 
 
@@ -229,6 +250,10 @@ def test_params_reject_bad_values():
         ('refire_cooldown_sec', float('nan')),
         ('refire_cooldown_sec', float('inf')),
         ('confirm_assoc_radius_m', 0.0), ('confirm_assoc_radius_m', -1.0),
+        # 🔴 §83.2 — 양수만 보면 1000 도 통과했다. 그러면 결합이 사실상 사라진다.
+        ('confirm_assoc_radius_m', 1000.0), ('confirm_assoc_radius_m', 2.5),
+        ('tf_wait_sec', -0.1), ('tf_wait_sec', 5.0),
+        ('tf_wait_sec', float('nan')),
         ('min_confidence', 'x'), ('max_range', None),
     ]
     for k, v in bad:
@@ -311,3 +336,16 @@ def test_pick_best_bad_confidence_does_not_hide_a_good_one():
         [_D('fire', float('nan')), _D('fire', 0.66)], 'fire', 0.40)
     assert best is not None and math.isclose(best.confidence, 0.66)
     assert bad
+
+
+def test_params_zero_tf_wait_is_allowed():
+    """0 = 기다리지 않는다. 유효한 선택이라 막지 않는다."""
+    assert validate_params({**GOOD, 'tf_wait_sec': 0.0}) == []
+
+
+def test_params_assoc_radius_upper_bound_is_two_metres():
+    """상한 근거 = 연결통로 반폭 0.825 m · 아래복도 반폭 1.18 m.
+
+    화재는 정지 물체이므로 map 좌표에서 그보다 크게 튀면 같은 대상이 아니다."""
+    assert validate_params({**GOOD, 'confirm_assoc_radius_m': 2.0}) == []
+    assert validate_params({**GOOD, 'confirm_assoc_radius_m': 2.01}) != []

@@ -838,5 +838,35 @@
     "id": "0821-gather-safety-distance-not-enforced-82",
     "path": "src/mission_manager/mission_manager/mission_node.py",
     "anchor": "집결지 안전거리는 설정 부등식이 아니라 계산 결과에 적용해야 한다"
+  },
+  {
+    "id": "0821-tracker-primed-before-frame-lock-83",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "반복 관측은 검증을 통과한 후보만 센다 — 거부될 입력이 먼저 hit 를 쌓으면 안 된다"
+  },
+  {
+    "id": "0821-single-link-association-walks-83",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "공간 결합은 직전 점이 아니라 seed 기준 반경으로 잠근다 — 이어 붙기만 하면 복도 끝까지 한 대상이 된다"
+  },
+  {
+    "id": "0821-latest-tf-fallback-default-open-83",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "후퇴가 기본값이면 그 계약은 fail-open 이다 — 촬영시각 TF 는 기다리고 최신 TF 는 사람이 켠다"
+  },
+  {
+    "id": "0821-rearm-api-without-transition-83",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "재무장은 API 가 아니라 전달과 상태 관문까지가 계약이다"
+  },
+  {
+    "id": "0821-m3-tick-phase-and-run-ranking-83",
+    "path": "tools/cluster_width_report.py",
+    "anchor": "판정은 콜백 직후가 아니라 mission tick 이 보는 순간이고 안정성은 run 개수가 아니다"
+  },
+  {
+    "id": "0821-s13-reject-keeps-patrol-goal-83",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "거부는 상태 전이여야 한다 — 경고만 찍고 return 하면 로봇은 기존 goal 을 계속 수행한다"
   }
 ]

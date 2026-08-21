@@ -130,6 +130,79 @@ def run_case(scenario, overrides, settle=1.5, budget=5.0):
                 pass
 
 
+def run_transition(first, second, overrides=(), settle=1.5, each=3.0):
+    """🔴 §83.2 — **한 노드 세대 안에서** 시나리오를 바꿔 가며 돌린다.
+
+    case 마다 노드를 새로 만들면 `거부되는 frame → 정상 frame` 전환을 못 본다.
+    구판이 정확히 그래서, 거부될 프레임 5장이 tracker 를 채워 두고 다음 정상
+    프레임 **한 장**이 즉시 `/alarm` 으로 승격되는 경로를 통과시켰다.
+    """
+    nodes = []
+    try:
+        tf = TfPub()
+        nodes.append(tf)
+        # 🔴 문턱을 **정상 프레임 수보다 높게** 둔다. 그래야 뒤에서 발행이 나오면
+        #   그것은 "정당한 확정" 이 아니라 **앞의 거부 입력이 채운 것** 이다.
+        #   (첫 구현은 need=3 인데 정상 3~4장을 흘려 둘을 구별하지 못했다.)
+        ov = [Parameter('confirm_frames', value=8),
+              Parameter('confirm_window_sec', value=30.0)] + list(overrides)
+        adapter = PerceptionAdapter(parameter_overrides=ov)
+        nodes.append(adapter)
+        spy = AlarmSpy()
+        nodes.append(spy)
+        ex = SingleThreadedExecutor()
+        for n in nodes:
+            ex.add_node(n)
+        end = time.time() + settle
+        while time.time() < end:
+            ex.spin_once(timeout_sec=0.02)
+
+        fake = FakeDetections(
+            parameter_overrides=[Parameter('scenario', value=first)])
+        nodes.append(fake)
+        ex.add_node(fake)
+        end = time.time() + each
+        while time.time() < end:
+            ex.spin_once(timeout_sec=0.02)
+        first_fired = spy.got is not None
+
+        # 같은 노드 세대에서 시나리오만 바꾼다
+        fake.set_parameters([Parameter('scenario', value=second)])
+        end = time.time() + 0.45          # 정상 프레임 4~5장만 (문턱 8 미만)
+        while time.time() < end:
+            ex.spin_once(timeout_sec=0.02)
+        return first_fired, spy.got
+    finally:
+        for n in nodes:
+            try:
+                n.destroy_node()
+            except Exception:
+                pass
+
+
+def transition_checks():
+    """§83.2 전환 경로 — 거부 입력이 다음 정상 입력을 승격시키면 안 된다."""
+    ok = bad = 0
+    first, got = run_transition('resolvable_frame', 'fire')
+    if first:
+        print('  XX  전환① 거부 시나리오가 발행했다')
+        bad += 1
+    elif got is not None:
+        print(f'  XX  전환① 거부 입력이 tracker 를 채웠다 — 정상 4~5장(문턱 8)에 발행 {got}')
+        bad += 1
+    else:
+        print('  OK  전환① wrong frame 다수 → 정상 4~5장(문턱 8), 발행 없음')
+        ok += 1
+    first, got = run_transition('low_conf', 'fire')
+    if got is not None:
+        print(f'  XX  전환② 저신뢰가 tracker 를 채웠다 {got}')
+        bad += 1
+    else:
+        print('  OK  전환② low_conf 다수 → 정상 4~5장(문턱 8), 발행 없음')
+        ok += 1
+    return ok, bad
+
+
 CASES = [
     # (시나리오, 기대 발행?, 파라미터, 기대 좌표 or None)
     ('fire',        True,  [], (12.0, 0.0)),
@@ -187,6 +260,9 @@ def main():
             detail = f'({got[0]:.2f}, {got[1]:.2f}) {got[2]}' if fired else '발행 없음'
             print(f'  OK  {tag:16s} {detail}')
             ok += 1
+        tok, tbad = transition_checks()
+        ok += tok
+        bad += tbad
     finally:
         rclpy.shutdown()
     print(f'\n{ok}/{ok + bad} 통과')

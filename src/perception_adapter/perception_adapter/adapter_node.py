@@ -43,6 +43,7 @@
 import math
 
 import rclpy
+import rclpy.duration
 from geometry_msgs.msg import PointStamped, PoseStamped
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
@@ -167,7 +168,11 @@ class ConfirmTracker:
             return False
         if self._last_stamp is not None and s <= self._last_stamp:
             return False                 # 같은 프레임/재전송 — 새 근거가 아니다
-        if self._hits and self._far(pos, self._hits[-1][2], self.assoc_radius):
+        # 🔴 08-21 §83.2 — 구판은 **직전 점과만** 비교하는 single-link 였다.
+        #   재현: 0.0→0.9→1.8→2.7→3.6 m 로 걸어가면 매 걸음이 1.0 m 안이라
+        #   첫 점과 3.6 m 떨어졌는데도 확정됐다. 이어 붙기만 하면 복도 끝까지
+        #   같은 화재가 된다. → **seed(첫 hit) 기준 반경**으로 잠근다.
+        if self._hits and self._far(pos, self._hits[0][2], self.assoc_radius):
             self._hits = []              # 다른 대상 — 누적을 합치지 않는다
         self._last_stamp = s
         self._hits.append((t, s, pos))
@@ -225,7 +230,12 @@ def validate_params(vals):
     num('max_stamp_age_sec', positive=True)
     num('max_range', positive=True)
     num('fixed_range', positive=True)
-    num('confirm_assoc_radius_m', positive=True)
+    # 🔴 §83.2 — 양수만 보면 `confirm_assoc_radius_m=1000.0` 도 통과한다(재현).
+    #   그러면 공간 결합이 사실상 사라져 복도 어디의 오탐이든 한 화재가 된다.
+    #   상한 근거 = 연결통로 반폭 0.825 m · 아래복도 반폭 1.18 m. 화재는 정지
+    #   물체이므로 map 좌표에서 그보다 크게 튀면 같은 대상이 아니다.
+    num('confirm_assoc_radius_m', positive=True, hi=2.0)
+    num('tf_wait_sec', lo=0.0, hi=1.0)
     # refire_cooldown_sec 은 0 이하가 "평생 1회" 라는 뜻이라 부호를 안 막는다.
     # 다만 NaN/Inf 는 비교가 전부 False 가 되어 억제가 조용히 사라진다.
     num('refire_cooldown_sec')
@@ -306,10 +316,22 @@ class PerceptionAdapter(Node):
         # 🔴 §82.3 — 기대 source frame. 빈 문자열이면 검사 안 함(비권장).
         #    이게 없으면 TF 트리에 있는 아무 frame(base_link 등)도 조용히 통과한다.
         self.declare_parameter('expected_source_frame', 'camera_color_optical_frame')
-        # 🔴 §82.3 — 촬영시각 TF 가 없을 때 최신 TF 로 후퇴할지. 후퇴하면 격하 표시.
-        self.declare_parameter('allow_latest_tf_fallback', True)
+        # 🔴 §83.3 — 촬영시각 TF 가 없을 때 최신 TF 로 후퇴할지.
+        #   **기본 False.** 후퇴가 기본이면 촬영시각 계약이 fail-open 이 된다.
+        #   켜는 것은 사람이 명시적으로 고르는 도전 모드다.
+        self.declare_parameter('allow_latest_tf_fallback', False)
+        # 🔴 §83.3 — 촬영시각 TF 를 이만큼 기다린다. detection 이 동적 TF 보다
+        #   조금 먼저 오는 **정상 비동기 순서**를 흡수하는 값이지, 없는 TF 를
+        #   기다리는 값이 아니다. 10Hz 스트림에서 0.10s 면 한 프레임 안이다.
+        self.declare_parameter('tf_wait_sec', 0.10)
         # §82.5 — 테이크 사이 재무장 명령 토픽 (std_msgs/String "rearm")
         self.declare_parameter('cmd_topic', '/adapter_cmd')
+        # 🔴 §83.4 — 재무장을 아무 때나 받으면 **지속 오탐이 새 테이크를 자동
+        #   시작**시킨다. PATROL 이 아닌 상태(=이미 출동 중)에서의 재무장은
+        #   운영자의 실수일 가능성이 높으므로 거부한다. 상태를 한 번도 못 받았으면
+        #   **거부**한다 — fail-closed. 미션 없이 어댑터만 시험할 때만 끈다.
+        self.declare_parameter('mission_state_topic', '/mission_state')
+        self.declare_parameter('rearm_requires_patrol', True)
 
         p = self.get_parameter
         self.detections_topic = p('detections_topic').value
@@ -350,6 +372,7 @@ class PerceptionAdapter(Node):
             'fixed_range': p('fixed_range').value,
             'refire_cooldown_sec': p('refire_cooldown_sec').value,
             'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
+            'tf_wait_sec': p('tf_wait_sec').value,
         })
         if bad:
             for m in bad:
@@ -371,6 +394,9 @@ class PerceptionAdapter(Node):
         #   테이크를 자동 시작시켜서 더 나쁘다 — 사람이 명시적으로 재무장한다.
         self.create_subscription(
             String, p('cmd_topic').value, self.on_cmd, 10)
+        self._mission_state = None
+        self.create_subscription(
+            String, p('mission_state_topic').value, self.on_mission_state, 10)
 
         self.create_timer(2.0, self.tick)
 
@@ -385,17 +411,46 @@ class PerceptionAdapter(Node):
                 f'{p("fixed_range").value} m 로 강제한다. 기록에 남길 것.')
 
     # ------------------------------------------------------------------
+    def on_mission_state(self, msg: String):
+        """§83.4 — 재무장 관문에 쓸 미션 상태. 판정은 on_cmd 가 한다."""
+        self._mission_state = (msg.data or '').strip().upper()
+
     def on_cmd(self, msg: String):
-        """§82.5 — 테이크 사이 재무장. `ros2 topic pub --once /adapter_cmd ... rearm`"""
+        """§82.5 — 테이크 사이 재무장.
+
+        🔴 §83.4 — `REARMED` 를 **ack 로 쓴다.** 런북은 `-w 1 --times 3` 로 보내고
+        이 문자열을 눈으로 확인한 뒤에야 다음 단계로 간다. 안 보이면 DDS 매칭이
+        안 된 것이므로 재전송한다 — 단발 `--once` 는 discovery 전에 유실된다.
+        """
         cmd = (msg.data or '').strip().lower()
-        if cmd == 'rearm':
-            self.fired_at = None
-            self.tracker.reset()
-            self._last_reason = '재무장됨 — 다음 테이크 대기'
-            self.get_logger().warn('🔵 재무장 — 발사 이력과 누적 관측을 지웠다')
-            self.say('REARMED')
-        elif cmd:
-            self.get_logger().warn(f'알 수 없는 명령 "{cmd}" — rearm 만 받는다')
+        if cmd != 'rearm':
+            if cmd:
+                self.get_logger().warn(f'알 수 없는 명령 "{cmd}" — rearm 만 받는다')
+            return
+
+        # 🔴 §83.4 관문 — 이미 출동 중인데 재무장하면 지속 오탐이 새 테이크를
+        #   자동으로 시작시킨다. 상태 미수신도 거부다(fail-closed).
+        if self.get_parameter('rearm_requires_patrol').value:
+            st = self._mission_state
+            if st is None:
+                self.get_logger().error(
+                    '🔴 재무장 거부 — 미션 상태를 한 번도 못 받았다. 미션이 떠 있는지 '
+                    '확인할 것 (미션 없이 시험하려면 rearm_requires_patrol:=false)')
+                self.say('REARM_REJECTED (미션 상태 없음)')
+                return
+            if 'PATROL' not in st:
+                self.get_logger().error(
+                    f'🔴 재무장 거부 — 미션이 {st} 다(PATROL 아님). 지금 재무장하면 '
+                    f'지속 오탐이 다음 출동을 자동으로 시작시킨다. '
+                    f'미션을 reset 해 PATROL 로 돌린 뒤 다시 보낼 것')
+                self.say(f'REARM_REJECTED ({st})')
+                return
+
+        self.fired_at = None
+        self.tracker.reset()
+        self._last_reason = '재무장됨 — 다음 테이크 대기'
+        self.get_logger().warn('🔵 재무장 — 발사 이력과 누적 관측을 지웠다')
+        self.say('REARMED')
 
     def now_sec(self):
         return self.get_clock().now().nanoseconds / 1e9
@@ -460,36 +515,13 @@ class PerceptionAdapter(Node):
             self._last_reason = f'{want} 없음 (탐지 {len(msg.detections)}건)'
             return
 
-        # ── ④ 반복 관측 확정 ───────────────────────────────────────────
-        # 🔴 §82.4 — 촬영시각과 좌표를 함께 넘긴다. 수신시각만으로는 같은 프레임
-        #   한 장의 재전송과 진짜 반복 관측을 구별할 수 없다(재현: [F,F,F,F,True]).
-        stamp_sec = st.sec + st.nanosec / 1e9
-        bp = best.position
-        if not self.tracker.add(t, stamp_sec, (bp.x, bp.y, bp.z)):
-            self._last_reason = (f'{want} conf={best.confidence:.2f} '
-                                 f'확정대기 {self.tracker.count(t)}/{self.tracker.need}')
-            return
-
-        # ── ⑤ 거리 처리 ────────────────────────────────────────────────
-        px, py, pz = best.position.x, best.position.y, best.position.z
-        degraded = False
-        if self.get_parameter('use_fixed_range').value:
-            r = fix_range(px, py, pz, self.get_parameter('fixed_range').value)
-            if r is None:
-                self._last_reason = '거리 0 — 방위가 없어 고정거리 적용 불가'
-                return
-            px, py, pz = r
-            degraded = True
-        else:
-            px, py, pz, clamped = clamp_range(
-                px, py, pz, self.get_parameter('max_range').value)
-            if clamped:
-                self.get_logger().warn(
-                    '⚠ 거리 클램프 발동 — depth 가 max_range 를 넘었다. '
-                    '방위는 살리고 거리만 잘랐다.')
-                degraded = True
-
-        # ── ⑥ map 으로 변환 ────────────────────────────────────────────
+        # ── ④ 좌표계 검증 ──────────────────────────────────────────────
+        # 🔴 08-21 §83.2 재현 반영 — **검증보다 tracker 가 먼저 돌고 있었다.**
+        #   구판 순서는 ③ → tracker → 거리 → frame 검사였다. 그래서
+        #   `frame_id=base_link` 인 (결국 거부될) 프레임 5장이 hit 를 쌓아 두고,
+        #   그다음 정상 프레임 **한 장**이 즉시 `/alarm` 으로 승격됐다.
+        #   재현: 거부 5장 뒤 `tracker.count()==5`, 정상 1장에 True.
+        #   → **완전히 통과한 후보만 센다.** 검증은 전부 tracker 앞으로 옮긴다.
         src = msg.header.frame_id or self.get_parameter('fallback_source_frame').value
         if not src:
             self.get_logger().error(
@@ -510,31 +542,62 @@ class PerceptionAdapter(Node):
             self._last_reason = f'frame 불일치 {src}≠{expect}'
             return
 
+        # ── ⑤ 거리 처리 ────────────────────────────────────────────────
+        px, py, pz = best.position.x, best.position.y, best.position.z
+        degraded_range = False
+        if self.get_parameter('use_fixed_range').value:
+            r = fix_range(px, py, pz, self.get_parameter('fixed_range').value)
+            if r is None:
+                self._last_reason = '거리 0 — 방위가 없어 고정거리 적용 불가'
+                return
+            px, py, pz = r
+            degraded_range = True
+        else:
+            px, py, pz, clamped = clamp_range(
+                px, py, pz, self.get_parameter('max_range').value)
+            if clamped:
+                self.get_logger().warn(
+                    '⚠ 거리 클램프 발동 — depth 가 max_range 를 넘었다. '
+                    '방위는 살리고 거리만 잘랐다.')
+                degraded_range = True
+
+        # ── ⑥ map 으로 변환 ────────────────────────────────────────────
         pt = PointStamped()
         pt.header.frame_id = src
         pt.header.stamp = msg.header.stamp
         pt.point.x, pt.point.y, pt.point.z = px, py, pz
+
         # 🔴 §82.3 — **촬영시각의 TF** 로 조회한다.
         #   구판은 `rclpy.time.Time()`(=최신)을 썼고, 주석에 "속도 0.087 m/s 면
         #   이동은 cm 단위" 라고 근거까지 적어놨다. 그 계산이 **병진만** 본 것이다.
         #   회전 중에는 이동이 아니라 **각도**가 문제다 — 제자리 0.13 rad/s 로도
         #   0.3초면 2.2°, 2m 앞 목표가 7.7cm 옮겨간다. 코너에서는 더 크다.
-        #   버퍼에 그 시점이 없으면(초기화 직후 등) 최신으로 후퇴하되 **격하 표시**한다.
-        stamp_err = None
-        out = None
+        #
+        # 🔴 08-21 §83.3 재현 반영 — 후퇴가 **기본값이면 그 계약은 fail-open 이다.**
+        #   구판은 `allow_latest_tf_fallback` 기본이 True 였다. detection 이 같은
+        #   시각의 동적 TF 보다 조금 먼저 도착하는 **정상 비동기 순서**에서도
+        #   future extrapolation 이 나므로, 후퇴는 예외가 아니라 상시 경로였다.
+        #   → 기본을 False 로 내리고, 대신 짧은 **대기**(tf_wait_sec)로 정상 도착
+        #     순서만 흡수한다. 최신 TF 는 사람이 명시적으로 켠 도전 모드다.
+        stamp_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        wait = self.get_parameter('tf_wait_sec').value
+        stamp_err, out = None, None
         try:
             tr = self.tf_buffer.lookup_transform(
-                self.target_frame, src, rclpy.time.Time.from_msg(msg.header.stamp))
+                self.target_frame, src, stamp_time,
+                timeout=rclpy.duration.Duration(seconds=float(wait)))
             out = do_transform_point(pt, tr)
         except Exception as e:
             # ⚠ 파이썬은 except 블록을 벗어나면 `as e` 를 지운다 — 문자열로 붙잡는다.
             stamp_err = str(e)
 
+        degraded_tf = False
         if out is None:
             if not self.get_parameter('allow_latest_tf_fallback').value:
                 self.get_logger().warn(
-                    f'TF 변환 실패 (촬영시각 {src}→{self.target_frame}): {stamp_err} '
-                    f'— 후퇴 금지 설정이라 발행하지 않는다', throttle_duration_sec=3.0)
+                    f'TF 변환 실패 (촬영시각 {src}→{self.target_frame}, '
+                    f'{wait}s 대기): {stamp_err} — 후퇴 금지(기본)라 발행하지 않는다',
+                    throttle_duration_sec=3.0)
                 self._last_reason = f'TF 실패(촬영시각) {src}→{self.target_frame}'
                 return
             try:
@@ -547,7 +610,7 @@ class PerceptionAdapter(Node):
                     throttle_duration_sec=3.0)
                 self._last_reason = f'TF 실패 {src}→{self.target_frame}'
                 return
-            degraded = True
+            degraded_tf = True
             self._tf_degraded = True
             self.get_logger().warn(
                 f'⚠ 촬영시각 TF 없음 → 최신 TF 로 후퇴 (격하). 회전 중이면 좌표가 '
@@ -555,6 +618,18 @@ class PerceptionAdapter(Node):
 
         if not is_finite_point(out.point.x, out.point.y, out.point.z):
             self.get_logger().error('🔴 변환 결과가 유한값이 아님 — 발행 취소')
+            return
+
+        # ── ⑦ 반복 관측 확정 (map 좌표에서) ────────────────────────────
+        # 🔴 §82.4 — 촬영시각과 좌표를 함께 넘긴다. 수신시각만으로는 같은 프레임
+        #   한 장의 재전송과 진짜 반복 관측을 구별할 수 없다(재현: [F,F,F,F,True]).
+        # 🔴 §83.2 — **map 좌표로 센다.** 카메라 좌표에서는 로봇이 돌기만 해도
+        #   같은 화재가 움직여 결합이 끊긴다. map 에서는 정지 화재가 제자리다.
+        stamp_sec = st.sec + st.nanosec / 1e9
+        pos = (out.point.x, out.point.y, out.point.z)
+        if not self.tracker.add(t, stamp_sec, pos):
+            self._last_reason = (f'{want} conf={best.confidence:.2f} '
+                                 f'확정대기 {self.tracker.count(t)}/{self.tracker.need}')
             return
 
         # ── ⑦ 발행 ─────────────────────────────────────────────────────
@@ -568,7 +643,15 @@ class PerceptionAdapter(Node):
         self.alarm_pub.publish(a)
         self.fired_at = t
 
-        mark = ' 🔴[격하: 거리 보정됨]' if degraded else ''
+        # 🔴 §83.3 — 격하 두 종류를 **합치지 않는다.** 구판은 TF 후퇴도
+        #   `[격하: 거리 보정됨]` 으로 표시해, 운영자가 좌표 **시각**이 격하된
+        #   것을 거리 clamp 로 오독할 수 있었다. 원인이 다르면 문구도 다르다.
+        marks = []
+        if degraded_range:
+            marks.append('거리 보정됨')
+        if degraded_tf:
+            marks.append('좌표 시각 = 최신 TF (회전 중이면 밀림)')
+        mark = f' 🔴[격하: {" · ".join(marks)}]' if marks else ''
         self.get_logger().warn(
             f'🔥 화재 확정 → /alarm 발행 '
             f'({out.point.x:.2f}, {out.point.y:.2f}) '

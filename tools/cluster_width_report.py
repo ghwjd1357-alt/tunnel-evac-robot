@@ -100,24 +100,54 @@ def clusters_of(scans, max_range):
     return rows
 
 
-def replay(scans, width, rng, min_pts, zone='any'):
+def replay(scans, width, rng, min_pts, zone='any', tick_hz=2.0,
+           phase=0.0, tick_first=False):
     """🔵 실제 판정 경로를 그대로 재생한다.
 
-    반환 (visible_run 개수, visible 인 스캔 수, 전체 스캔 수, run 구간 목록[초]).
-    run = visible() 이 False→True 로 바뀐 뒤 True 로 이어진 구간.
+    반환 (run 개수, visible 인 tick 수, 전체 tick 수, run 구간 목록[초]).
+
+    🔴 08-21 §83.5 재현 반영 — **scan 직후만 보면 mission 이 보는 순간을 놓친다.**
+    구판은 scan 마다 `update()` 한 **뒤에만** `visible()` 을 읽었다. 그런데 실제
+    `mission_node` 는 scan 콜백과 무관한 **2 Hz tick** 에서 읽는다.
+    재현: 10 Hz 로 검출 10장(t=0.0~0.9) 뒤 빈 장(t=1.0) 을 넣으면 구판 replay 는
+    run **0** 을 냈지만, 빈 장 콜백 **직전** t=1.0 의 tick 에서는 `visible()==True`
+    였다. 즉 대조군에서 mission 이 실제로 잡을 오탐을 0 으로 보고할 수 있었다.
+
+    → scan 이벤트와 tick 이벤트를 **하나의 시간축에 합쳐** 재생하고, `visible()`
+      은 **tick 에서만** 읽는다. tick 위상은 bag 시작에 맞춘다.
+    ⚠ 위상이 하나뿐이라 여전히 상한이 아니다 — 여러 위상을 보려면 tick 오프셋을
+      바꿔 여러 번 돌려야 한다(`sweep()` 이 최악값을 쓴다).
     """
+    if not scans:
+        return 0, 0, 0, []
     clock = _Clock()
     mon = FollowerMonitor(clock, max_range=rng, min_points=min_pts,
                           max_cluster_width=width)
-    runs, vis_scans, prev = [], 0, False
-    t0 = scans[0][0] if scans else 0
+    t0, t1 = scans[0][0], scans[-1][0]
+    step = int(1e9 / float(tick_hz))
+    # 🔴 §83.5 — tick 격자를 **위상만큼 민다.** scan 을 밀면 t0 도 같이 밀려
+    #   상대 위상이 안 바뀐다(첫 구현이 그 실수를 했고 재현으로 잡혔다).
+    off = int(float(phase) * step)
+    # 🔴 §83.5 — **같은 시각의 순서도 관측 대상이다.** 재현본(검출 10장 뒤 빈 장)
+    #   에서 visible 이 True 인 순간은 t=1.0 **딱 한 점**이고, 그 시각의 빈 scan 이
+    #   먼저 처리되면 사라진다. 실제 노드에서 콜백과 tick 의 선후는 보장되지 않으므로
+    #   **양쪽을 다 돌려 최악값**을 쓴다. 한쪽만 보면 대조군 오탐을 0 으로 보고한다.
+    sk, tk = (1, 0) if tick_first else (0, 1)
+    events = [(t, sk, i) for i, (t, _) in enumerate(scans)]
+    events += [(tt, tk, -1) for tt in range(t0 + off, t1 + 1, step)]
+    events.sort()
+
+    runs, vis_ticks, ticks, prev = [], 0, 0, False
     start = None
-    for t, scan in scans:
+    for t, kind, idx in events:
         clock.ns = t
-        mon.update(scan)
+        if idx >= 0:
+            mon.update(scans[idx][1])
+            continue
+        ticks += 1
         v = mon.visible(zone=zone)
         if v:
-            vis_scans += 1
+            vis_ticks += 1
             if not prev:
                 start = t
         elif prev:
@@ -125,8 +155,13 @@ def replay(scans, width, rng, min_pts, zone='any'):
             start = None
         prev = v
     if prev and start is not None:
-        runs.append(((start - t0) / 1e9, (scans[-1][0] - t0) / 1e9))
-    return len(runs), vis_scans, len(scans), runs
+        runs.append(((start - t0) / 1e9, (t1 - t0) / 1e9))
+    return len(runs), vis_ticks, ticks, runs
+
+
+def longest_run(runs):
+    """가장 긴 연속 visible 구간 [초]. 안정성 지표 — run **개수**가 아니다."""
+    return max((b - a for a, b in runs), default=0.0)
 
 
 def parse_segments(text, scans):
@@ -210,7 +245,7 @@ def sweep(scans, a):
     print(f'대조군: {a.compare} — 스캔 {len(empty)}개 · {edur:.1f}초')
     print(f'구간: {", ".join(f"{lb}({len(s)}스캔)" for lb, s in segs)}')
     print(f"판정 = FollowerMonitor.visible(zone='{a.zone}') 재생 · "
-          f'seen_sec 1.0초 연속\n')
+          f'2Hz tick 8조합(위상4×순서2) 최악값\n')
 
     hdr = f'{"width":>6} {"range":>6} {"minpt":>6} {"대조군run":>9} ' + \
           ' '.join(f'{lb:>9}' for lb, _ in segs) + '   판정'
@@ -218,17 +253,38 @@ def sweep(scans, a):
     print('-' * len(hdr))
 
     ok = []
+    # tick 위상 4종 × 같은 시각 순서 2종 = 8가지. 전부 최악값을 쓴다.
+    phases = [(ph, tf) for ph in (0.0, 0.25, 0.5, 0.75) for tf in (False, True)]
+
+    def worst_control(bag_scans, w, rng, mp):
+        """대조군은 **어느 위상에서도** run 0 이어야 한다 — 최악값을 본다."""
+        return max(replay(bag_scans, w, rng, mp, a.zone,
+                          phase=ph, tick_first=tf)[0]
+                   for ph, tf in phases)
+
+    def worst_person(bag_scans, w, rng, mp):
+        """사람은 **모든 위상에서** 잡혀야 한다 — 최소 run·최소 지속시간을 본다."""
+        res = [replay(bag_scans, w, rng, mp, a.zone, phase=ph, tick_first=tf)
+               for ph, tf in phases]
+        return min(r[0] for r in res), min(longest_run(r[3]) for r in res)
+
     for rng in floats(a.sweep_range):
         for mp in (int(v) for v in floats(a.sweep_min_points)):
             for w in floats(a.sweep_width):
-                eruns, _, _, _ = replay(empty, w, rng, mp, a.zone)
-                seg_runs = [replay(sel, w, rng, mp, a.zone)[0] for _, sel in segs]
+                eruns = worst_control(empty, w, rng, mp)
+                seg = [worst_person(sel, w, rng, mp) for _, sel in segs]
+                seg_runs = [r for r, _ in seg]
+                seg_hold = [h for _, h in seg]
                 good = (eruns == 0) and all(r >= 1 for r in seg_runs)
                 if good:
-                    mark = '🟢 조건 충족'
-                    ok.append((w, rng, mp, sum(seg_runs)))
+                    mark = f'🟢 최소 연속 {min(seg_hold):.1f}s'
+                    # 🔴 §83.5 — 정렬 기준은 run **개수**가 아니라 **최소 연속
+                    #   지속시간**이다. 구판은 sum(run) 내림차순이라 안정 9초(run 1)
+                    #   보다 1.2초 깜빡임(run 7)을 "여유가 크다" 며 골랐다.
+                    #   run 은 성공 횟수이지 안정성이 아니다.
+                    ok.append((w, rng, mp, min(seg_hold)))
                 elif eruns > 0 and all(r >= 1 for r in seg_runs):
-                    mark = f'🔴 대조군 오탐 {eruns}회'
+                    mark = f'🔴 대조군 오탐 {eruns}회(최악 위상)'
                 elif eruns == 0:
                     mark = '🔴 사람 미검출 구간 있음'
                 else:
@@ -244,11 +300,12 @@ def sweep(scans, a):
         print('   ③ 🔴 추천값을 억지로 만들지 않는다 — 그게 §82.6 이 지적한 실패다')
         return 1
 
-    # 사람 쪽 run 이 가장 많은(= 여유가 큰) 조합. 동률이면 width 가 작은 쪽.
+    # 🔴 §83.5 — **최소 연속 지속시간**이 가장 긴 조합. 동률이면 width 가 작은 쪽.
+    #   깜빡임은 GUIDE⇄SEARCH_BACK 진동을 만든다 — 성공 횟수로 고르면 안 된다.
     ok.sort(key=lambda r: (-r[3], r[0]))
-    w, rng, mp, tot = ok[0]
+    w, rng, mp, hold = ok[0]
     print(f'🟢 추천 = cluster_max_width {w:.2f} · detect_range {rng:.2f} · '
-          f'min_points {mp}  (대조군 오탐 run 0 · 사람 run 합계 {tot})')
+          f'min_points {mp}  (대조군 오탐 0 · 사람 최소 연속 {hold:.1f}s)')
     print('   반영: python3 tools/apply_measurements.py '
           f'--cluster-max-width {w:.2f} --detect-range {rng:.2f} --min-points {mp}')
     print('   ⚠ 이 값은 이 두 bag 이 찍힌 자리에서만 검증됐다. 자리를 옮기면 다시 잰다.')

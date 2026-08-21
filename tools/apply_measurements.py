@@ -40,6 +40,7 @@ import argparse
 import math
 import os
 import re
+import stat
 import sys
 import tempfile
 
@@ -233,11 +234,27 @@ def no_dispatch_zone(wp, step=0.05):
 # ─────────────────────────────────────────────────────────────
 # 4. 원자적 쓰기
 # ─────────────────────────────────────────────────────────────
-def atomic_write(path, text):
-    """같은 디렉터리 임시파일 → fsync → os.replace. 중간에 죽어도 원본은 온전하다."""
+def atomic_write(path, text, mode=None):
+    """같은 디렉터리 임시파일 → fsync → os.replace → **부모 디렉터리 fsync**.
+
+    🔴 08-21 §83.8 재현 반영 두 가지:
+
+    ① **mode 를 보존한다.** `mkstemp()` 는 0600 으로 만든다. 그대로 replace 하면
+       0644 이던 yaml 이 **0600 이 된다**(재현: 적용 후 원본·백업 둘 다 600).
+       Jetson 에서 같은 사용자로 돌리면 대개 티가 안 나지만, 다른 service user 나
+       그룹이 읽는 배포에서는 **정상 적용이 권한 실패를 새로 만든다.**
+    ② **부모 디렉터리를 fsync 한다.** 파일 fsync + `os.replace` 만으로는 rename 의
+       디렉터리 엔트리가 durable 하지 않다. 그것 없이 "전원 단절에도 안전" 이라고
+       적으면 문서가 실제 보증보다 앞선다.
+
+    ⚠ 보존 범위는 **mode 까지**다. 소유권·xattr·ACL 은 보존하지 않는다.
+    ⚠ symlink 는 링크 자체를 대체한다(대상 파일이 아니라).
+    """
     d = os.path.dirname(os.path.abspath(path)) or '.'
     fd, tmp = tempfile.mkstemp(dir=d, prefix='.apply_', suffix='.tmp')
     try:
+        if mode is not None:
+            os.fchmod(fd, mode)
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(text)
             f.flush()
@@ -247,6 +264,11 @@ def atomic_write(path, text):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+    dfd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
 
 
 def main():
@@ -273,6 +295,8 @@ def main():
         return 1
 
     original = open(a.file, encoding='utf-8').read()
+    # §83.8 — 원본 mode 를 기억해 그대로 되돌려 준다.
+    src_mode = stat.S_IMODE(os.stat(a.file).st_mode)
 
     # ② 후보 생성 (메모리)
     cand, changes = build_candidate(original, a)
@@ -308,11 +332,11 @@ def main():
         print(f'⚠ 원본이 이미 검증을 통과하지 못한다 {oerrs}')
         print(f'   → 백업을 갱신하지 않는다 ({bak} 의 기존 내용을 보존)')
     else:
-        atomic_write(bak, original)
+        atomic_write(bak, original, src_mode)
         print(f'   백업 = {bak}')
 
     # ⑤ 원자적 교체
-    atomic_write(a.file, cand)
+    atomic_write(a.file, cand, src_mode)
     print('저장 완료 (원자적 교체)')
 
     z = no_dispatch_zone(wp)

@@ -61,6 +61,28 @@ def series(pattern):
     return [(i * step, scan(person=p, ns=i * step)) for i, p in enumerate(pattern)]
 
 
+PHASES = [(ph, tf) for ph in (0.0, 0.25, 0.5, 0.75) for tf in (False, True)]
+
+
+def worst(ser, width=0.8, rng=2.35, mp=3):
+    """도구와 같은 최악값 — 8조합(위상4×같은시각 순서2) 중 최대 run."""
+    return max(R.replay(ser, width, rng, mp, phase=ph, tick_first=tf)[0]
+               for ph, tf in PHASES)
+
+
+def always(ser, width=0.8, rng=2.35, mp=3):
+    """8조합 **전부**에서 잡히는가 — 사람 쪽 기준."""
+    return min(R.replay(ser, width, rng, mp, phase=ph, tick_first=tf)[0]
+               for ph, tf in PHASES)
+
+
+def hold(ser, width=0.8, rng=2.35, mp=3):
+    """8조합 중 **최소** 연속 지속시간 [초] — 안정성 지표."""
+    return min(R.longest_run(R.replay(ser, width, rng, mp,
+                                      phase=ph, tick_first=tf)[3])
+               for ph, tf in PHASES)
+
+
 # ── ① 같은 총량, 다른 배치 ─────────────────────────────────────────────
 
 def test_continuous_detection_confirms_but_bursts_do_not():
@@ -81,11 +103,57 @@ def test_continuous_detection_confirms_but_bursts_do_not():
 
 
 def test_exactly_one_second_is_the_boundary():
-    """seen_sec = 1.0초. 0.9초는 안 되고 1.1초는 돼야 한다."""
-    short = series([False] * 3 + [True] * 9 + [False] * 3)    # 0.9초
-    long_ = series([False] * 3 + [True] * 12 + [False] * 3)   # 1.2초
-    assert R.replay(short, 0.8, 2.35, 3)[0] == 0
-    assert R.replay(long_, 0.8, 2.35, 3)[0] >= 1
+    """seen_sec = 1.0초. 0.9초는 어떤 위상에서도 안 잡혀야 한다.
+
+    ⚠ 1.2초는 **잡힐 수도, 안 잡힐 수도** 있다 — mission 은 2 Hz 로만 보므로
+      창이 tick 사이에 들어가면 놓친다. 그래서 "최악값" 과 "최선값" 을 나눠 본다.
+      이것이 §83.5 가 말한 tick 위상 문제의 정체다."""
+    short = series([False] * 3 + [True] * 9 + [False] * 5)     # 0.9초
+    long_ = series([False] * 3 + [True] * 12 + [False] * 5)    # 1.2초
+    assert worst(short) == 0, '0.9초가 어딘가에서 확정됐다'
+    assert worst(long_) >= 1, '1.2초가 어느 위상에서도 안 잡힌다'
+    # 🔴 그리고 1.2초는 **모든** 위상에서 잡히지는 않는다 — 사람 기준으로 쓰면 안 된다
+    assert always(long_) == 0, '1.2초가 전 위상에서 잡히면 이 경고가 무의미하다'
+    stable = series([False] * 3 + [True] * 40 + [False] * 5)   # 4.0초
+    assert always(stable) >= 1, '4초 연속인데 놓치는 위상이 있다'
+
+
+# ── §83.5 재현본: tick 위상과 같은 시각 순서 ───────────────────────────
+
+def test_tick_before_callback_sees_what_scan_first_hides():
+    """🔴 재현 — 검출 10장(0.0~0.9) 뒤 빈 장(1.0).
+
+    구판 replay 는 scan 직후만 표본화해 run **0** 을 냈다. 그런데 t=1.0 의 tick 이
+    빈 scan 콜백보다 **먼저** 돌면 `visible()==True` 다. 대조군에서 이 차이는
+    "mission 이 실제로 잡을 오탐을 0 으로 보고" 하는 것이라 치명적이다."""
+    ser = series([True] * 10 + [False] * 3)
+    assert R.replay(ser, 0.8, 2.35, 3, phase=0.0, tick_first=False)[0] == 0
+    assert R.replay(ser, 0.8, 2.35, 3, phase=0.0, tick_first=True)[0] == 1
+    assert worst(ser) == 1, '최악값이 knife-edge 를 못 잡는다'
+
+
+def test_phase_offset_moves_the_tick_grid_not_the_scans():
+    """위상은 **tick 격자**를 밀어야 한다. scan 을 밀면 t0 도 같이 밀려 무효다.
+
+    첫 구현이 정확히 그 실수를 했고 재현으로 잡혔다."""
+    ser = series([True] * 10 + [False] * 3)
+    got = {R.replay(ser, 0.8, 2.35, 3, phase=p, tick_first=True)[0]
+           for p in (0.0, 0.25, 0.5, 0.75)}
+    assert len(got) > 1, f'위상을 바꿔도 결과가 그대로다 ({got})'
+
+
+# ── §83.5: 정렬 기준은 run 개수가 아니라 안정성 ────────────────────────
+
+def test_stable_beats_blinking_on_the_ranking_metric():
+    """🔴 재현 — 안정 9초는 run 1, 1.2초 깜빡임은 run 여러 개.
+
+    구판 정렬은 `sum(run)` 내림차순이라 **깜빡임을 "여유가 크다" 며 골랐다.**
+    run 은 성공 **횟수**이지 안정성이 아니다. 새 기준은 최소 연속 지속시간이다."""
+    stable = series([True] * 90)
+    blink = series(([True] * 12 + [False]) * 7)
+    assert R.replay(stable, 0.8, 2.35, 3)[0] <= R.replay(blink, 0.8, 2.35, 3)[0], \
+        '이 시험의 전제(깜빡임 run 이 더 많다)가 깨졌다'
+    assert hold(stable) > hold(blink), '안정 쪽 연속시간이 더 길어야 한다'
 
 
 def test_empty_series_has_no_runs():
