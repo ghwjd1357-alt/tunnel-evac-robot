@@ -141,7 +141,16 @@ def test_good_change_round_trips_values_and_keeps_comments(yml):
                '--min-points', '4', '--low-west', '0.42,-10.61').returncode == 0
     after = open(yml, encoding='utf-8').read()
     assert '# 유도 저속' in after and '평시' in after, '주석이 날아갔다'
-    assert run(yml, '--guide-speed', '0.10', '--normal-speed', '0.10',
-               '--cluster-max-width', '0.80', '--detect-range', '1.50',
-               '--min-points', '3', '--low-west', '0.50,-10.65').returncode == 0
-    assert Y.safe_load(open(yml, encoding='utf-8')) == Y.safe_load(before)
+    # 🔴 08-21 — 복원값을 하드코딩했더니 실측이 정본을 갱신하는 순간 깨졌다
+    #   (`detect_range` 1.5 → 3.00). 왕복 시험의 뜻은 "값이 되돌아온다" 이지
+    #   "값이 1.5 다" 가 아니다. **원본에서 읽어 되돌린다** — 그러면 다음 실측이
+    #   와도 이 테스트는 안 부서진다.
+    b = Y.safe_load(before)
+    sb, sp = b['search_back'], b['corridor_graph']['nodes']['low_west']
+    assert run(yml, '--guide-speed', str(b['guide_speed']),
+               '--normal-speed', str(b['normal_speed']),
+               '--cluster-max-width', str(sb['cluster_max_width']),
+               '--detect-range', str(sb['detect_range']),
+               '--min-points', str(sb['min_points']),
+               '--low-west', f"{sp['x']},{sp['y']}").returncode == 0
+    assert Y.safe_load(open(yml, encoding='utf-8')) == b
