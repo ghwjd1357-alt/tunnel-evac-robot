@@ -44,6 +44,13 @@ MAX_R = 4.0        # 이보다 먼 점은 벽으로 안 본다 (반대편 복도
 TURN_RATE = 0.45        # rad/s 명령 (회전 불감대 0.2329 를 확실히 넘는 값)
 DEG_PER_SEC = 8.0       # 그때 실측 회전율 (08-21 M2: 7.5~8.1 °/s)
 MAX_TURN = 45.0         # 안전 상한 — 이보다 크게 돌리려면 여러 번 나눠 친다
+# 🔴 08-21 실차 — `DEG_PER_SEC=8.0` 만 쓰면 짧은 회전이 **덜 돈다.** 12° 를
+#   요청한 1.5초 명령이 7.2° 만 돌았다(다른 1.4초는 8.5°). 8.0 은 M2 의 27초
+#   회전 평균이라 기동 지연이 묻혀 있던 값이다. 정지에서 회전 불감대
+#   (0.2329 rad/s)를 넘겨 바퀴가 실제로 도는 데 약 0.45초가 든다.
+#     실제 = DEG_PER_SEC × (명령시간 − TURN_LAG)
+#   ⚠ 그래도 개루프다. 정확히 맞추려면 `--align`(닫힌 루프)을 쓴다.
+TURN_LAG = 0.45
 
 
 def fit(pts):
@@ -61,7 +68,9 @@ def fit(pts):
     return m, ys[n // 2], n
 
 
-def report(scan):
+def measure(scan):
+    """스캔 한 장에서 좌·우 벽 기울기를 낸다. 인쇄는 하지 않는다.
+    반환 {'좌': deg, '우': deg, ...} — 표본이 부족한 쪽은 키가 없다."""
     left, right = [], []
     for i, r in enumerate(scan.ranges):
         if not math.isfinite(r) or r < scan.range_min or r > MAX_R:
@@ -74,17 +83,25 @@ def report(scan):
         elif RIGHT[0] <= a <= RIGHT[1]:
             right.append(p)
 
-    fl, fr = fit(left), fit(right)
-    if fl is None and fr is None:
+    out = {}
+    for name, f in (('좌', fit(left)), ('우', fit(right))):
+        if f is not None:
+            m, d, n = f
+            out[name] = (math.degrees(math.atan(m)), d, n)
+    return out
+
+
+def report(scan):
+    got_full = measure(scan)
+    if not got_full:
         print('🔴 좌우 어느 쪽에서도 벽을 못 찾았다 (표본 부족)')
         return
     got = {}
-    for name, f in (('좌', fl), ('우', fr)):
-        if f is None:
+    for name in ('좌', '우'):
+        if name not in got_full:
             print(f'  {name}벽  표본 부족')
             continue
-        m, d, n = f
-        deg = math.degrees(math.atan(m))
+        deg, d, n = got_full[name]
         got[name] = deg
         print(f'  {name}벽  거리 {d:5.2f} m · 기울기 {deg:+6.2f}° · 점 {n:3d}개')
 
