@@ -224,7 +224,26 @@ GOOD = {
     'max_stamp_age_sec': 1.0, 'max_range': 5.0, 'fixed_range': 2.0,
     'refire_cooldown_sec': -1.0, 'confirm_assoc_radius_m': 1.0,
     'tf_wait_sec': 0.10, 'rearm_ack_timeout_sec': 3.0, 'rearm_dedup_sec': 5.0,
+    # 🆕 08-22 사람 경로 — `PROJECT_CONTEXT §4.1-b` 의 보수적 기본값
+    'person_confirm_sec_fallen': 1.5, 'person_confirm_sec_leave': 4.0,
+    'person_min_frames': 6, 'person_min_confidence': 0.50,
+    'person_stale_sec': 0.5,
 }
+
+
+def test_params_good_set_covers_every_runtime_numeric():
+    """🔴 메타 회귀 — `GOOD` 이 `RUNTIME_NUMERIC` 전량을 덮어야 한다.
+
+    08-22 에 사람 파라미터 5개를 더하면서 여기를 안 고쳐 회귀 5건이 깨졌다.
+    노드 쪽은 `unvalidated_numeric_params()` 가 기동 때 잡아 주지만(§85.5),
+    **시험 픽스처에는 그런 잠금이 없었다.** 다음 사람이 같은 벽을 만나지 않도록
+    여기서 대조한다 — 빠진 키는 `validate_params` 에서 `None` 이 되어
+    "숫자가 아니다" 로 터지는데, 그 메시지만 보면 원인이 픽스처인 줄 모른다.
+    """
+    from perception_adapter.adapter_node import PerceptionAdapter
+
+    missing = sorted(set(PerceptionAdapter.RUNTIME_NUMERIC) - set(GOOD))
+    assert not missing, f'GOOD 에 없는 런타임 수치 파라미터: {missing}'
 
 
 def test_params_good_set_passes():

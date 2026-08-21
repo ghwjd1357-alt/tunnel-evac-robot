@@ -274,6 +274,20 @@ def validate_params(vals):
     # refire_cooldown_sec 은 0 이하가 "평생 1회" 라는 뜻이라 부호를 안 막는다.
     # 다만 NaN/Inf 는 비교가 전부 False 가 되어 억제가 조용히 사라진다.
     num('refire_cooldown_sec')
+
+    # ── 🆕 08-22 사람 경로 (`PROJECT_CONTEXT §4.1-b`) ──────────────────────
+    # 🔴 상한을 다 건다. 이 값들이 `inf` 면 확정이 **영원히 안 서고**, 0 이면
+    #   한 프레임 오탐이 곧바로 신고가 된다. 둘 다 촬영을 망치는 방향이다.
+    # 상한 근거: 확정을 10초 넘게 기다리면 그 사이 사람이 이미 이동한다.
+    num('person_confirm_sec_fallen', positive=True, hi=10.0)
+    num('person_confirm_sec_leave', positive=True, hi=10.0)
+    # 🔴 하한 2 — 화재의 `confirm_frames` 와 같은 논리다. 1 이면 "반복 관측"이
+    #   한 장이라는 뜻이라 디바운스가 없는 것과 같다.
+    num('person_min_frames', lo=2, integer=True)
+    num('person_min_confidence', lo=0.0, hi=1.0)
+    # 🔴 상한 5.0 — stale 을 길게 잡으면 센서가 죽은 뒤에도 마지막 판정이
+    #   살아 있어, 미션이 사람이 계속 있는 줄 안다. 계약값은 0.5 다.
+    num('person_stale_sec', positive=True, hi=5.0)
     return out
 
 
@@ -348,6 +362,20 @@ class PerceptionAdapter(Node):
         self.declare_parameter('fallback_source_frame', '')
         # 🔴 §82.4 — 직전 관측과 이만큼 떨어지면 다른 대상으로 본다 [m]
         self.declare_parameter('confirm_assoc_radius_m', 1.0)
+        # ── 🆕 08-22 사람 경로 (`PROJECT_CONTEXT §4.1-b`) ───────────────────
+        # 🔴 값은 전부 **보수적 기본값**이다. 역할 B 의 Jetson 실측(발행률·confidence
+        #   분포)이 오면 **코드가 아니라 이 값만** 바꾼다. 답을 기다리느라 구현이
+        #   멈추면 주말이 날아가므로 08-22 새벽에 이렇게 설계했다.
+        # 🔴 비대칭 방향이 직관과 반대다 — 쓰러졌는데 `ok` 로 읽으면 로봇이 유도를
+        #   시작하고 **떠난다**(= 쓰러진 사람을 버린다). 서 있는데 `fallen` 이면
+        #   관제가 확인하고 끝이다. 그러니 **떠나도 된다는 판정이 비싸다.**
+        self.declare_parameter('person_confirm_sec_fallen', 1.5)
+        self.declare_parameter('person_confirm_sec_leave', 4.0)   # ok · none 공용
+        self.declare_parameter('person_min_frames', 6)
+        self.declare_parameter('person_min_confidence', 0.50)
+        self.declare_parameter('person_stale_sec', 0.5)           # §4.1 계약값
+        self.declare_parameter('person_status_topic', '/person_status')
+        self.declare_parameter('victim_topic', '/victim')
         # 🔴 §82.3 — 기대 source frame. 빈 문자열이면 검사 안 함(비권장).
         #    이게 없으면 TF 트리에 있는 아무 frame(base_link 등)도 조용히 통과한다.
         self.declare_parameter('expected_source_frame', 'camera_color_optical_frame')
@@ -402,24 +430,13 @@ class PerceptionAdapter(Node):
         #    **크게 죽는다.** 재현: max_range=-1 이면 clamp_range 가 (2,0,0) 을
         #    (-1,0,0) 으로 뒤집어 로봇 **뒤쪽** 좌표를 만들었다. 조용히 도는 것보다
         #    안 뜨는 편이 낫다 — 안 뜨면 관제 수동 클릭이라는 후퇴로가 살아 있다.
-        bad = validate_params({
-            'min_confidence': p('min_confidence').value,
-            'confirm_frames': p('confirm_frames').value,
-            'confirm_window_sec': p('confirm_window_sec').value,
-            'max_stamp_age_sec': p('max_stamp_age_sec').value,
-            'max_range': p('max_range').value,
-            'fixed_range': p('fixed_range').value,
-            'refire_cooldown_sec': p('refire_cooldown_sec').value,
-            'confirm_assoc_radius_m': p('confirm_assoc_radius_m').value,
-            'tf_wait_sec': p('tf_wait_sec').value,
-            'rearm_ack_timeout_sec': p('rearm_ack_timeout_sec').value,
-            'rearm_dedup_sec': p('rearm_dedup_sec').value,
-        })
-        if bad:
-            for m in bad:
-                self.get_logger().error(f'🔴 파라미터 거부 — {m}')
-            raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
-
+        # 🔴 08-22 — 구판은 이 dict 를 **손으로 세고 있었다.** 그래서 사람 경로
+        #   파라미터 5개를 더하자 `RUNTIME_NUMERIC` 에는 들어갔는데 여기는 빠져
+        #   전부 `None` 이 됐고, "숫자가 아니다 (None)" 라는 **원인을 못 읽는
+        #   메시지**로 기동이 거부됐다. 이 프로젝트가 반복해서 밟는 그 함정이다 —
+        #   같이 고쳐야 하는 자리가 둘인데 하나만 고친다.
+        #   → 목록 하나에서 만든다. `unvalidated_numeric_params()` 가 "선언했는데
+        #     목록에 없는 것"을 잡고, 이 줄이 "목록에 있는데 안 넘긴 것"을 없앤다.
         # 🔴 §85.5 **패턴 수정** — 목록을 손으로 관리하면 다음 파라미터에서 또 샌다.
         #   실제로 §84.4("모든 수치를 검증한다")를 넣은 **바로 그 커밋**에서
         #   `mission_state_max_age_sec` 를 목록에 안 넣었다.
@@ -430,6 +447,18 @@ class PerceptionAdapter(Node):
             raise ValueError(
                 f'🔴 수치 파라미터 {sorted(missed)} 가 검증 목록 밖이다. '
                 f'RUNTIME_NUMERIC 과 validate_params 에 함께 넣을 것 (§85.5)')
+
+        # 🔴 08-22 — **순서가 중요하다.** 목록 검사가 먼저다.
+        #   아래 dict 를 `RUNTIME_NUMERIC` 에서 만들기 때문에, 선언만 하고 목록에
+        #   안 넣은 파라미터는 여기 안 실려 `None` 이 되고 값 검사가 먼저 터진다.
+        #   그러면 "숫자가 아니다 (None)" 라는, **고칠 자리를 안 알려주는 메시지**가
+        #   나간다. 목록 검사를 앞에 두면 "RUNTIME_NUMERIC 에 넣어라" 가 뜬다.
+        bad = validate_params({k: p(k).value for k in self.RUNTIME_NUMERIC})
+        if bad:
+            for m in bad:
+                self.get_logger().error(f'🔴 파라미터 거부 — {m}')
+            raise ValueError(f'perception_adapter 파라미터 {len(bad)}건 불량: {bad}')
+
 
         # 🔴 08-21 §85.2 — `spin_thread=True` **만으로는 안 된다.**
         #   §84.1 에서 리스너에 전용 executor 를 줬는데, 그 뒤 `main()` 의
@@ -469,6 +498,20 @@ class PerceptionAdapter(Node):
         self.alarm_pub = self.create_publisher(PoseStamped, self.alarm_topic, 10)
         # 관제·기록용 상태 문자열. 왜 안 쐈는지가 여기 남는다.
         self.status_pub = self.create_publisher(String, '/adapter_status', 10)
+        # 🆕 08-22 사람 경로. QoS 는 `/alarm` 과 같은 기본값으로 맞춘다 —
+        #   이 프로젝트는 RELIABLE/BEST_EFFORT 불일치로 이미 두 번 당했다.
+        self.person_status_pub = self.create_publisher(
+            String, p('person_status_topic').value, 10)
+        self.victim_pub = self.create_publisher(
+            PoseStamped, p('victim_topic').value, 10)
+        # 사람 경로 내부 상태
+        self._p_last_det_t = None     # 마지막 /detections 수신 시각
+        self._p_streak_class = None   # 현재 연속의 프레임 판정
+        self._p_streak_since = None
+        self._p_streak_frames = 0
+        self._p_status = 'stale'      # 🔴 기동 직후는 '사람 없음'이 아니라 '못 봤다'
+        self._p_victim_pos = None
+        self._p_victim_sent = False
 
         # ── 상태 ────────────────────────────────────────────────────────
         self.tracker = ConfirmTracker(p('confirm_frames').value,
@@ -505,6 +548,10 @@ class PerceptionAdapter(Node):
             String, p('mission_state_topic').value, self.on_mission_state, 10)
 
         self.create_timer(2.0, self.tick)
+        # 🆕 10 Hz — `/person_status` 는 **상시 신호**다. `/detections` 콜백에만
+        #   매달면 발행이 끊긴 순간 아무 말도 못 하게 되는데, 그 침묵이야말로
+        #   미션이 알아야 할 정보다(`stale`).
+        self.create_timer(0.1, self._person_tick)
 
         self.get_logger().info(
             f'어댑터 기동 — {self.detections_topic} → {self.alarm_topic} '
@@ -531,6 +578,9 @@ class PerceptionAdapter(Node):
         'max_stamp_age_sec', 'max_range', 'fixed_range',
         'refire_cooldown_sec', 'confirm_assoc_radius_m', 'tf_wait_sec',
         'rearm_ack_timeout_sec', 'rearm_dedup_sec',
+        # 🆕 08-22 사람 경로
+        'person_confirm_sec_fallen', 'person_confirm_sec_leave',
+        'person_min_frames', 'person_min_confidence', 'person_stale_sec',
     )
     #: tracker 를 다시 만들어야 하는 것들 (파생 상태)
     TRACKER_KEYS = ('confirm_frames', 'confirm_window_sec', 'confirm_assoc_radius_m')
@@ -684,6 +734,163 @@ class PerceptionAdapter(Node):
         self.get_logger().warn('🔵 재무장 — 발사 이력과 누적 관측을 지웠다')
         self.say('REARMED')
 
+    # ===================================================================
+    # 🆕 사람 경로 (08-22) — `PROJECT_CONTEXT §4.1-b`
+    # 🔴 화재 경로와 **한 줄도 공유하지 않는다.** 어댑터는 검토 다섯 회차로 동결한
+    #    사슬이고, 촬영 전날 밤에 그 안을 리팩터링할 이유가 없다. 아래 map 변환이
+    #    `on_detections` 의 것과 겹치는 것은 **의도된 중복**이다.
+    #    ⏸ 합칠 조건 = 촬영이 끝나고 사람 경로가 독립 검토를 받은 뒤.
+    # ===================================================================
+    PERSON_CLASSES = ('person_fallen', 'person_ok', 'person_unknown')
+
+    def _person_to_map(self, det, header):
+        """탐지 1건의 위치를 map 으로. 실패하면 None (신고 좌표 없이 상태만 간다)."""
+        src = header.frame_id or self.get_parameter('fallback_source_frame').value
+        expect = self.get_parameter('expected_source_frame').value
+        if not src or (expect and src != expect):
+            return None
+        if not is_finite_point(det.position.x, det.position.y, det.position.z):
+            return None
+        pt = PointStamped()
+        pt.header = header
+        pt.point.x, pt.point.y, pt.point.z = (
+            det.position.x, det.position.y, det.position.z)
+        for stamp in (rclpy.time.Time.from_msg(header.stamp), rclpy.time.Time()):
+            # 촬영시각 → 없으면 최신 TF. 회전 중(SCAN_AREA)이면 최신은 밀리지만,
+            # 좌표가 조금 밀리는 것과 **신고를 못 하는 것**은 값이 다르다.
+            try:
+                tr = self.tf_buffer.lookup_transform(
+                    self.target_frame, src, stamp,
+                    timeout=rclpy.duration.Duration(seconds=0.1))
+                out = do_transform_point(pt, tr)
+                if is_finite_point(out.point.x, out.point.y, out.point.z):
+                    return (out.point.x, out.point.y)
+            except Exception:                                    # noqa: BLE001
+                continue
+        return None
+
+    def _person_frame_verdict(self, msg):
+        """이 프레임 한 장의 판정 — fallen | ok | unknown | none.
+
+        🔴 **fallen 이 ok 를 이긴다.** 두 사람이 있고 하나가 쓰러져 있으면 프레임에
+        `person_ok` 와 `person_fallen` 이 같이 온다. 그때 'ok' 로 접으면 로봇이
+        **쓰러진 사람을 두고 떠난다.** 신고는 되돌릴 수 있고 유기는 못 되돌린다.
+        """
+        min_conf = float(self.get_parameter('person_min_confidence').value)
+        seen = set()
+        best_fallen = None
+        for d in msg.detections:
+            name = getattr(d, 'class_name', '')
+            if name not in self.PERSON_CLASSES:
+                continue
+            if float(getattr(d, 'confidence', 0.0)) < min_conf:
+                continue
+            seen.add(name)
+            if name == 'person_fallen' and (
+                    best_fallen is None or d.confidence > best_fallen.confidence):
+                best_fallen = d
+        if 'person_fallen' in seen:
+            return 'fallen', best_fallen
+        if 'person_ok' in seen:
+            return 'ok', None
+        if 'person_unknown' in seen:
+            return 'unknown', None
+        return 'none', None
+
+    def _p_set_status(self, v):
+        """상태 전이 + `fallen` 상승엣지에서 `/victim` 1회 발행."""
+        if v == 'fallen':
+            if not self._p_victim_sent and self._p_victim_pos is not None:
+                m = PoseStamped()
+                m.header.frame_id = self.target_frame
+                m.header.stamp = self.get_clock().now().to_msg()
+                m.pose.position.x, m.pose.position.y = self._p_victim_pos
+                m.pose.position.z = 0.0        # 미션은 평면만 쓴다
+                m.pose.orientation.w = 1.0
+                self.victim_pub.publish(m)
+                self._p_victim_sent = True
+                self.get_logger().error(
+                    f'🔴 쓰러진 사람 확정 → /victim 발행 '
+                    f'({self._p_victim_pos[0]:.2f}, {self._p_victim_pos[1]:.2f})')
+        else:
+            # 🔵 상태가 fallen 을 벗어나면 재무장한다 — 같은 임무에서 두 번째
+            #   쓰러짐이 생겼을 때 신고가 막히면 안 된다.
+            self._p_victim_sent = False
+        if v != self._p_status:
+            self.get_logger().info(f'사람 상태 {self._p_status} → {v}')
+        self._p_status = v
+
+    def _p_reset_streak(self):
+        self._p_streak_class = None
+        self._p_streak_since = None
+        self._p_streak_frames = 0
+
+    def _update_person(self, msg, t):
+        """🔴 `on_detections` 의 **맨 앞**에서 불린다 — 그 아래 어떤 return 에도 걸리면 안 된다.
+
+        특히 ①번 재발사 억제는 화재가 한 번 나가면 기본값이 **평생 return** 이다.
+        사람 판정을 그 뒤에 두면 **화재 경보가 나간 순간 죽는다** — 그런데
+        `SCAN_AREA`(사람 찾기)는 바로 그 다음 국면이다.
+        """
+        self._p_last_det_t = t
+
+        # stamp 신선도를 **자체로** 본다 (화재 경로의 검사를 빌리지 않는다).
+        st = msg.header.stamp
+        age = t - (st.sec + st.nanosec / 1e9)
+        if abs(age) > float(self.get_parameter('max_stamp_age_sec').value):
+            # 🔴 "오고는 있는데 못 믿는다" 는 `unknown` 이다. `stale`(안 온다)도
+            #   `none`(봤는데 없다)도 아니다. 셋을 섞으면 아무도 없는 자리에서
+            #   유도가 시작되거나 센서가 죽은 채로 신고가 나간다.
+            self._p_reset_streak()
+            self._p_set_status('unknown')
+            return
+
+        verdict, best = self._person_frame_verdict(msg)
+        if verdict == 'unknown':
+            self._p_reset_streak()
+            self._p_set_status('unknown')
+            return
+
+        if verdict != self._p_streak_class:
+            self._p_streak_class = verdict
+            self._p_streak_since = t
+            self._p_streak_frames = 0
+        self._p_streak_frames += 1
+
+        if verdict == 'fallen' and best is not None:
+            pos = self._person_to_map(best, msg.header)
+            if pos is not None:
+                self._p_victim_pos = pos
+
+        # 🔴 `fallen` 은 빠르게, **떠나도 된다는 판정(`ok`·`none`)은 신중하게.**
+        need = float(self.get_parameter(
+            'person_confirm_sec_fallen' if verdict == 'fallen'
+            else 'person_confirm_sec_leave').value)
+        frames_ok = self._p_streak_frames >= int(
+            self.get_parameter('person_min_frames').value)
+        if (t - self._p_streak_since) >= need and frames_ok:
+            self._p_set_status(verdict)
+        else:
+            # 판정이 아직 안 섰다 = 보류. 미션은 여기서 아무 분기도 하지 않는다.
+            self._p_set_status('unknown')
+
+    def _person_tick(self):
+        """10 Hz 상시 발행 + 침묵 감지.
+
+        🔴 `/detections` 콜백에만 매달면 **발행이 끊긴 순간 아무 말도 못 한다.**
+        그 침묵이야말로 미션이 알아야 할 정보다 — 마지막 상태가 `ok` 였다면
+        미션은 사람이 계속 따라오는 줄 안다.
+        """
+        t = self.now_sec()
+        stale_sec = float(self.get_parameter('person_stale_sec').value)
+        if self._p_last_det_t is None or (t - self._p_last_det_t) > stale_sec:
+            if self._p_status != 'stale':
+                self._p_reset_streak()
+                self._p_set_status('stale')
+        m = String()
+        m.data = self._p_status
+        self.person_status_pub.publish(m)
+
     def now_sec(self):
         return self.get_clock().now().nanoseconds / 1e9
 
@@ -725,6 +932,11 @@ class PerceptionAdapter(Node):
     def on_detections(self, msg: Detection3DArray):
         self._frames += 1
         t = self.now_sec()
+
+        # 🆕 08-22 — 🔴 **맨 앞이어야 한다.** 아래 ①(재발사 억제)은 화재가 한 번
+        #   나가면 기본값이 평생 return 이고, `SCAN_AREA` 는 그 **다음** 국면이다.
+        #   여기 순서를 내리면 사람 판정이 화재 경보와 함께 죽는다.
+        self._update_person(msg, t)
 
         # ── ① 재발사 억제 ──────────────────────────────────────────────
         cooldown = self.get_parameter('refire_cooldown_sec').value
