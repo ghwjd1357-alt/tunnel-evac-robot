@@ -83,6 +83,81 @@ Detection3DArray : std_msgs/Header header / Detection3D[] detections
   T2 지속 실패 시 `/diagnostics` STALE 승격 · T3 G3 실측표 정본화 ·
   T4 `human_dropped` 와 `person_*` 발행 수 동반 노출.
 
+### 4.1-b 🆕 `/person_status`·`/victim` — 어댑터→미션 **내부** 계약 (2026-08-22 신설)
+
+🔴 **`§4.1` 과 다른 물건이다.** `§4.1`(`/detections`)은 **역할 B 와의 계약**이라 바꾸면
+양쪽이 같이 리빌드한다. 여기 둘은 **역할 A 안에서만** 쓰는 내부 배선이라, 우리가
+혼자 바꿀 수 있고 역할 B 는 알 필요가 없다. 🔵 그래서 새 `.msg` 를 만들지 않았다 —
+`tunnel_interfaces` 는 계약 전용 패키지이고 거기 손대면 양쪽 리빌드가 된다.
+
+```
+/person_status   std_msgs/String            10 Hz 상시   ok | fallen | unknown | none | stale
+/victim          geometry_msgs/PoseStamped  fallen 확정 시 1회   map 좌표
+```
+
+QoS 는 **`/alarm` 과 같은 기본값**(RELIABLE·VOLATILE·KEEP_LAST 10)을 쓴다. 이 프로젝트는
+BEST_EFFORT/RELIABLE 불일치로 이미 두 번 당했다(`PITFALLS §17`) — 같은 계열끼리는
+같은 값으로 맞춘다.
+
+#### 왜 두 개인가
+
+미션이 필요로 하는 것이 **성격이 다른 둘**이다.
+
+| | 쓰는 곳 | 성격 |
+|---|---|---|
+| `/person_status` | `SCAN_AREA` 의 분기(유도/신고/사람없음) | **상시 신호** — "지금 어떤 상태인가" |
+| `/victim` | `RESCUE` 가 관제에 신고할 좌표 | **사건** — `/alarm` 과 같은 모양 |
+
+`/alarm` 하나로 끝나는 화재와 달리, 사람은 *"아직 판정 중"* 과 *"사람이 없다"* 를
+구분해야 한다. 사건만으로는 **"없다"가 영원히 안 온다.**
+
+#### 🔴 디바운스는 **어댑터**가 한다 (미션이 아니다)
+
+이미 화재가 그렇게 돼 있고(`confirm_frames 5` · `confirm_window_sec 3.0` ·
+`confirm_assoc_radius_m 1.0`), 그 기계와 회귀가 검증돼 있다. 미션은 상태머신이지
+신호처리기가 아니다. `부분 실패 금지`·`stale` 판정도 이미 어댑터 몫이다.
+
+#### 판정 규칙 — 🔴 비대칭 방향이 직관과 반대다
+
+| 오판 | 결과 |
+|---|---|
+| 쓰러졌는데 `ok` | 로봇이 유도를 시작하고 떠난다 → 🔴 **쓰러진 사람을 버린다** |
+| 서 있는데 `fallen` | 관제에 신고가 뜬다 → 사람이 확인 → 시간 손실뿐 |
+
+→ **`ok`(= 유도 시작) 가 비싼 판정이다.** 그러니 `fallen` 은 빠르게, `ok` 는 신중하게.
+
+```
+person_fallen  confirm_sec_fallen 연속  →  status = fallen  (+ /victim 1회)
+person_ok      confirm_sec_ok     연속  →  status = ok
+person_unknown                          →  🔴 둘 다 안 센다 → status = unknown
+탐지 0건(빈 배열)                        →  status = none    (정상 미탐지)
+/detections 가 person_stale_sec 동안 없음 →  status = stale  (🔴 판정 불가 ≠ 사람 없음)
+유효 프레임 < person_min_frames          →  status = unknown
+```
+
+🔴 **`stale` 과 `none` 을 절대 섞지 않는다.** `none` 은 "봤는데 없다", `stale` 은
+"못 봤다" 다. 미션은 `stale` 에서 **아무 분기도 하지 않고 정지 상태를 유지한다.**
+이건 `§4.1` 의 *"빈 배열과 미발행을 섞지 않는다"* 를 우리 쪽에서 이어받은 것이다.
+
+#### 보수적 기본값 (역할 B 실측 전)
+
+```
+person_confirm_sec_fallen  1.5      person_min_frames      6
+person_confirm_sec_ok      4.0      person_min_confidence  0.50
+person_stale_sec           0.5      ← §4.1 계약값과 같다
+```
+
+⚠ **전부 런치 파라미터다.** 역할 B 의 Jetson 실측(발행률·confidence 분포)이 오면
+**코드를 안 고치고 값만 바꾼다.** 08-22 새벽에 그렇게 설계한 이유가 이것이다 —
+답을 기다리느라 구현이 멈추면 주말이 날아간다.
+
+#### 🔴 화재 경로는 손대지 않는다
+
+어댑터는 검토 다섯 회차로 🧊 동결한 사슬이다(`AGENTS §6` 상한 초과). 사람 경로는
+**순수 추가**이고, `/detections → /alarm` 은 한 줄도 안 바뀐다.
+🔴 **"안 바뀌었다" 를 회귀로 잠근다** — 안 그러면 다음 사람이 그 말을 믿을 근거가 없다.
+⚠ 이 추가는 **독립 검토를 안 받았다.** 동결을 푼 것이 아니라 새 변경을 얹은 것이다.
+
 ### 4.2 08-18~19 왕복 — 역할 B 실측·회신과 역할 A 5~7차 회신 (2026-08-19 신설 · 08-19 오후 갱신)
 
 🔴 **원문 보관 위치가 생겼다.** 그전까지 역할 B 회신은 **원문이 한 건도 저장돼 있지 않았고**

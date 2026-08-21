@@ -52,6 +52,14 @@ SCENARIOS = (
     'fire_left',        # optical x=-1 → map 에서 왼쪽(+y) 으로 나와야 한다
     'fire_right',       # optical x=+1 → map 에서 오른쪽(-y)
     'resolvable_frame',  # TF 에 **있는** 엉뚱한 frame(base_link). 거부해야 한다
+    # ── 🆕 08-22: 사람 경로(`PROJECT_CONTEXT §4.1-b`). 로봇도 카메라도 역할 B 도
+    #    없이 `/person_status`·`/victim` 전구간을 굴리기 위한 것이다. ──
+    'person_ok',        # 서 있는 사람 → status=ok → 미션은 유도로 간다
+    'person_fallen',    # 쓰러진 사람 → status=fallen + /victim → 미션은 신고로 간다
+    'person_none',      # 사람 없음(빈 배열) → status=none. 🔴 stale 과 섞이면 안 된다
+    'person_unknown',   # 자세 판정 실패 → status=unknown. 🔴 "괜찮다"로 접으면 안 된다
+    'person_flicker',   # ok/fallen 이 프레임마다 뒤집힌다 — 디바운스가 살아 있는지
+    'person_far_fallen',  # 쓰러진 사람이 8m 밖. 거리 문턱이 걸리는지
 )
 
 
@@ -136,6 +144,27 @@ class FakeDetections(Node):
         elif s == 'wrong_frame':
             msg.header.frame_id = 'frame_that_does_not_exist'
             msg.detections = [mk('fire', 0.90, 0.0, 0.0, 2.0)]
+        # ── 🆕 08-22 사람 경로 ──────────────────────────────────────────
+        elif s == 'person_ok':
+            msg.detections = [mk('person_ok', 0.88, 0.0, 0.0, 2.2)]
+        elif s == 'person_fallen':
+            msg.detections = [mk('person_fallen', 0.86, 0.2, 0.0, 2.2)]
+        elif s == 'person_none':
+            # 🔴 `empty` 와 바이트로는 같다. 그런데 **이름이 다른 이유가 있다** —
+            #   사람 경로에서 빈 배열은 "봤는데 없다"(none)이고, 발행이 끊긴 것은
+            #   "못 봤다"(stale)다. 둘을 섞으면 아무도 없는 자리에서 유도가 시작되거나
+            #   (none 을 stale 로 읽음) 센서가 죽은 채로 신고가 나간다(그 반대).
+            #   시나리오 이름을 갈라 두면 시험이 어느 쪽을 겨눴는지 읽는 사람이 안다.
+            msg.detections = []
+        elif s == 'person_unknown':
+            msg.detections = [mk('person_unknown', 0.71, 0.0, 0.0, 2.2)]
+        elif s == 'person_flicker':
+            # 🔴 한 프레임씩 뒤집는다. 디바운스가 없으면 미션이 유도↔신고를 왕복한다.
+            self._flip = not getattr(self, '_flip', False)
+            msg.detections = [mk('person_fallen' if self._flip else 'person_ok',
+                                 0.90, 0.0, 0.0, 2.2)]
+        elif s == 'person_far_fallen':
+            msg.detections = [mk('person_fallen', 0.86, 0.0, 0.0, 8.0)]
         elif s == 'fire_left':
             # optical x=오른쪽 이므로 왼쪽은 음수. map 에서는 +y 로 나와야 한다.
             msg.detections = [mk('fire', 0.90, -1.0, 0.0, 2.0)]
