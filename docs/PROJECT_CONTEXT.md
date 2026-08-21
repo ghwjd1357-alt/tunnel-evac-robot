@@ -151,6 +151,28 @@ person_stale_sec           0.5      ← §4.1 계약값과 같다
 **코드를 안 고치고 값만 바꾼다.** 08-22 새벽에 그렇게 설계한 이유가 이것이다 —
 답을 기다리느라 구현이 멈추면 주말이 날아간다.
 
+#### 🟢 08-22 구현 완료 — 무엇이 어디에 있나
+
+| | 어디 | 키 |
+|---|---|---|
+| 발행 (어댑터) | `adapter_node._update_person` · `_person_tick`(10 Hz) | `person_confirm_sec_fallen 1.5` · `person_confirm_sec_leave 4.0` · `person_min_frames 6` · `person_min_confidence 0.50` · `person_stale_sec 0.5` |
+| 소비 (미션) | `mission_node.person_verdict` — `GATHER` 분기 | `person_gate` **false** · `person_decide_timeout_sec 10.0` · `person_status_timeout_sec 1.0` |
+| 훑기 | `SCAN_AREA` — 같은 (x,y) 에 yaw 만 돌린 Nav2 goal ×4 | `scan_steps 4` · `scan_dwell_sec 2.0` |
+| 역행 병행 | 예약 61 — 라이다에 **OR 로만** | `search_back.camera_refind` **false** |
+| 가짜 입력 | `fake_detections.py` 시나리오 6종 | `person_ok`·`person_fallen`·`person_none`·`person_unknown`·`person_flicker`·`person_far_fallen` |
+
+🔵 **로봇도 카메라도 역할 B 도 없이 전구간이 굴러간다** — 가짜 탐지 → 어댑터 →
+`/person_status` → 미션. 회귀 = adapter `test_person_path.py` · mission `test_person_gate.py`.
+
+🔴 **미션도 자기 눈으로 신선도를 본다** (`person_status_timeout_sec`). 어댑터는 자기
+입력이 끊기면 `stale` 을 말해 주지만, **어댑터 자체가 죽으면 아무 말도 못 한다.**
+그때 마지막 `ok` 를 붙들면 미션은 빈 복도를 유도한다.
+
+🔴 **두 게이트가 다 기본 꺼짐이다** — 본편 테이크(`camera:=false`)에는 어댑터가 없어
+`/person_status` 가 한 건도 안 온다. 켜 두면 그 침묵이 `stale` 로 굳어 사람이 서
+있는데도 `RESCUE` 로 빠진다. 증거는 회귀 숫자다 — 게이트를 더한 커밋에서 기존
+**209 가 209 그대로**였다(`PITFALLS §19-③`).
+
 #### 🔴 화재 경로는 손대지 않는다
 
 어댑터는 검토 다섯 회차로 🧊 동결한 사슬이다(`AGENTS §6` 상한 초과). 사람 경로는
