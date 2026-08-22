@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""주행 중 구동계 감시 — **재발을 테이크 안에서 잡는다** (2026-08-22 신설).
+"""주행 중 감시 — **라이다 사망 + 구동계 재발**을 테이크 안에서 잡는다 (2026-08-22).
 
 사용 (로봇을 움직이지 않는다 · 보기만 한다):
     python3 tools/drive_watch.py
@@ -16,9 +16,20 @@
 
     r = odomω · BASE / (2 · odom속도) = (kR − kL)/(kR + kL)      ← v 가 지워진다
 
-정지·회전 구간은 건너뛴다(그때는 이 식이 성립하지 않는다). 정본 =
-`REAL_ROBOT_VALUES §1-m-11` · 짝 도구 = `drive_health.py`(전 점검) ·
-`bag_drive_report.py`(사후 판독).
+정지·회전 구간은 건너뛴다(그때는 이 식이 성립하지 않는다).
+
+★ **라이다 사망도 같이 본다** (08-22 추가 — 지금 실차의 주 증상)
+
+`PITFALLS §17-①` — 라이다는 **프로세스가 살아 있는 채로 데이터만 끊는다.**
+로그에 에러가 0줄이라 사람이 알아채는 것은 *"로봇이 그냥 섰다"* 뿐이다.
+`/scan` 이 `scan_timeout` 동안 안 오면 **끊긴 시각을 찍어서** 소리친다 —
+시각이 있어야 `dmesg` 와 대조해 USB 재열거인지 가른다.
+
+⚠ **이 도구는 원인을 못 가른다.** 끊긴 시각을 주는 것뿐이다. 원인은 `dmesg` 와
+배선(허브·직결)이 가른다.
+
+정본 = `REAL_ROBOT_VALUES §1-m-11` · `PITFALLS §17-①` ·
+짝 도구 = `drive_health.py`(전 점검) · `bag_drive_report.py`(사후 판독).
 """
 import argparse
 import os
@@ -27,6 +38,7 @@ import statistics as st
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 # 🔴 구동부(micro-ROS)는 BEST_EFFORT 로 발행한다. RELIABLE 구독자는 한 건도 못 받고
@@ -37,6 +49,9 @@ SELF = os.path.abspath(__file__)
 ODOM_WHEEL_BASE = 0.829     # `.ino` ODOM_WHEEL_BASE — 회귀가 대조한다
 BAL_OK = 0.05               # |r| 이 이 아래면 정상
 MIN_SPEED = 0.02            # 이보다 느리면 판정하지 않는다
+# 🔴 `/scan` 이 이 시간 동안 안 오면 죽은 것으로 본다. 정상 10 Hz(0.1s) 대비 10배
+#   여유다 — 더 짧게 잡으면 한 번 걸러진 프레임에 소리친다.
+SCAN_TIMEOUT_DEFAULT = 1.0
 
 
 def verdict(lin, ow, base=ODOM_WHEEL_BASE):
@@ -78,9 +93,44 @@ class Watch:
                 f'(r={r:+.3f} · odom {lin:.3f} m/s · ω {ow:+.3f})')
 
 
+class ScanWatch:
+    """`/scan` 침묵 감시 — 순수 상태기계(ROS 없이 회귀한다).
+
+    🔴 라이다는 **에러 없이** 죽는다. 그래서 "안 온다" 를 세는 것 말고 방법이 없다.
+    """
+
+    def __init__(self, timeout=SCAN_TIMEOUT_DEFAULT):
+        self.timeout = timeout
+        self.last = None
+        self.dead_since = None
+        self.deaths = 0
+
+    def on_scan(self, t):
+        msg = None
+        if self.dead_since is not None:
+            msg = (f'🟢 /scan 복구 — {t - self.dead_since:.1f}초 끊겼다 '
+                   f'(끊긴 시각 {self.dead_since:.1f})')
+            self.dead_since = None
+        self.last = t
+        return msg
+
+    def check(self, t):
+        """주기 점검. 반환: 경고 또는 None. 🔵 같은 사망에 한 번만 소리친다."""
+        if self.last is None or self.dead_since is not None:
+            return None
+        if t - self.last > self.timeout:
+            self.dead_since = self.last
+            self.deaths += 1
+            return (f'🔴 /scan 끊김 — 마지막 수신 {self.last:.1f} '
+                    f'({t - self.last:.1f}초째 없음)')
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--window', type=float, default=2.0, help='판정 창 [s]')
+    ap.add_argument('--scan-timeout', type=float, default=SCAN_TIMEOUT_DEFAULT,
+                    help='/scan 이 이 시간 동안 없으면 죽은 것으로 본다 [s]')
     a = ap.parse_args()
 
     rclpy.init()
@@ -103,12 +153,37 @@ def main():
             print('=' * 62, flush=True)
 
     node.create_subscription(Odometry, '/odom', on_odom, BEST_EFFORT)
-    print(f'주행 감시 시작 — 직진 {a.window:.1f}초 창으로 좌우 균형을 본다.')
+
+    sw = ScanWatch(a.scan_timeout)
+
+    def now():
+        return node.get_clock().now().nanoseconds / 1e9
+
+    def on_scan(_m):
+        m = sw.on_scan(now())
+        if m:
+            print('\n' + m, flush=True)
+
+    def scan_tick():
+        m = sw.check(now())
+        if m:
+            print('\n' + '=' * 62)
+            print('  ' + m)
+            print('  🔴 라이다는 **에러 없이** 죽는다 — 로그는 깨끗하다.')
+            print('  → 스택 재기동 말고는 복구가 없다. 이 테이크는 버린다.')
+            print('  → 끊긴 시각을 적어두고 `sudo dmesg | tail -40` 로 대조한다.')
+            print('=' * 62, flush=True)
+
+    node.create_subscription(LaserScan, '/scan', on_scan, BEST_EFFORT)
+    node.create_timer(0.2, scan_tick)
+
+    print(f'주행 감시 시작 — /scan 침묵({a.scan_timeout:.1f}s) + '
+          f'직진 {a.window:.1f}초 창의 좌우 균형.')
     print('🔵 로봇을 움직이지 않는다. 보기만 한다. (Ctrl+C 로 종료)')
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f'\n종료 — 경고 {w.alerts}회')
+        print(f'\n종료 — 구동계 경고 {w.alerts}회 · /scan 끊김 {sw.deaths}회')
     finally:
         node.destroy_node()
         rclpy.try_shutdown()

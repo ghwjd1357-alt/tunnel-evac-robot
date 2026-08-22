@@ -85,3 +85,68 @@ class WatchTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ScanWatchTest(unittest.TestCase):
+    """🔴 라이다는 **에러 없이** 죽는다 (`PITFALLS §17-①`). "안 온다" 를 세는 것뿐이다."""
+
+    def test_w11_a_silent_lidar_is_reported_once(self):
+        sw = W.ScanWatch(timeout=1.0)
+        for i in range(10):
+            self.assertIsNone(sw.on_scan(i * 0.1))
+            self.assertIsNone(sw.check(i * 0.1))
+        first = sw.check(2.0)
+        self.assertIsNotNone(first, '🔴 /scan 이 끊겼는데 아무 말도 안 했다')
+        self.assertIn('0.9', first, '마지막 수신 시각이 안 찍혔다')
+        self.assertIsNone(sw.check(3.0), '같은 사망에 두 번 소리쳤다')
+        self.assertEqual(1, sw.deaths)
+
+    def test_w12_normal_ten_hz_never_trips(self):
+        """🔵 역회귀 — 정상 10 Hz 에 소리치면 매 테이크가 버려진다."""
+        sw = W.ScanWatch(timeout=1.0)
+        for i in range(200):
+            t = i * 0.1
+            sw.on_scan(t)
+            self.assertIsNone(sw.check(t), f'정상 주기 t={t} 에서 오경보')
+        self.assertEqual(0, sw.deaths)
+
+    def test_w13_one_dropped_frame_is_not_a_death(self):
+        """한 프레임 걸러진 것에 소리치면 안 된다 — 실측에서 흔하다."""
+        sw = W.ScanWatch(timeout=1.0)
+        sw.on_scan(0.0)
+        self.assertIsNone(sw.check(0.5))       # 0.5초 공백은 정상 범위
+        sw.on_scan(0.6)
+        self.assertEqual(0, sw.deaths)
+
+    def test_w14_recovery_reports_how_long_it_was_out(self):
+        """🔵 복구 시각과 지속시간이 있어야 `dmesg` 와 대조할 수 있다."""
+        sw = W.ScanWatch(timeout=1.0)
+        sw.on_scan(0.0)
+        self.assertIsNotNone(sw.check(2.0))
+        back = sw.on_scan(5.0)
+        self.assertIsNotNone(back, '복구를 안 알렸다')
+        self.assertIn('5.0', back)
+        self.assertIsNone(sw.dead_since, '복구 후에도 사망 상태가 남았다')
+
+    def test_w15_a_lidar_that_never_started_is_not_called_dead(self):
+        """🔴 한 번도 안 온 것과 오다 끊긴 것은 다르다 — 기동 전 오경보 금지."""
+        sw = W.ScanWatch(timeout=1.0)
+        self.assertIsNone(sw.check(100.0))
+        self.assertEqual(0, sw.deaths)
+
+
+def test_w16_the_default_timeout_has_real_margin_over_10hz():
+    """🔴 부정 회귀 — 기본값이 정상 주기에 가까우면 **매 테이크가 오경보로 버려진다.**
+
+    ⚠ 위 시험들이 전부 `timeout=1.0` 을 명시해서 **기본값 자체는 검사 밖**이었다
+    (변이로 0.05 를 넣어도 전부 통과했다). 기본값도 잠근다.
+    정상 `/scan` 은 10 Hz(0.1s) 다 — 최소 5배 여유를 요구한다.
+    """
+    assert W.SCAN_TIMEOUT_DEFAULT >= 0.5, \
+        f'기본 {W.SCAN_TIMEOUT_DEFAULT}s 는 10 Hz 주기에 너무 가깝다'
+    sw = W.ScanWatch()                      # 기본값으로
+    for i in range(100):
+        t = i * 0.1
+        sw.on_scan(t)
+        assert sw.check(t) is None, f'기본값이 정상 10 Hz 에 오경보 (t={t})'
+    assert sw.deaths == 0
