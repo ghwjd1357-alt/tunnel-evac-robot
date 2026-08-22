@@ -44,6 +44,11 @@ import stat
 import sys
 import tempfile
 
+# 🔴 구동부 명령 상한 — `.ino` `MAX_LINEAR_CMD` 의 복사본이다 (2026-08-23 재교정).
+#   08-22 펌웨어 굽기로 0.12 → 0.20. 정본 = `docs/REAL_ROBOT_VALUES.md §1-n`.
+MAX_LINEAR_CMD = 0.20
+
+
 sys.path.insert(0, 'src/mission_manager')
 
 WP = 'src/mission_manager/config/waypoints_real_H.yaml'
@@ -194,8 +199,14 @@ def validate_text(text):
         return wp, ['불변조건: gather_dist·min_fire_dist·속도 중 유한값 아닌 것이 있다']
     if mfd >= gd:
         return wp, [f'불변조건: min_fire_dist({mfd}) >= gather_dist({gd})']
-    if ns > 0.12:
-        return wp, [f'불변조건: normal_speed({ns}) 가 구동부 명령 상한 0.12 를 넘는다']
+    # 🔴 2026-08-23 — 펌웨어 `MAX_LINEAR_CMD` 를 0.12 → **0.20** 으로 굽고(08-22 16:20,
+    #   `60bb3c2`) 이 상수를 같이 안 옮겼다. 그 커밋의 전수 열거가 이 자리를 놓쳤다
+    #   (`odom_guard.py` 의 `VX_ABS_MAX` 와 같은 클래스다 — 그쪽은 옮겼는데 여기는 빠졌다).
+    #   증상: 촬영값 `normal_speed 0.20` 을 넣으면 **정상 값인데 검증이 거부**한다.
+    #   🔴 이 상수는 `.ino` 를 따라간다 — 다음에 상한이 바뀌면 여기도 같이 옮긴다.
+    if ns > MAX_LINEAR_CMD:
+        return wp, [f'불변조건: normal_speed({ns}) 가 구동부 명령 상한 '
+                    f'{MAX_LINEAR_CMD} 를 넘는다']
     return wp, []
 
 

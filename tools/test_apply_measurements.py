@@ -54,7 +54,7 @@ BAD = [
     ('--cluster-max-width=-1', None), ('--detect-range', 'inf'),
     ('--min-points', '0'), ('--min-points=-2', None),
     ('--low-west', '1.0'), ('--low-west', 'a,b'), ('--low-west', 'nan,-10.6'),
-    ('--normal-speed', '0.5'),          # 검증 실패 (상한 0.12)
+    ('--normal-speed', '0.5'),          # 검증 실패 (상한 0.20 — 08-23 재교정)
 ]
 
 
@@ -140,7 +140,10 @@ def test_good_change_round_trips_values_and_keeps_comments(yml):
                '--cluster-max-width', '0.62', '--detect-range', '1.80',
                '--min-points', '4', '--low-west', '0.42,-10.61').returncode == 0
     after = open(yml, encoding='utf-8').read()
-    assert '# 유도 저속' in after and '평시' in after, '주석이 날아갔다'
+    # 🔴 08-23 — 촬영 갈래에서 두 줄의 주석 문구가 바뀌었다(촬영값 근거를 적었다).
+    #   이 단언의 목적은 **주석 보존**이지 특정 문구가 아니므로, 바뀐 줄에서
+    #   실제로 살아 있어야 할 표식으로 대체한다.
+    assert '촬영값' in after and '실측' in after, '주석이 날아갔다'
     # 🔴 08-21 — 복원값을 하드코딩했더니 실측이 정본을 갱신하는 순간 깨졌다
     #   (`detect_range` 1.5 → 3.00). 왕복 시험의 뜻은 "값이 되돌아온다" 이지
     #   "값이 1.5 다" 가 아니다. **원본에서 읽어 되돌린다** — 그러면 다음 실측이

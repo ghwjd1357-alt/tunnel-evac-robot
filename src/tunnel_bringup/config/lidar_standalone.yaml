@@ -1,0 +1,33 @@
+# lidar_standalone.yaml — 🆘 라이다 노드만 되살릴 때 쓰는 파라미터 (2026-08-23 신설)
+#
+# 왜 있나
+# -------
+# 08-22 실차에서 주행 중 라이다가 조용히 죽는 일이 반복됐다(원인 = 제미나이 카메라가
+# 버스파워 USB 허브 전류를 흔든다 · 예약 66). 증상은 `cp210x urb stopped: -32` 이고
+# `disconnect` 는 없다 — 장치는 붙어 있고 데이터 파이프만 멈춘다.
+#
+# 🔵 그때 **스택 전체를 내릴 필요가 없다.** `real_bringup.launch.py` 의 라이다 노드에는
+#   `on_exit=Shutdown` 도 `respawn` 도 없어서, 그 노드만 죽여도 런치가 안 내려간다.
+#   → AMCL/slam_toolbox 의 위치추정과 Nav2 가 살아 있는 채로 5초에 복구된다.
+#
+# 쓰는 법 (젯슨)
+# -------------
+#   pkill -f "sllidar[_]node"
+#   ros2 run sllidar_ros2 sllidar_node --ros-args --params-file \
+#     ~/ros2_ws/src/tunnel_bringup/config/lidar_standalone.yaml
+#
+# 🔴 값은 `real_bringup.launch.py` 의 라이다 노드와 **같아야 한다**. 특히 `frame_id` 가
+#   어긋나면 costmap 이 스캔을 "TF 없는 프레임" 으로 버리고, 증상은 "장애물이 안 보인다"
+#   로 나타나 원인을 못 찾는다.
+# 🔴 `serial_port` 는 **udev 심링크**로 준다. `ttyUSB` 번호는 재열거마다 바뀌고
+#   (08-22 에 `ttyUSB0 → ttyUSB1`), 열화상 ESP32 와 같은 CP2102 라 서로 번호를 뺏는다.
+/**:
+  ros__parameters:
+    channel_type: serial
+    serial_port: /dev/rplidar
+    serial_baudrate: 460800     # RPLIDAR C1
+    frame_id: lidar_link        # ★ URDF 와 정확히 같아야 한다
+    inverted: false
+    angle_compensate: true
+    scan_mode: Standard
+    use_sim_time: false
