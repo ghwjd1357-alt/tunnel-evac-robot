@@ -209,9 +209,9 @@ depth 유효율 · Jetson 실시간)를 반복 시험한 적이 없다 → **"1�
 ## 최종 회귀
 
 - `bash tools/doc_check.sh` rc=0.
-- 기준선 표기: pytest **247 passed** / colcon **430 tests** /
+- 기준선 표기: pytest **247 passed** / colcon **434 tests** /
   **test_harness_guards 24 검사** / test_gate_regression **14 케이스**.
-- adapter **115/115** · tools **328/328 + skip 1**.
+- adapter **119/119** · tools **328/328 + skip 1**.
 - 🟢 `perception_adapter` 단위 **107/107** · 늦은 TF 전구간 **5/5**(entrypoint 형상) · `tools/e2e_adapter.py` **19/19**
   (optical 좌·우·정면 · 엉뚱한 frame 거부 · **거부→정상 전환 2건**).
 - 🟢 **§82 신규 43** + **§83 신규 38** (게이트 black-box · fault-injection ·

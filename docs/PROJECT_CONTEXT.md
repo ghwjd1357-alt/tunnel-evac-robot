@@ -139,17 +139,49 @@ person_unknown                          →  🔴 둘 다 안 센다 → status 
 "못 봤다" 다. 미션은 `stale` 에서 **아무 분기도 하지 않고 정지 상태를 유지한다.**
 이건 `§4.1` 의 *"빈 배열과 미발행을 섞지 않는다"* 를 우리 쪽에서 이어받은 것이다.
 
-#### 보수적 기본값 (역할 B 실측 전)
+#### 🔴 판정 상수 — 역할 B 실측(08-22 인수인계 §8-a·§9)으로 확정
 
 ```
-person_confirm_sec_fallen  1.5      person_min_frames      6
-person_confirm_sec_ok      4.0      person_min_confidence  0.50
-person_stale_sec           0.5      ← §4.1 계약값과 같다
+person_confirm_sec_fallen  1.5      person_min_frames      4   ← 6 에서 내림
+person_confirm_sec_leave   4.0      person_min_confidence  0.50
+person_stale_sec           1.5      ← 계약값 0.5 를 못 쓴다
+min_confidence (fire)      0.60     ← 0.40 에서 올림
 ```
 
-⚠ **전부 런치 파라미터다.** 역할 B 의 Jetson 실측(발행률·confidence 분포)이 오면
-**코드를 안 고치고 값만 바꾼다.** 08-22 새벽에 그렇게 설계한 이유가 이것이다 —
-답을 기다리느라 구현이 멈추면 주말이 날아간다.
+🔴 **`/detections` 는 계약 10 Hz 가 아니라 실측 3.8 Hz 다**(정지 상태 · 회전 중 미측정).
+그러면 `fallen 1.5s` 창에 **5.7 프레임**만 들어온다 — 구값 `min_frames=6` 은 그것을
+넘어 **확정을 영원히 막았다.** 쓰러진 사람을 보고도 신고가 안 나간다.
+
+🔴 **`person_stale_sec` 는 계약값 0.5 를 쓸 수 없다.** 실측 프레임 간격이
+min 0.000 ~ **max 0.729 s** 라 0.5 를 자주 넘고, 그러면 정상 동작 중에 `stale` 이 떠
+판정이 계속 튕긴다. ⚠ **계약(§4.1)은 여전히 0.5 이고 구현이 그것을 못 지키는 것이다** —
+우리 쪽에서 흡수했지만 계약 위반 사실은 남는다.
+
+🔴 **fire 문턱을 0.40 → 0.60 으로 올렸다.** 역할 B §9: **불이 없는데 fire 가
+0.45~0.58 로 뜬다**(원인 미특정). 0.40 이면 그대로 통과하고 3초 창에 11.4 프레임이
+들어오므로 `confirm_frames 5` 도 쉽게 채운다 → **본편 원테이크 중 거짓 알람.**
+⚠ 근거 있는 문턱이 아니라 **응급 조치**다 — 진짜 화재의 confidence 분포를 아직
+아무도 안 쟀다. 🔵 그래도 올리는 쪽이 맞다: 거짓 알람은 테이크를 버리고, 놓친 자동
+검출은 오퍼레이터가 **수동 `/alarm`** 으로 즉시 메운다. 되돌릴 수 있는 쪽을 고른다.
+⏸ 되돌리는 조건 = 진짜 화재 confidence 실측.
+
+🔵 **전부 런치 파라미터라 코드를 안 고치고 값만 바꿨다** — 08-22 새벽에 그렇게
+설계한 이유가 이것이다. 회귀(`test_p17`~`p20`)가 **실측값과 상수의 관계**를 잠근다.
+
+#### 🔴 어댑터 기동 인자 — 기본값으로 띄우면 TF 트리가 깨진다
+
+역할 B 인수인계 §5: **Orbbec 드라이버가 이미 전체 TF 체인을 발행한다**
+(`camera_link → … → camera_color_optical_frame`). 우리 기본값
+(`camera_frame:=camera_color_optical_frame optical:=true`)으로 띄우면 그 프레임에
+**부모가 둘**이 되어 트리가 깨진다.
+
+```
+ros2 launch perception_adapter adapter.launch.py \
+    cam_x:=0.25 cam_z:=0.55 camera_frame:=camera_link optical:=false
+```
+
+⚠ `cam_x 0.25` · `cam_z 0.55` 는 **카메라 본체 기준 실측**이다. 브래킷 포함 최상단이
+`base_link` 기준 0.779 m 미만인지는 **아직 아무도 안 쟀다**(예약 43 전제).
 
 #### 🟢 08-22 구현 완료 — 무엇이 어디에 있나
 

@@ -348,7 +348,16 @@ class PerceptionAdapter(Node):
         self.declare_parameter('alarm_topic', '/alarm')
         self.declare_parameter('target_frame', 'map')
         self.declare_parameter('trigger_class', 'fire')
-        self.declare_parameter('min_confidence', 0.40)
+        # 🔴 08-22 역할 B §9 — **불이 없는데 fire 가 0.45~0.58 로 뜬다**(미해결).
+        #   0.40 이면 그 오탐이 그대로 통과하고, 3초 창에 11.4 프레임이 들어오므로
+        #   `confirm_frames 5` 도 쉽게 채운다 → **본편 원테이크 중 거짓 알람.**
+        #   관측된 오탐 구간(0.45~0.58) 위로 올린다.
+        #   ⚠ 이것은 근거 있는 문턱이 아니라 **응급 조치**다 — 진짜 화재의 confidence
+        #     분포를 아직 아무도 안 쟀다(역할 B §8-b 가 "오탐 포함이라 신뢰 말라" 고 했다).
+        #   🔵 그래도 올리는 쪽이 맞다: 거짓 알람은 테이크를 버리고, 놓친 자동 검출은
+        #     오퍼레이터가 수동 `/alarm` 으로 즉시 메운다. 되돌릴 수 있는 쪽을 고른다.
+        #   ⏸ 되돌리는 조건 = 진짜 화재 confidence 실측이 오면 그 값으로 다시 정한다.
+        self.declare_parameter('min_confidence', 0.60)
         self.declare_parameter('confirm_frames', 5)
         self.declare_parameter('confirm_window_sec', 3.0)
         self.declare_parameter('max_stamp_age_sec', 1.0)
@@ -371,9 +380,19 @@ class PerceptionAdapter(Node):
         #   관제가 확인하고 끝이다. 그러니 **떠나도 된다는 판정이 비싸다.**
         self.declare_parameter('person_confirm_sec_fallen', 1.5)
         self.declare_parameter('person_confirm_sec_leave', 4.0)   # ok · none 공용
-        self.declare_parameter('person_min_frames', 6)
+        # 🔴 08-22 역할 B 실측 반영 — `/detections` 는 계약 10 Hz 가 아니라 **3.8 Hz**다
+        #   (정지 상태 · 회전 중 미측정). 그러면 `fallen 1.5s` 창에 **5.7 프레임**만
+        #   들어온다. 구값 6 은 **확정을 영원히 막았다** — 쓰러진 사람을 보고도 신고가
+        #   안 나간다. 4 로 내려 1.4 프레임 여유를 둔다.
+        #   ⏸ 회전 중 발행률이 오면 다시 계산한다(더 낮으면 3 까지 내려야 할 수 있다).
+        self.declare_parameter('person_min_frames', 4)
         self.declare_parameter('person_min_confidence', 0.50)
-        self.declare_parameter('person_stale_sec', 0.5)           # §4.1 계약값
+        # 🔴 08-22 — 계약값 0.5 를 쓰면 **정상 동작 중에 stale 이 뜬다.** 역할 B 실측
+        #   프레임 간격이 min 0.000 ~ **max 0.729 s** 라 0.5 를 자주 넘는다. 그러면
+        #   판정이 `stale` 로 계속 튕겨 아무것도 확정되지 않는다.
+        #   실측 최대 간격의 약 2배로 잡는다. ⚠ 계약(§4.1)은 여전히 0.5 이고,
+        #   **구현이 계약을 못 지키고 있는 것**이다 — 역할 B 에게 알린다.
+        self.declare_parameter('person_stale_sec', 1.5)
         self.declare_parameter('person_status_topic', '/person_status')
         self.declare_parameter('victim_topic', '/victim')
         # 🔴 §82.3 — 기대 source frame. 빈 문자열이면 검사 안 함(비권장).

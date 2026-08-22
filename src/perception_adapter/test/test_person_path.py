@@ -317,3 +317,70 @@ def test_p16_an_interrupted_fallen_streak_drops_its_coordinate(node):
     node._update_person(arr(node, det('person_unknown'), t=8001.0), 8001.0)
     assert node._p_status == 'unknown'
     assert node._p_victim_pos is None, '세대가 끊겼는데 좌표가 남았다'
+
+
+# ── 🔴 08-22 역할 B 실측과 상수의 정합 ─────────────────────────────────
+# 인수인계서 §8-a·§9 의 실측값. 🔴 여기 숫자를 고칠 때는 **출처를 같이 고친다** —
+# 상수만 맞춰 놓고 실측이 바뀌면 판정이 조용히 무효가 된다.
+ROLE_B_DETECTIONS_HZ = 3.8      # §8-a 정지 상태 (🔴 회전 중 미측정)
+ROLE_B_MAX_GAP_SEC = 0.729      # §8-a 프레임 간 최대 간격
+ROLE_B_FIRE_FALSE_MAX = 0.58    # §9 불이 없는데 뜬 fire 의 최대 confidence
+
+
+def defaults():
+    import rclpy
+    rclpy.init()
+    n = PerceptionAdapter()
+    try:
+        return {k: n.get_parameter(k).value for k in (
+            'person_min_frames', 'person_confirm_sec_fallen',
+            'person_confirm_sec_leave', 'person_stale_sec', 'min_confidence')}
+    finally:
+        n.destroy_node()
+        rclpy.shutdown()
+
+
+def test_p17_fallen_can_actually_confirm_at_the_measured_frame_rate():
+    """🔴 부정 회귀 — 창에 들어오는 프레임보다 `min_frames` 가 크면 **영원히 확정 안 된다.**
+
+    계약은 10 Hz 인데 실측은 **3.8 Hz** 다. 그러면 `fallen 1.5s` 창에 5.7 프레임만
+    들어오는데 구값 `min_frames=6` 은 그것을 넘는다 — **쓰러진 사람을 보고도 신고가
+    안 나갔다.** 계약 숫자가 아니라 **실측**으로 맞춰야 한다.
+    """
+    d = defaults()
+    got = d['person_confirm_sec_fallen'] * ROLE_B_DETECTIONS_HZ
+    assert d['person_min_frames'] <= got - 1.0, (
+        f"fallen 창에 {got:.1f} 프레임이 들어오는데 min_frames={d['person_min_frames']} "
+        f"— 확정이 불가능하거나 여유가 없다")
+
+
+def test_p18_leaving_still_needs_a_lot_more_evidence_than_fallen():
+    """🔵 역회귀 — 상수를 실측에 맞추면서 비대칭이 뒤집히면 안 된다."""
+    d = defaults()
+    assert d['person_confirm_sec_leave'] > d['person_confirm_sec_fallen'] * 2, \
+        '떠나도 된다는 판정이 신고보다 신중해야 한다는 원칙이 깨졌다'
+
+
+def test_p19_stale_is_not_declared_during_normal_gaps():
+    """🔴 부정 회귀 — 계약값 0.5 는 실측 최대 간격 0.729 보다 **작다.**
+
+    그대로 두면 정상 동작 중에 `stale` 이 떠서 판정이 계속 튕기고 아무것도 확정되지
+    않는다. ⚠ 계약(§4.1)은 여전히 0.5 이고 **구현이 계약을 못 지키는 것**이다 —
+    이 시험은 그 사실을 우리 쪽에서 흡수한 자리를 지킨다.
+    """
+    d = defaults()
+    assert d['person_stale_sec'] > ROLE_B_MAX_GAP_SEC * 1.5, (
+        f"stale={d['person_stale_sec']} 가 실측 최대 간격 {ROLE_B_MAX_GAP_SEC} 에 너무 가깝다")
+
+
+def test_p20_the_fire_threshold_clears_the_observed_false_positives():
+    """🔴 불이 없는데 뜨는 fire(0.45~0.58)가 문턱을 통과하면 본편 테이크가 죽는다.
+
+    ⚠ 이것은 근거 있는 문턱이 아니라 **응급 조치**다 — 진짜 화재의 confidence 분포를
+    아직 아무도 안 쟀다. 거짓 알람은 테이크를 버리고, 놓친 자동 검출은 오퍼레이터가
+    수동 `/alarm` 으로 메운다. 되돌릴 수 있는 쪽을 고른 것이다.
+    """
+    d = defaults()
+    assert d['min_confidence'] > ROLE_B_FIRE_FALSE_MAX, (
+        f"min_confidence={d['min_confidence']} 로는 관측된 오탐 "
+        f"{ROLE_B_FIRE_FALSE_MAX} 이 그대로 통과한다")
