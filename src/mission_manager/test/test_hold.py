@@ -397,3 +397,84 @@ def test_h_p0_3_the_only_thing_scan_death_does_is_warn():
     assert warned, '🔴 라이다가 죽었는데 경고조차 안 나왔다 — 관제가 모른다'
     assert all('추종감시 불가' in m for m in warned), \
         f'경고 문구가 바뀌었다 — 런북 §10 이 이 문구를 인용한다: {warned}'
+
+
+# ============================================================
+# 🔴 08-23 §91 P0-2 — 재발견 취소가 **직렬화 의도를 실어 보내는지** (호출 자리)
+# ============================================================
+#
+# `test_goal_lifecycle.py` 의 같은 번호 시험은 `GoalManager` 기구만 본다 —
+# `cancel_current_goal(intent='guide_stop')` 를 손으로 부르므로 **호출 자리를
+# 안 지난다.** 실제로 `mission_node.py` 의 수정을 되돌려도 그 파일은 전부 통과했다.
+#
+# 여기서는 **진짜 상태머신을 SEARCH_BACK 까지 굴린 뒤** 재발견 가지가 실제로
+# `_cancel_intent = 'guide_stop'` 을 세우고 취소하는지 본다. 수정을 되돌리면
+# 여기가 깨진다 — 그게 이 시험의 존재 이유다.
+#
+# ⚠ 하네스의 `cancel_current_goal` 은 가짜라 intent 를 안 본다. 그래서 시험이
+#   그 함수를 **감싸서** 호출 순간의 `node._cancel_intent` 를 기록한다.
+#   (하네스 자체를 고치면 다른 시험의 `env.cancels` 계약이 흔들린다.)
+
+
+def _spy_cancel(env):
+    """취소가 불릴 때의 `_cancel_intent` 를 순서대로 기록한다."""
+    seen = []
+    inner = env.node.cancel_current_goal
+
+    def wrapped():
+        seen.append(env.node._cancel_intent)
+        return inner()
+
+    env.node.cancel_current_goal = wrapped
+    return seen
+
+
+def _drive_to_search_back(env):
+    """GUIDE → 놓침 → HOLD → hold_sec 경과 → SEARCH_BACK 까지 진짜 경로로 굴린다."""
+    T.run(env, 0.1, PERSON)
+    T.run(env, 3.6, EMPTY)                      # lost_sec(3.0) 초과 → HOLD
+    assert env.node.state == State.HOLD, '전제 실패 — HOLD 에 못 갔다'
+    T.run(env, hold_sec() + 0.6, EMPTY)         # hold_sec 경과 → SEARCH_BACK
+    assert env.node.state == State.SEARCH_BACK, \
+        f'전제 실패 — SEARCH_BACK 에 못 갔다 (지금 {env.node.state})'
+
+
+def test_h_p0_2_refind_cancel_carries_guide_stop_intent():
+    """🎯 재발견 취소는 **`guide_stop`** 이어야 한다 — 일반 취소면 직렬화가 안 걸린다."""
+    env = T.make_env()
+    _drive_to_search_back(env)
+    intents = _spy_cancel(env)
+
+    # seen_sec 연속 검출 → 재발견 가지
+    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 0.6, PERSON)
+
+    assert env.node.state == State.GUIDE, '재발견했는데 GUIDE 로 복귀하지 않았다'
+    assert intents, '재발견 복귀인데 취소를 아예 안 불렀다 — 역행 goal 이 살아 있다'
+    assert intents[-1] == 'guide_stop', (
+        '🔴 §91 P0-2 재발생 — 재발견 취소가 일반 취소(intent=%r)로 나갔다. '
+        'B 직렬화가 안 걸려 역행 goal 의 취소가 종결되기 전에 다음 GUIDE goal 이 '
+        '나간다.' % (intents[-1],))
+
+
+def test_h_p0_2_hold_return_needs_no_cancel_which_is_why_only_search_back_broke():
+    """역회귀 — HOLD 복귀는 **취소 자체가 없다**(로봇이 이미 서 있다).
+
+    이 대비가 §91 P0-2 의 요지다: 두 재발견 가지 중 취소를 내는 쪽은 SEARCH_BACK
+    뿐이고, 그래서 그 한 곳만 직렬화 의도를 빠뜨릴 수 있었다.
+    """
+    env = T.make_env()
+    T.run(env, 0.1, PERSON)
+    T.run(env, 3.6, EMPTY)
+    assert env.node.state == State.HOLD
+    intents = _spy_cancel(env)
+
+    T.run(env, 1.5, PERSON)                     # HOLD 복귀 창(4.0 − seen_sec) 안
+
+    if env.node.state == State.GUIDE:
+        assert not intents, \
+            f'HOLD 복귀가 취소를 냈다 — 로봇은 이미 서 있다: {intents}'
+    else:
+        # seen_sec 3.0 · hold_sec 4.0 이면 복귀 창이 1초뿐이라 여기로 온다.
+        # 그 사실 자체를 고정한다 (§91 P1-1 · 샷리스트 ⑪ 이 이 값에 의존한다).
+        assert env.node.state == State.SEARCH_BACK, \
+            f'HOLD 도 GUIDE 도 아닌 곳으로 갔다: {env.node.state}'

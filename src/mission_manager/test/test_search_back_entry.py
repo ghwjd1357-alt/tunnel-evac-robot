@@ -199,6 +199,12 @@ def make_env(tf_ok=True, state=State.GUIDE):
 
     def _cancel():
         cancels.append(1)
+        # 🔴 08-23 §91 — 생산 `cancel_current_goal`(mission_node.py:735~736)은 의도를
+        #   **읽고 즉시 비운다**("다음 취소로 새지 않게"). 구판 하네스는 안 비웠고,
+        #   그래서 앞선 취소의 `safety_stop` 이 다음 취소까지 남아 보였다.
+        #   실물과 다른 하네스는 시험이 틀린 것이다(`PITFALLS §19-⑤`) — 특히 의도를
+        #   감시하는 시험이 **엉뚱한 이유로** 붉거나 푸르게 된다.
+        node._cancel_intent = None
         node.goal_active = False
         if stop_ok[0]:
             node.on_safety_stop_confirmed()
