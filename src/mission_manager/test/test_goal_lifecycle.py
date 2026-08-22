@@ -801,3 +801,49 @@ def test_combo_reset_hard_intent_clears_serialization():
     node.on_cmd(types.SimpleNamespace(data='reset'))
     assert not node.goals._stop_pending                # ★ hard 로 해제됨
     assert node.state == State.PATROL
+
+
+# ============================================================
+# ★ §91 P0-2 — SEARCH_BACK 재발견은 취소 종결 전에 다음 goal 을 보내면 안 된다
+#   검토 재현 관찰값: `sent_goals=2 · old_cancel_called=True · stop_pending=False
+#   · old_result_terminal_pending=True` — 사람을 다시 찾은 **바로 그 순간**에
+#   이전 회전 goal 과 다음 탈출 goal 의 소유권이 겹쳤다.
+#   원인은 재발견이 `intent=None`(일반 취소)을 써서 B 직렬화를 안 건드린 것이다.
+# ============================================================
+def test_refind_cancel_blocks_the_next_goal_until_terminal():
+    """🔴 `guide_stop` 으로 취소하면 **종결 전에는 신규 goal 이 0건**이어야 한다."""
+    env = make_gm()
+    handle = send_and_accept(env, tag='search_back')
+    assert len(env.goals) == 1
+
+    env.gm.cancel_current_goal(intent='guide_stop')
+    assert handle.cancel_called
+    assert env.gm.stop_pending, 'guide_stop 인데 직렬화가 안 걸렸다'
+
+    # 재발견 직후 GUIDE 가 다음 goal 을 시도한다 — 종결 전이므로 나가면 안 된다
+    env.gm.send_goal({'x': 0.5, 'y': -10.65}, tag='guide', state_name='GUIDE')
+    assert len(env.goals) == 1, (
+        f'취소 종결 전에 신규 goal 이 나갔다 (sent_goals={len(env.goals)})')
+
+    # 종결이 관찰되면 봉쇄가 풀리고 그때 한 번 나간다
+    handle.cancel_response_cb(fake_cancel_response(1))
+    handle.result_cb(fake_result(CANCELED))
+    assert not env.gm.stop_pending, '종결됐는데 봉쇄가 안 풀렸다'
+    env.gm.send_goal({'x': 0.5, 'y': -10.65}, tag='guide', state_name='GUIDE')
+    assert len(env.goals) == 2
+
+
+def test_plain_cancel_does_not_serialize_which_is_why_refind_needed_the_fix():
+    """🔴 역회귀 — 일반 취소(intent=None)는 **직렬화하지 않는다**는 사실 고정.
+
+    이 성질 자체는 설계다(알람 재지정 등은 봉쇄하면 안 된다). 그래서 재발견 쪽이
+    `guide_stop` 을 **명시해야** 한다는 것이 §91 P0-2 의 요지다. 이 단언이 깨지면
+    위 테스트가 무엇을 지키는지도 같이 무의미해진다.
+    """
+    env = make_gm()
+    handle = send_and_accept(env, tag='search_back')
+    env.gm.cancel_current_goal()            # intent=None
+    assert handle.cancel_called
+    assert not env.gm.stop_pending
+    env.gm.send_goal({'x': 0.5, 'y': -10.65}, tag='guide', state_name='GUIDE')
+    assert len(env.goals) == 2              # 봉쇄 없음 = 옛 거동

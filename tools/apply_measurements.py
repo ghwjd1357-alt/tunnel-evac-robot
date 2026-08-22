@@ -204,9 +204,13 @@ def validate_text(text):
     #   (`odom_guard.py` 의 `VX_ABS_MAX` 와 같은 클래스다 — 그쪽은 옮겼는데 여기는 빠졌다).
     #   증상: 정상 값 `normal_speed 0.20` 을 넣으면 **검증이 거부**한다.
     #   🔴 이 상수는 `.ino` 를 따라간다 — 다음에 상한이 바뀌면 여기도 같이 옮긴다.
-    if ns > MAX_LINEAR_CMD:
-        return wp, [f'불변조건: normal_speed({ns}) 가 구동부 명령 상한 '
-                    f'{MAX_LINEAR_CMD} 를 넘는다']
+    # 🔴 08-23 §91 P1-3 — `normal_speed` 만 검사하고 **`guide_speed` 는 안 봤다.**
+    #   `--guide-speed 0.50` 을 주입해도 검증이 통과했다. 두 필드 모두 같은 구동부
+    #   상한을 소비하므로 **같은 경계로 검사한다.**
+    for _name, _v in (('normal_speed', ns), ('guide_speed', gs)):
+        if _v > MAX_LINEAR_CMD:
+            return wp, [f'불변조건: {_name}({_v}) 가 구동부 명령 상한 '
+                        f'{MAX_LINEAR_CMD} 를 넘는다']
     return wp, []
 
 
