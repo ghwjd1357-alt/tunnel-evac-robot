@@ -810,6 +810,13 @@ def test_combo_reset_hard_intent_clears_serialization():
 #   이전 회전 goal 과 다음 탈출 goal 의 소유권이 겹쳤다.
 #   원인은 재발견이 `intent=None`(일반 취소)을 써서 B 직렬화를 안 건드린 것이다.
 # ============================================================
+# 🔴 08-23 §91 P0-2 — 아래 둘은 **`GoalManager` 기구**를 검사한다.
+#   ⚠ 이것만으로는 결함을 못 잡는다. 실제로 확인했다: `mission_node.py` 의 수정을
+#     되돌려도 이 파일은 47 passed 였다. 두 시험이 `cancel_current_goal(intent=...)` 를
+#     **직접 부르기 때문**에 호출 자리를 한 번도 안 지난다 = 동어반복이다.
+#   → 호출 자리를 지키는 시험은 `test_hold.py` 의 `test_h_p0_2_*` 다. 짝으로 읽어라.
+#     여기(기구) + 거기(호출 자리) 둘 다 있어야 이 P0 가 봉인된다.
+
 def test_refind_cancel_blocks_the_next_goal_until_terminal():
     """🔴 `guide_stop` 으로 취소하면 **종결 전에는 신규 goal 이 0건**이어야 한다."""
     env = make_gm()

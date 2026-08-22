@@ -239,7 +239,7 @@ EMI/전원 지문이고, 셋이 **버스파워 허브** 하나에 매달려 있�
 
 ## 최종 회귀
 
-- 기준선(**08-23 갱신** — §91 P0-2 +2 · P0-3 거동고정 +2 · P2-1 라이다등가 +3): pytest **273 passed** / adapter **120** / tools **349 + skip 1** /
+- 기준선(**08-23 갱신** — §91 P0-2 기구+2·호출자리+2 · P0-3 거동고정 +2 · P2-1 라이다등가 +3): pytest **275 passed** / adapter **120** / tools **349 + skip 1** /
   colcon **460 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** /
   test_gate_regression **14 케이스**.
 - 🔴 `colcon` · `doc_check.sh` 는 **이번 묶음에서 재실행하지 않았다** — 정본 부채 때문에
