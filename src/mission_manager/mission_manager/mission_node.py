@@ -1079,7 +1079,18 @@ class MissionNode(Node):
                 self.enter_rescue()
             elif self.monitor.visible(zone='any') or cam == 'ok':
                 # ★ 재발견 → 유도 재개
+                # 🔴 08-23 §91 P0-2 — 여기서 **일반 취소**(intent=None)를 쓰면
+                #   B 직렬화를 안 건드려서, 역행 goal 의 취소가 종결되기 전에
+                #   다음 tick 의 GUIDE 가 새 goal 을 보낸다. 재현 관찰값:
+                #   `sent_goals=2 · old_cancel_called=True · stop_pending=False ·
+                #    old_result_terminal_pending=True` — **사람을 다시 찾은 바로 그
+                #   순간에 이전 회전 goal 과 다음 탈출 goal 의 소유권이 겹친다.**
+                #   → `guide_stop` 으로 올려 CANCELED 종결까지 신규 goal 을 봉쇄한다.
+                #     이미 검토된 기구이고 `CANCEL_STOP_MAX_BLOCKS`(60 tick)로 유한하다.
+                #   ⚠ §90.2 의 '미지 goal(응답 등록 실패)' 봉쇄는 **여기서 안 닫힌다** —
+                #     그건 GoalManager 쪽 보완이고 예약으로 남는다.
                 self.get_logger().info('★ 추종자 재발견 → GUIDE 복귀')
+                self._cancel_intent = 'guide_stop'
                 self.cancel_current_goal()
                 self.refind_since = None
                 self.monitor.reset('any')    # [reset-role] refind-return — 복귀 즉시 재-놓침 방지

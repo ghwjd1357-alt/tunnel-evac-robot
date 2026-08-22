@@ -338,3 +338,62 @@ def test_h18b_a_scan_within_the_deadline_is_left_alone():
     finally:
         MN.time.monotonic = real
     assert env.node.state == MN.State.SCAN_AREA
+
+
+# ============================================================
+# 🔴 08-23 §91 P0-3 — /scan 이 죽었을 때 GUIDE 가 **계속 간다**는 사실을 못박는다
+# ============================================================
+#
+# 검토 §91 P0-3 은 *"GUIDE 중 scan publisher 중단 시 1 tick 안에 정지 명령과 신규 goal
+# 차단"* 을 요구했다. **지금 코드는 그렇게 하지 않는다** — `mission_node.py` 의 GUIDE
+# 분기는 `'⚠ /scan 끊김 — 추종감시 불가 (유도는 계속)'` 을 찍고 goal 을 유지한다.
+#
+# 🔴 이건 버그가 아니라 **의도된 설계**다. `FollowerMonitor.lost()` 주석이 근거를 적어
+#   뒀다: *"놓침 선언은 비싼 역행을 일으키므로 데이터 없이 내리면 안 됨 — 대피 유도는
+#   계속하는 게 안전한 쪽."* 불타는 터널에서 사람을 데리고 나가던 로봇이 라이다가
+#   죽었다고 그 자리에 서면, 그게 더 위험하다는 판단이다.
+#
+# 🔴 그런데 **촬영에서는 전제가 뒤집힌다.** 불이 없고, 대본상 사람과 장애물이 경로
+#   근처에 있다. 앞을 못 보면서 달리는 쪽이 위험하다.
+#
+# 그래서 08-23 에는 **코드를 안 바꾸고** 다음 셋으로 처리했다:
+#   ① 런북 §10·§12 = 라이다 이상 인지 **즉시 E-stop · 그 테이크 폐기** (사람이 막는다)
+#   ② 이 검사 = 현재 거동을 **명시적으로 고정**한다. 누가 조용히 뒤집으면 여기서 깨진다.
+#   ③ `MASTER_PLAN §7` 예약 = 어느 쪽을 정본으로 삼을지 사용자 결정 항목으로 올린다.
+#
+# ⚠ 코드를 안 고친 이유를 남긴다: 정지를 새로 넣으려면 **이미 4회차 불승인 상태인
+#   정지 직렬화 사슬**(§90.1·§90.2)에 경로를 하나 더 붙여야 하고, 실차 검증 없이
+#   새벽에 그걸 하는 것이 `AGENTS §6` 이 말하는 발산이다.
+#
+# 🔵 이 검사를 **깨뜨리는 쪽이 정답이 되는 날**이 온다 — 그때 이 주석째로 갈아엎어라.
+
+
+def test_h_p0_3_guide_keeps_driving_while_scan_is_dead():
+    """🔴 현재 계약: /scan 이 죽어도 GUIDE 는 유지되고 goal 도 안 취소된다."""
+    env = T.make_env()
+    T.run(env, 1.0, PERSON)                 # 정상 유도 중
+    goals_before, cancels_before = len(env.goals), env.cancels
+
+    T.tick_only(env, 3.0)                   # 🔴 /scan 한 장도 안 온다 (timeout 1.0s)
+
+    assert env.node.monitor.scan_stale(), '전제 실패 — stale 이 안 됐다'
+    assert env.node.state == State.GUIDE, \
+        ('GUIDE 가 유지되지 않았다. 정지를 넣기로 **결정**했다면 이 검사와 위 주석을 '
+         '같이 갈아엎어라 — 조용히 통과시키지 마라.')
+    assert env.cancels == cancels_before, \
+        '🔴 거동이 바뀌었다: scan 끊김에 취소가 붙었다 (§91 P0-3 결정 없이)'
+    assert len(env.goals) == goals_before, \
+        '🔴 거동이 바뀌었다: scan 끊김 중에 새 goal 이 나갔다'
+
+
+def test_h_p0_3_the_only_thing_scan_death_does_is_warn():
+    """그 구간에 로봇이 하는 일은 **경고 한 줄**뿐이라는 것까지 고정한다."""
+    env = T.make_env()
+    T.run(env, 1.0, PERSON)
+    env.logs.clear()
+    T.tick_only(env, 3.0)
+
+    warned = [m for m, _ in env.logs if '/scan 끊김' in m]
+    assert warned, '🔴 라이다가 죽었는데 경고조차 안 나왔다 — 관제가 모른다'
+    assert all('추종감시 불가' in m for m in warned), \
+        f'경고 문구가 바뀌었다 — 런북 §10 이 이 문구를 인용한다: {warned}'

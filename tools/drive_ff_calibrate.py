@@ -57,6 +57,13 @@ LOW_SPEED_HOLD_PWM = 30.0
 MIN_EFFECTIVE_WHEEL_CMD = 0.020
 FEEDFORWARD_MAX_PWM = 145.0
 WHEEL_KP = 30.0
+# 🔴 2026-08-23 §91 P1-3 — **아래 상수 묶음은 08-22 16:20 펌웨어(`60bb3c2`)와 어긋난다.**
+#   굽힌 값: WHEEL_KP 30→60 · INTEGRAL_PWM_LIMIT 20→40 · MAX_LINEAR_CMD 0.12→0.20.
+#   여기 수치를 **일부러 안 옮겼다** — 이 파일은 *그때 그 보드로 낸 교정 결과를 재현*하는
+#   용도라 값을 바꾸면 과거 산출을 못 되돌린다. 대신 규칙을 못박는다:
+#   🔴 08-22 이후에 딴 bag 으로 이 도구를 돌리면 **산출이 무효다.** 새 보드로 재교정하려면
+#      이 상수들을 `.ino` 현재값으로 갱신한 뒤 `--point` 를 새로 따야 한다.
+#   정본 = `docs/REAL_ROBOT_VALUES.md §1-n` · `firmware/…v1_4.ino`.
 WHEEL_KI = 5.0
 INTEGRAL_PWM_LIMIT = 20.0
 # 시행 당시 보드에 있던 값. 🔴 산출은 "그때 무엇이 실려 있었나"에 의존한다.

@@ -19,7 +19,7 @@
 저속은 '적용'됐고 goal 도 살아 있는데 주행만 0 이다. 진단이 아무것도 안 뜬다.
 08-20 에 세 번 당한 **무증상 실패**와 같은 형태다.
 
-구동부 명령 상한이 `0.12 m/s` 이므로, `D_lin` 이 그 근처면 *"저속 유도"* 라는
+구동부 명령 상한이 `MAX_LINEAR_CMD`(08-22 이후 `0.20 m/s`) 이므로, `D_lin` 이 그 근처면 *"저속 유도"* 라는
 개념 자체가 성립하지 않는다. **그 판정이 이 측정의 목적이다.**
 
 무엇을 재는가
@@ -56,6 +56,13 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+
+# 🔴 구동부 명령 상한 — `.ino` `MAX_LINEAR_CMD` 의 복사본이다 (2026-08-23 §91 P1-3).
+#   구판은 0.12 를 세 자리에 하드코딩했고, 08-22 에 펌웨어가 0.20 으로 올라갔는데
+#   따라가지 않아 **여유·판정을 틀린 기준으로 계산**했다.
+#   정본 = `docs/REAL_ROBOT_VALUES.md §1-n`.
+MAX_LINEAR_CMD = 0.20
+
 
 DEFAULT_STEPS = (0.04, 0.06, 0.08, 0.10, 0.12)
 
@@ -153,15 +160,16 @@ class LinearSweep(Node):
             return 1
         D, a, n = r
         print(f'선형 불감대 D_lin = {D:.4f} m/s   전달률 a = {a:.3f}   (점 {n}개)')
-        print(f'구동부 명령 상한 = 0.12 m/s  →  여유 = {0.12 - D:.4f} m/s '
-              f'({(0.12 - D) / 0.12 * 100:.0f}%)')
+        print(f'구동부 명령 상한 = {MAX_LINEAR_CMD} m/s  →  여유 = '
+              f'{MAX_LINEAR_CMD - D:.4f} m/s '
+              f'({(MAX_LINEAR_CMD - D) / MAX_LINEAR_CMD * 100:.0f}%)')
         print()
-        if D >= 0.12:
+        if D >= MAX_LINEAR_CMD:
             print('🔴 D_lin 이 명령 상한 이상이다 — 저속 유도가 성립하지 않는다.')
             print('   guide_speed 를 낮추는 방향으로는 못 푼다. 구동부(FF·게인) 문제다.')
         elif D >= 0.08:
             print('🔶 여유가 좁다. guide_speed 를 D_lin 위로 확실히 띄워야 한다.')
-            print(f'   권장 guide_speed ≥ {min(0.12, D * 1.5):.3f} (D_lin 의 1.5배)')
+            print(f'   권장 guide_speed ≥ {min(MAX_LINEAR_CMD, D * 1.5):.3f} (D_lin 의 1.5배)')
         else:
             print(f'🟢 여유가 있다. 권장 guide_speed = {max(D * 1.5, 0.06):.3f} '
                   f'~ 0.10 (normal_speed 보다 낮게)')
