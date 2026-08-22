@@ -1053,5 +1053,25 @@
     "id": "0822-eyeball-sweep-instead-of-rg-89",
     "path": "docs/CURRENT_HANDOFF.md",
     "anchor": "전수 대조는 눈이 아니라"
+  },
+  {
+    "id": "0822-cancel-skipped-drags-a-live-goal-into-fault-90",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "취소를 못 보낸 채 FAULT 로 넘어가면 살아 있는 goal 을 끌고 간다"
+  },
+  {
+    "id": "0822-unknown-goal-left-behind-allows-the-next-one-90",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "응답 등록이 실패한 goal 은 미지 상태로 남고 다음 goal 이 허용된다"
+  },
+  {
+    "id": "0822-lower-bound-count-regression-passes-a-missing-entry-90",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "하한·문자열 개수 회귀는 새 진입점 누락을 통과시킨다"
+  },
+  {
+    "id": "0822-imu-watch-still-blind-on-low-rate-and-curves-90",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "IMU 기준 감시도 저발행률과 곡선 전환에서 판정 공백이 남는다"
   }
 ]
