@@ -24,3 +24,7 @@ firmware/**/build/
 firmware/**/out/
 firmware/*.hex
 firmware/*.elf
+
+# 🔴 apply_measurements.py 가 만드는 백업. 진짜 설정 옆에 낡은 설정이 놓이면
+#   새벽에 그걸 읽는다. 원본은 git 이력에 있다.
+*.yaml.bak
