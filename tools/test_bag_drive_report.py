@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`bag_drive_report.py` 회귀 — 08-21 실측을 그대로 박는다.
 
-🔴 이 도구가 낸 결론(오른쪽 엔코더 결손)으로 **로봇을 뜯는다.** 역산이 틀리면
+🔴 이 도구가 낸 결론(우측 합성 계측 비대칭)으로 **어느 쪽을 볼지 정한다.** 역산이 틀리면
 아침 두 시간이 엉뚱한 곳으로 간다. 숫자는 전부 08-21 21:32 리허설 bag 에서 나온
 실측이다 — 지어낸 값으로 통과시키면 도구가 죽어도 초록이다.
 """
@@ -18,7 +18,7 @@ class SolveKrTest(unittest.TestCase):
     HEALTHY = (0.0958, +0.0031)    # rehearsalD_0821 17:17
 
     def test_b1_the_real_failure_solves_to_a_half(self):
-        """🎯 이 숫자가 진단의 전부다 — 0.525 = 정확히 절반."""
+        """🎯 이 숫자가 진단의 전부다 — ≈0.52 는 **합성** 비율이다(채널이 아니다)."""
         r, weak, k = B.solve_kr(*self.BROKEN)
         self.assertEqual('right', weak)
         self.assertAlmostEqual(0.525, k, places=3)

@@ -35,6 +35,10 @@ IMPLEMENT_GATE = Ref("docs/TEST_GATES.md", "1")
 PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
     "process": (
         Ref("docs/AI_CONTEXT.md"),
+        # 08-22 검토 §89: 두 프로필만 유효 결정 색인이 없었다 — §89.6(구동계 판정기)·
+        # §89.7(문서 단정 전수)이 회수 안 되는 이유가 이것이었다. 나머지 프로필은
+        # 전부 §8 을 든다.
+        Ref("docs/MASTER_PLAN.md", "8"),
         Ref("docs/TEST_GATES.md", "7"),
     ),
     "docs": (
@@ -43,6 +47,10 @@ PROFILE_REFS: dict[str, tuple[Ref, ...]] = {
     ),
     "firmware": (
         Ref("docs/FIRMWARE_REBUILD.md"),
+        # 08-22 검토 §89: 두 프로필만 유효 결정 색인이 없었다 — §89.6(구동계 판정기)·
+        # §89.7(문서 단정 전수)이 회수 안 되는 이유가 이것이었다. 나머지 프로필은
+        # 전부 §8 을 든다.
+        Ref("docs/MASTER_PLAN.md", "8"),
         Ref("docs/REAL_ROBOT_VALUES.md", "1"),
         Ref("docs/ELECTRICAL_BASELINE.md", "4"),
         # 검토 §43: E-stop 물리 권위(릴레이 DC 차단·퓨즈 협조)의 전제조건·재개방 조건이
@@ -250,6 +258,14 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         # 검토 §77.2: dmesg 판정기는 파일 위치가 tools/ 여도 계약이 펌웨어 현장 증거다.
         # 짝 회귀까지 같은 프로필로 묶어 커버리지 판정과 원시 증거 해석을 함께 회수한다.
         "tools/dmesg_coverage_check.py", "tools/test_dmesg_coverage.py",
+        # 08-22 검토 §89.6: 구동계 판정기 7종이 전부 라우팅 밖이었다(`review` 가
+        # unknown 으로 fail-closed 회수). 이들은 `/odom` 이 참인지를 묻는 도구이고
+        # 그 기준(엔코더 4채널·ODOM_WHEEL_BASE)은 펌웨어와 `REAL_ROBOT_VALUES §1`
+        # 이 함께 소유한다 — 상수가 바뀌면 이 판정기들이 같이 틀린다.
+        "tools/drive_watch.py", "tools/test_drive_watch.py",
+        "tools/drive_health.py", "tools/test_drive_health.py",
+        "tools/bag_drive_report.py", "tools/test_bag_drive_report.py",
+        "tools/drive_encoder_check.py",
     )),
     ("docs", ("docs/*.md",)),
 )

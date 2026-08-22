@@ -1018,5 +1018,40 @@
     "id": "0822-debounce-constant-from-arithmetic-not-replay-88",
     "path": "src/perception_adapter/perception_adapter/adapter_node.py",
     "anchor": "평균×시간 산술로 디바운스 상수를 정하지 않는다 — 흘려서 잰다"
+  },
+  {
+    "id": "0822-deadline-armed-in-only-one-entry-89",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "안전 상한은 그것을 여는 모든 진입이 한 곳에서 무장해야 한다"
+  },
+  {
+    "id": "0822-steady-math-called-by-a-ros-timer-89",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "계산이 정상시계여도 그것을 부르는 타이머가 ROS 시계면 소용없다"
+  },
+  {
+    "id": "0822-swallowing-an-exception-is-not-cleanup-89",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "예외를 삼키는 것과 수명주기를 정리하는 것은 다르다"
+  },
+  {
+    "id": "0822-in-class-sweep-misses-the-same-class-outside-89",
+    "path": "src/mission_manager/mission_manager/speed_manager.py",
+    "anchor": "한 클래스의 내부 전수는 그 클래스 밖의 같은 결함을 못 센다"
+  },
+  {
+    "id": "0822-cmdvel-cannot-be-the-reference-for-sensor-fault-89",
+    "path": "tools/drive_watch.py",
+    "anchor": "은 센서 이상의 기준이 될 수 없다 — 자이로가 기준이다"
+  },
+  {
+    "id": "0822-inequality-regression-misses-the-default-89",
+    "path": "tools/drive_watch.py",
+    "anchor": "숫자 부등식 회귀는 명시값만 지키고 기본값을 안 지킨다"
+  },
+  {
+    "id": "0822-eyeball-sweep-instead-of-rg-89",
+    "path": "docs/CURRENT_HANDOFF.md",
+    "anchor": "전수 대조는 눈이 아니라"
   }
 ]

@@ -5,7 +5,7 @@
     python3 tools/bag_drive_report.py <bag 디렉터리> [<bag> ...]
 
 🔴 **왜 이 도구가 있나** — 08-21 밤에 이 분석을 임시 스크립트로 돌려
-`오른쪽 엔코더 결손(kR=0.525)` 을 확정했다(`REAL_ROBOT_VALUES §1-m-11`).
+`우측 합성 계측 ≈0.52×` 를 확인했다(1채널 dead 는 가설)(`REAL_ROBOT_VALUES §1-m-11`).
 그런데 그 스크립트를 남기지 않아 **결론만 있고 방법이 재현 불가**였다.
 독립 검토가 그 진단을 확인하려 해도 다시 짜야 한다. 그래서 도구로 되살린다.
 
@@ -25,7 +25,7 @@
     직진:  odom속도 = v(kL+kR)/2 · odomω = v(kR−kL)/BASE
            r = odomω·BASE/(2·odom속도) = (kR−kL)/(kR+kL)      ← v 가 지워진다
     성한 쪽을 1 로 두면  약한 쪽 = (1−|r|)/(1+|r|)
-    🔴 0.5 근처 = 그 쪽 엔코더 2개 중 하나가 0 을 낸다(펌웨어가 평균하므로).
+    🔴 0.5 근처면 **1채널 dead 가 선두 가설**이다 — 확정은 개별 바퀴 시험이 한다.
 
 정본 = `REAL_ROBOT_VALUES §1-m-11` · 함정 = `PITFALLS §18`.
 짝 도구 = `tools/drive_health.py --straight`(실시간) · `tools/drive_encoder_check.py`(바퀴 특정).
