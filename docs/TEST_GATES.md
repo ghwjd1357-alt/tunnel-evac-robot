@@ -55,7 +55,7 @@ grep -m1 nav2_params /tmp/*/launch.log
 **0.236 m ≤ 0.3 m**, negative 는 지도밖·벽너머·막힌 goal 전부 ABORTED · 정상 대조
 **0.218 m**. 표준 실행값(0.138 / 0.085)과 **다르다** — 그 차이가 검증의 내용이다.
 
-기준선 (**08-02 재갱신 4** — 위 34건 위에 **예약 16 회귀 23건**(`test_search_back_entry.py` — SEARCH_BACK 진입 봉인 11 + 검토 §26 의 **GUIDE 진입 세대** 8 + 검토 §27 의 **센서 관측 세대** 4) 편입 · **08-12 예약 20 `ast` 전환 +2**): pytest **269 passed** / colcon **457 tests, 0 fail, 3 skip**(08-19 `tunnel_interfaces` 편입 +5) / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
+기준선 (**08-02 재갱신 4** — 위 34건 위에 **예약 16 회귀 23건**(`test_search_back_entry.py` — SEARCH_BACK 진입 봉인 11 + 검토 §26 의 **GUIDE 진입 세대** 8 + 검토 §27 의 **센서 관측 세대** 4) 편입 · **08-12 예약 20 `ast` 전환 +2** · **08-23 §91 P0-2 재발견취소 직렬화 +2 · P0-3 scan사망중 GUIDE 거동고정 +2**): pytest **273 passed** / colcon **460 tests, 0 fail, 3 skip**(08-23 §91 P2-1 `test_lidar_standalone_equivalence` +3)(08-19 `tunnel_interfaces` 편입 +5) / **test_harness_guards 24 검사** / test_gate_regression **14 케이스** / E2E 4종 PASS **+ 쌍굴 PASS**.
 ⚠ 이 줄을 포함해 **기준선 수치가 적힌 모든 자리**는 `tools/gate_baseline_scan.py` 가 전수로
 대조한다(현재 13 자리). 수치 뒤 단위어(`passed`/`tests`/`검사`/`케이스`)를 떼면 검사에서 빠지고,
 기준선이 **아닌** 수를 같은 줄에 적을 때는 `케이스 12` 처럼 단위어를 **앞에** 쓴다.
