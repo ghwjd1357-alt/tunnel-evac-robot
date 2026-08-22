@@ -54,7 +54,7 @@ BAD = [
     ('--cluster-max-width=-1', None), ('--detect-range', 'inf'),
     ('--min-points', '0'), ('--min-points=-2', None),
     ('--low-west', '1.0'), ('--low-west', 'a,b'), ('--low-west', 'nan,-10.6'),
-    ('--normal-speed', '0.5'),          # 검증 실패 (상한 0.12)
+    ('--normal-speed', '0.5'),          # 검증 실패 (상한 0.20 — 08-23 재교정)
 ]
 
 
