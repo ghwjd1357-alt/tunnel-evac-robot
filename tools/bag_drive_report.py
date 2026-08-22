@@ -44,10 +44,14 @@ BAL_OK = 0.05        # |r| 이 이 아래면 좌우 균형 정상
 def solve_kr(odom_lin, odom_w, base=ODOM_WHEEL_BASE):
     """직진 구간의 (속도, ω) 에서 약한 쪽 계수를 역산한다. 순수 함수 — 회귀 대상.
 
+    🔴 **`k` 는 정규화 비율이지 절대 교정값이 아니다** (§87.3). `kL=1` 은 가정이고,
+    bag 이 식별하는 것은 "약한 쪽 합성 계측이 성한 쪽의 k 배" 까지다. 어느 **채널**이
+    얼마나인지는 개별 바퀴 시험이 가른다.
+
     반환 (r, weak, k):
       r    = (kR−kL)/(kR+kL). 0 이면 좌우 같다
-      weak = 'right' | 'left' | None
-      k    = 약한 쪽 계수 (성한 쪽을 1.0 으로). None 이면 판정 불가
+      weak = 'right' | 'left' | None — **쪽**이지 채널이 아니다
+      k    = 약한 쪽 **합성** 계수 (성한 쪽을 1.0 으로). None 이면 판정 불가
     """
     if odom_lin is None or abs(odom_lin) < 1e-6:
         return None, None, None
@@ -143,7 +147,11 @@ def report(path):
             side = '오른쪽' if weak == 'right' else '왼쪽'
             print(f'  🔴 **{side}이 {k:.3f} 배로 읽힌다** (r={r:+.4f})')
             if abs(k - 0.5) < 0.12:
-                print(f'     → 0.5 에 가깝다 = **{side} 엔코더 2개 중 하나가 0 을 낸다**')
+                # 🔴 §87.3 — bag 이 식별하는 것은 **합성 비율**까지다. 같은 0.52 를
+                #   (1.0, 0.05) 도 (0.525, 0.525) 도 만든다. 확정은 개별 바퀴 시험이다.
+                print(f'     → 0.5 에 가깝다. **선두 가설 = {side} 채널 하나가 0**')
+                print(f'     🔴 확정 아님 — 두 채널이 함께 낮아도 같은 값이 나온다.')
+                print(f'        `drive_encoder_check.py --wheels=FR`/`--wheels=RR` 로 가른다.')
     # ── ① 배율 (참고 — 이것만으로는 반지름과 안 갈린다) ──────────────
     rb = []
     for a, b in segments(d['/cmd_vel'], 'rotation', 1.5):

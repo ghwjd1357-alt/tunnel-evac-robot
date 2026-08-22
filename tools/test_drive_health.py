@@ -53,7 +53,8 @@ class StraightVerdictTest(unittest.TestCase):
         k = (1 - abs(r)) / (1 + abs(r))
         self.assertAlmostEqual(0.525, k, places=3)
         self.assertIn('0.525', out)
-        self.assertIn('하나가 안 센다', out)
+        self.assertIn('선두 가설', out)
+        self.assertNotIn('엔코더 2개 중 하나가 안 센다.', out)  # §87.3 단정 금지
 
     def test_04_the_weak_side_is_not_hardcoded(self):
         """🔴 부정 회귀 — 부호를 뒤집으면 **왼쪽**이 나와야 한다.

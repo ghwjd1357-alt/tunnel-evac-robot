@@ -943,5 +943,50 @@
     "id": "0821-schema-gap-declared-vs-validated-86",
     "path": "src/perception_adapter/perception_adapter/adapter_node.py",
     "anchor": "선언과 목록의 차집합만 잠그면 validator 실제 판정·비수치·동적 선언은 여전히 밖이다"
+  },
+  {
+    "id": "0822-stop-declared-but-not-armed-87",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "정지를 선언하는 것과 정지를 무장하는 것은 다르다"
+  },
+  {
+    "id": "0822-odom-ratio-identifies-side-not-channel-87",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "bag 은 좌우 합성 비율까지만 식별한다 — 채널은 개별 시험이 가른다"
+  },
+  {
+    "id": "0822-ekf-db-is-diagnostic-not-driving-authorization-87",
+    "path": "src/tunnel_bringup/config/ekf_real_db.yaml",
+    "anchor": "우회 설정은 진단용이지 주행 허가가 아니다"
+  },
+  {
+    "id": "0822-nonfinite-confidence-folds-into-leaving-87",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "신뢰도는 유한한 0~1 만"
+  },
+  {
+    "id": "0822-victim-coordinate-not-scoped-to-generation-87",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "신고 좌표는 그 세대에서 얻은 것만 쓴다"
+  },
+  {
+    "id": "0822-scan-goal-has-no-wallclock-deadline-87",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "명시 실패에만 상한이 있고 무응답에는 없으면 그것이 무한이다"
+  },
+  {
+    "id": "0822-sweep-forgets-what-it-saw-midway-87",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "훑는 상태는 본 것을 기억해야 훑는 의미가 있다"
+  },
+  {
+    "id": "0822-new-config-bypasses-fail-fast-validator-87",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "게이트는 엄격한 bool 로 검사한다"
+  },
+  {
+    "id": "0822-regression-did-not-read-the-changed-nav2-file-87",
+    "path": "src/tunnel_bringup/config/nav2_params_real_db.yaml",
+    "anchor": "바꾼 파라미터 파일로 돌리지 않은 회귀는 그 변경을 검증하지 않았다"
   }
 ]

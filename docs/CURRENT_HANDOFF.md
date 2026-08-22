@@ -24,14 +24,10 @@
 ⚠ **"이미 덮였다" 가 아니다** — 넷 다 살아 있는 결함이고 재개방 조건이 붙어 있다.
 전제조건은 **사람이 지킨다**(촬영 런북 §3 네 문장).
 
-🔴 **여전히 유효한 08-21 새벽 사실 넷:**
-- **`SEARCH_BACK` 의 180° 턴은 유도 방향이 서쪽일 때만 난다**(예약 58 · 코드 미변경).
-  → 탈출구를 **아래 복도 서쪽**으로 잡아 회피했다.
-- **2차 화재 `reset` 우회를 철회**했다 — `reset` 은 유도 중인 사람을 잃는다.
-  → 소품·관제 팝업으로만. 🔵 *"다중 화재를 스스로 처리한다"* 는 주장을 아예 안 하게 된다.
-- **열화상 ESP32 가 라이다와 같은 CP2102** — `ttyUSB` 번호를 뺏고 **에러를 안 낸다**.
-  → 런치 기본값을 `/dev/rplidar` 로(동결 예외 여덟 번째).
-- **실효속도 0.087 m/s** → 대본 전체 **약 440초**. 🔴 08-20 밤 *"약 305초"* 는 틀렸다.
+🔴 **여전히 유효한 08-21 새벽 사실 넷** (정본 = `MASTER_PLAN §7` 예약 58·56·59):
+`SEARCH_BACK` 180° 는 서쪽 유도일 때만 · 2차 화재 `reset` 우회 철회(소품·팝업으로만) ·
+열화상 ESP32 가 라이다와 같은 CP2102(`/dev/rplidar` 로 고정) ·
+실효속도 **0.087 m/s** → 대본 **약 440초**(08-20 *"305초"* 는 틀렸다).
 
 ### 🔴 관문 — 시각을 지킨다. 판단을 그 순간에 하지 않는다
 
@@ -66,6 +62,11 @@ GUIDE 353.5 → SEARCH_BACK 365.5 → GUIDE 381 → ESCAPED 446.5s`(예상 440s)
 `detect_range 3.00` 이 제 일을 한 것이다 — 돌다가 사람을 **다시 찾아버린다.**
 → 🔵 **연출로 푼다: 사람이 통로 안쪽 3~4 m 까지 들어간다.**
 
+🔴 **08-22 독립 검토 §87 — P0 1건 + P1 8건. 1차 보완 완료**(`c211833` 외).
+P0 = `HOLD`·`RESCUE`·`NO_VICTIM` 이 **정지를 선언만 하고 무장하지 않았다**(일반 취소는
+`_stop_pending` 을 안 세워 Nav2 옛 goal 이 계속 달렸다). `BLOCKED` 이 §84.2 에서 이미
+고친 자리를 다시 밟았다. ⚠ **재검토 미실시** — 보완이 맞는지는 아직 아무도 안 봤다.
+
 🟢 **08-22 새벽 — 사람 판정 경로를 통째로 구현했다** (`cfe2310`·`e5baa7b`·`bec494a`).
 어댑터가 `person_*` 를 `/person_status`·`/victim` 으로 배달하고, 미션에
 `SCAN_AREA`(제자리 360° 훑기)·`RESCUE`(쓰러진 사람 신고)·`NO_VICTIM`(아무도 없음)이
@@ -84,8 +85,8 @@ GUIDE 353.5 → SEARCH_BACK 365.5 → GUIDE 381 → ESCAPED 446.5s`(예상 440s)
 IMU 로는 오히려 빨라졌다(7.23 → 8.34 °/s). 로봇은 명령대로 0.10 m/s 로 갔다(SLAM).
 🔵 뜯지 않고 범인을 가른다: `drive_health.py --straight 8` → 한 바퀴만 굴린 bag +
 `drive_encoder_check.py --wheels=FR`. **배선(커넥터)이 커플러보다 먼저다.**
-⚠ 우회 = `ekf_params:=ekf_real_db.yaml`(odom `vyaw` 만 끔). **가리는 것이지 고치는
-것이 아니다.**
+⚠ 우회 = `ekf_params:=ekf_real_db.yaml`(odom `vyaw` 만 끔). 🔴 **진단용이다**(§87.4) —
+거짓 `vx` 적분으로 20초 회전에 가짜 병진 0.32 m. 주행 허가가 아니다.
 
 🔴 **조용한 실패 4종을 만났다** (`PITFALLS §17`) — 라이다가 에러 없이 죽음 ·
 사람이 앞에 서면 정지 · 무장 미확인 · 제자리 회전 미완주. **넷 다 증상이
@@ -208,17 +209,17 @@ depth 유효율 · Jetson 실시간)를 반복 시험한 적이 없다 → **"1�
 ## 최종 회귀
 
 - `bash tools/doc_check.sh` rc=0.
-- 기준선(**08-22 갱신**): mission **229** / adapter **107** / tools **322 + skip 1** /
-  colcon **404** / **test_harness_guards 24** / test_gate_regression **14**.
+- 기준선 표기: pytest **247 passed** / colcon **430 tests** /
+  **test_harness_guards 24 검사** / test_gate_regression **14 케이스**.
+- adapter **115/115** · tools **328/328 + skip 1**.
 - 🟢 `perception_adapter` 단위 **107/107** · 늦은 TF 전구간 **5/5**(entrypoint 형상) · `tools/e2e_adapter.py` **19/19**
   (optical 좌·우·정면 · 엉뚱한 frame 거부 · **거부→정상 전환 2건**).
-- 🟢 **§82 신규 회귀 43** + **§83 신규 회귀 38** — 게이트 black-box **4** ·
-  apply fault-injection **21** · yaw 관문 **10** · tick 위상/정렬 **4** ·
-  seed 결합·파라미터 상한 **4** · S1-3 BLOCKED **3**.
+- 🟢 **§82 신규 43** + **§83 신규 38** (게이트 black-box · fault-injection ·
+  yaw 관문 · tick 위상 · 파라미터 상한 · S1-3 BLOCKED).
 - 🔴 **link-stall harness 3단**: MCU **367** · 호스트 분류 **23**(9종) · 구조 **14**.
 - re-arm host **989/989 + 구조 11/11**, runtime/watchdog **11/11**,
-  firmware-info 상한 **1418/1664**. 알려진 P0/P1 코퍼스 **189/189**.
-- firmware precheck 실제 저장소는 승인 지문 미이관으로 **rc=1 이 정상**.
+  firmware-info 상한 **1418/1664**. 알려진 P0/P1 코퍼스 **198/198**.
+- firmware precheck 는 지문 미이관으로 **rc=1 이 정상**.
 
 ## 역할 교대
 

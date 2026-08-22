@@ -134,11 +134,19 @@ def straight_verdict(lin, ow, iw, base=ODOM_WHEEL_BASE):
     weak = '오른쪽' if r < 0 else '왼쪽'
     k = (1.0 - abs(r)) / (1.0 + abs(r))
     print(f'  🔴 **{weak}이 {k:.3f} 배로 읽힌다** (성한 쪽을 1.0 으로 뒀을 때)')
+    # 🔴 08-22 (§87.3) — 여기서 "엔코더 하나가 안 센다" 고 **단정하지 않는다.**
+    #   이 값은 `/odom` 의 좌우 **합성 계측 비율**이고, 같은 비율을 내는 원인이
+    #   여럿이다: 한 채널 dead(1.0, 0.0) · 두 채널이 같이 낮음(0.52, 0.52) ·
+    #   부분/간헐 pulse loss · 그 쪽 공통 배선·기어·샘플링. 본문은 "어느 쪽이
+    #   얼마나" 라고 말하면서 판정문만 단정해 서로 충돌했다.
     if abs(k - 0.5) < 0.12:
-        print(f'     → 0.5 에 가깝다 = **{weak} 엔코더 2개 중 하나가 안 센다.**')
-        print('     → 굽기 전에 배선부터: 커넥터·A/B·전원·GND, 그다음 커플러.')
+        print(f'     → 0.5 에 가깝다. **선두 가설 = {weak} 엔코더 2개 중 하나가 0.**')
+        print(f'     🔴 확정은 아니다 — 같은 비율을 두 채널이 함께 낮아도 만든다.')
+        print(f'     → `drive_encoder_check.py --wheels=FR` / `--wheels=RR` 로')
+        print(f'        한 바퀴씩 갈라 **0 구간이 나오는 채널**을 본 뒤에 확정한다.')
     else:
         print('     → 절반과는 다르다. 부호 반전이나 부분 결손일 수 있다.')
+    print('     🔵 어느 경우든 굽기 전에 배선부터: 커넥터·A/B·전원·GND, 그다음 커플러.')
     print(f'     🔵 범인 바퀴 이름은 한 바퀴씩 굴려 가른다:')
     print(f'        ros2 bag record /odom -o enc_FR_$(date +%m%d_%H%M)')
     print(f'        python3 tools/drive_encoder_check.py <bag> --wheels=FR')
