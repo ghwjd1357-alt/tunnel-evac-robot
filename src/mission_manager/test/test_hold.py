@@ -225,44 +225,116 @@ def test_h14_a_healthy_cancel_opens_the_clock_at_once():
 def test_h15_a_stop_that_never_terminates_becomes_unconfirmed():
     """🔴 부정 회귀 — 종결 콜백이 **영원히 안 오면** 상한이 실패로 승격해야 한다.
 
-    `CANCEL_STOP_MAX_BLOCKS` 는 새 goal 을 보내려는 시도에서만 소비된다. goal 을 안
-    내는 HOLD·RESCUE·NO_VICTIM 에서는 **영원히 pending** 이고, 그동안 "멈췄다" 를
-    말하면 사람이 물리 정지를 늦춘다.
+    ⚠ 판정은 `tick` 이 아니라 `safety_watchdog` 이 한다(§89.2) — `/clock` 이 멈추면
+    tick 자체가 안 불리므로 그 안에 두면 평가될 기회가 없다.
     """
     import mission_manager.mission_node as MN
 
     env = T.make_env()
-    env.stop_ok[0] = None                    # 확인도 실패도 안 온다
-    orig = env.node.cancel_current_goal
-    env.node.cancel_current_goal = lambda: (env.cancels.append(1),
-                                            setattr(env.node, 'goal_active', False))[0]
-    T.run(env, 0.1, PERSON)
-    T.run(env, 3.6, EMPTY)
-    assert env.node.state == State.HOLD
-    assert env.node.stop_state == 'pending', '전제 불성립'
-
-    real, fake = MN.time.monotonic, [env.node._stop_pending_since]
-    MN.time.monotonic = lambda: fake[0] + MN.STOP_CONFIRM_TIMEOUT_SEC + 0.1
+    env.node.arm_stop_deadline(True)
+    assert env.node.stop_state == 'pending'
+    real, base = MN.time.monotonic, env.node._stop_pending_since
+    MN.time.monotonic = lambda: base + MN.STOP_CONFIRM_TIMEOUT_SEC + 0.1
     try:
-        T.run(env, 1.0, EMPTY)
+        env.node.safety_watchdog()
     finally:
         MN.time.monotonic = real
     assert env.node.stop_state == 'unconfirmed', \
         '🔴 종결이 영원히 안 왔는데 pending 에 머물렀다'
-    env.node.cancel_current_goal = orig
 
 
-def test_h16_the_deadline_uses_a_steady_clock_not_ros_time():
-    """🔴 `/clock` 이 멈춰도 이 상한은 흘러야 한다.
+def test_h15b_the_deadline_does_not_fire_early():
+    """🔵 역회귀 — 상한 전에 실패로 올리면 정상 취소가 E-stop 요구가 된다."""
+    import mission_manager.mission_node as MN
 
-    ROS clock 을 쓰면 sim clock 정지에서 상한도 같이 멈춘다 — **그때야말로 로봇이
-    서 있는지 알 수 없는 상황**이다.
+    env = T.make_env()
+    env.node.arm_stop_deadline(True)
+    real, base = MN.time.monotonic, env.node._stop_pending_since
+    MN.time.monotonic = lambda: base + MN.STOP_CONFIRM_TIMEOUT_SEC - 0.5
+    try:
+        env.node.safety_watchdog()
+    finally:
+        MN.time.monotonic = real
+    assert env.node.stop_state == 'pending'
+
+
+def test_h16_the_safety_deadline_runs_off_a_steady_timer():
+    """🔴 §89.2 — **계산이 monotonic 이어도 호출이 ROS clock 이면 소용없다.**
+
+    2차 보완이 정확히 그 상태였다: `time.monotonic()` 비교를 `tick()` 안에 뒀는데,
+    `tick` 타이머는 노드 기본 clock(ROS_TIME)이라 `use_sim_time` + `/clock` 정지에서
+    **아예 안 불린다.** 구판 `test_h16` 은 함수 소스를 문자열로 봐서 이 경계를 놓쳤다.
     """
     import inspect
 
     import mission_manager.mission_node as MN
 
-    src = inspect.getsource(MN.MissionNode._confirmed_stop)
-    assert 'time.monotonic' in src, '정지 기산이 steady clock 이 아니다'
-    assert 'get_clock' not in src.split('_stop_pending_since')[1][:200], \
-        '정지 기산에 ROS clock 이 섞였다'
+    tick_src = inspect.getsource(MN.MissionNode.tick)
+    assert 'STOP_CONFIRM_TIMEOUT_SEC' not in tick_src, \
+        '안전 상한이 아직 ROS clock tick 안에 있다'
+    wd = inspect.getsource(MN.MissionNode.safety_watchdog)
+    assert 'STOP_CONFIRM_TIMEOUT_SEC' in wd and 'time.monotonic' in wd
+    assert 'SCAN_GOAL_TIMEOUT_DEFAULT' in wd, '훑기 상한도 여기 있어야 한다(§89.4)'
+    init = inspect.getsource(MN.MissionNode.__init__)
+    assert 'ClockType.STEADY_TIME' in init, '정상시계 타이머가 없다'
+    assert 'clock=self._steady_clock' in init, '워치독이 그 시계를 안 쓴다'
+
+
+def test_h17_every_safety_stop_entry_arms_the_deadline():
+    """🔴 §89.2 — **safety_stop 을 여는 자리가 전부 공통 무장을 타는가.**
+
+    1·2차 보완은 `_confirmed_stop()` 안에만 기산을 뒀고, `BLOCKED` 진입과 `SCAN`
+    타임아웃이 그것을 안 탔다 — 재현값 `BLOCKED / pending / since=None`.
+    새 진입을 만들 때 `arm_stop_deadline()` 을 부르는 것이 계약이다.
+    """
+    import inspect
+
+    import mission_manager.mission_node as MN
+
+    src = inspect.getsource(MN.MissionNode)
+    setters = src.count("_cancel_intent = 'safety_stop'")
+    # ⚠ `def arm_stop_deadline(` 도 같은 문자열을 포함한다 — 정의를 호출로 세면
+    #   진입 하나가 무장을 안 타도 숫자가 맞아버린다(실제로 변이가 통과했다).
+    arms = src.count('self.arm_stop_deadline(')
+    assert arms >= setters, (
+        f'safety_stop 세팅 {setters}곳 vs 공통 무장 {arms}곳 — '
+        f'무장을 안 타는 진입이 있다')
+
+
+def test_h18_the_scan_deadline_fires_from_the_steady_watchdog():
+    """🔴 §89.4 — 훑기 상한도 `/clock` 과 무관하게 돌아야 한다.
+
+    ⚠ 소스에 상수 이름이 있는지만 보면 **호출을 통째로 죽여도 통과한다**
+    (변이로 실제 확인했다). 동작으로 본다.
+    """
+    import mission_manager.mission_node as MN
+
+    env = T.make_env(state=State.SCAN_AREA)
+    env.node.wp['scan_goal_timeout_sec'] = 3.0
+    env.node.goal_active = True
+    env.node.scan_goal_since = 100.0
+    real = MN.time.monotonic
+    MN.time.monotonic = lambda: 110.0
+    try:
+        env.node.safety_watchdog()
+    finally:
+        MN.time.monotonic = real
+    assert env.node.state == MN.State.FAULT, \
+        '🔴 훑기 무응답이 steady 워치독에서 유한 종결되지 않았다'
+
+
+def test_h18b_a_scan_within_the_deadline_is_left_alone():
+    """🔵 역회귀 — 상한 안의 정상 스텝을 자르면 훑기가 아예 안 된다."""
+    import mission_manager.mission_node as MN
+
+    env = T.make_env(state=State.SCAN_AREA)
+    env.node.wp['scan_goal_timeout_sec'] = 90.0
+    env.node.goal_active = True
+    env.node.scan_goal_since = 100.0
+    real = MN.time.monotonic
+    MN.time.monotonic = lambda: 110.0
+    try:
+        env.node.safety_watchdog()
+    finally:
+        MN.time.monotonic = real
+    assert env.node.state == MN.State.SCAN_AREA

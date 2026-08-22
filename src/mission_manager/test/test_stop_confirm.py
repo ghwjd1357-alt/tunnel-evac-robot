@@ -76,3 +76,57 @@ def test_s3_the_watch_boundary_never_lets_an_exception_escape():
             add_done_callback=lambda cb: (_ for _ in ()).throw(RuntimeError('y'))),
         lambda f: None, '시험2')
     assert ok2 is False
+
+
+# ── 🔴 08-22 §89.3 — 예외를 삼키는 것과 goal 을 치우는 것은 다르다 ─────
+def test_s4_a_failed_result_watch_cancels_the_goal_it_knows(monkeypatch=None):
+    """🔴 **§89.3 P0** — 결과 감시 등록이 터지면 그 goal 을 **취소해야** 한다.
+
+    2차 보완은 예외만 삼키고 `active=True` · 핸들 보존을 남겼다. `enter_fault()` 는
+    goal 을 취소하지 않으므로 **Nav2 goal 이 FAULT 아래서 계속 달리고 5초 뒤 자동
+    재개까지 했다.** 예외 전파를 막은 초록이 수명주기 정리를 증명하지 않는다.
+    """
+    env = G.make_gm()
+    env.gm.send_goal({'x': 1.0, 'y': 0.0, 'yaw': 0.0}, tag='t')
+    cancels = []
+    handle = types.SimpleNamespace(
+        accepted=True,
+        get_result_async=lambda: (_ for _ in ()).throw(RuntimeError('등록 실패')),
+        cancel_goal_async=lambda: (cancels.append(1), types.SimpleNamespace(
+            add_done_callback=lambda cb: None))[1])
+    fut = types.SimpleNamespace(result=lambda: handle, exception=lambda: None)
+    env.resp_cbs[0](fut)
+    assert cancels, '🔴 핸들을 아는데 취소하지 않았다 — goal 이 계속 달린다'
+    assert env.gm._handle is None, '실패한 goal 의 핸들이 남았다'
+    assert env.actives and env.actives[-1] is False, 'active 미러가 안 내려갔다'
+
+
+def test_s5_a_failed_send_registration_clears_the_mirror():
+    """🔴 전송 응답 등록이 실패하면 `active=True` 로 굳어 **다음 goal 도 막힌다.**"""
+    env = G.make_gm()
+    boom = types.SimpleNamespace(
+        add_done_callback=lambda cb: (_ for _ in ()).throw(RuntimeError('등록 실패')))
+    env.gm._nav = types.SimpleNamespace(
+        server_is_ready=lambda: True, send_goal_async=lambda g: boom)
+    env.gm.send_goal({'x': 1.0, 'y': 0.0, 'yaw': 0.0}, tag='t')
+    assert env.gm._response_pending_seq is None, '응답 대기 세대가 남았다'
+    assert env.actives and env.actives[-1] is False, 'active 미러가 안 내려갔다'
+    assert any('추적 불가' in m for m in env.logs), \
+        '추적 불가한 goal 이 남을 수 있다는 사실을 안 알렸다'
+
+
+def test_s6_the_speed_manager_registration_cannot_escape():
+    """🔴 §89.3 — `SpeedManager._send` 의 등록 예외가 프로세스 밖으로 새면 안 된다.
+
+    새면 **미션이 죽고**, 그 동안 이미 active 인 Nav2 goal 은 독립적으로 계속 간다.
+    "GoalManager 네 자리" 는 그 클래스 내부 전수였지 미션 전수가 아니었다.
+    """
+    import inspect
+
+    from mission_manager import speed_manager as SM
+
+    src = inspect.getsource(SM.SpeedManager._send)
+    i = src.index('add_done_callback')
+    before = src[:i]
+    assert before.rstrip().endswith('try:') or 'try:' in before[-200:], \
+        '응답 등록이 try 밖에 있다 — 예외가 프로세스 밖으로 샌다'

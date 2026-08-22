@@ -49,6 +49,7 @@ import os
 
 import yaml
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import qos_profile_sensor_data
@@ -708,6 +709,15 @@ class MissionNode(Node):
         self.resume_state = None
 
         self.timer = self.create_timer(0.5, self.tick)
+        # 🔴 08-22 §89.2·§89.4 — **주 tick 은 노드 clock(ROS_TIME)을 쓴다.**
+        #   `use_sim_time:=true` 에서 `/clock` 이 멈추면 tick 자체가 안 불리므로,
+        #   그 안에 `time.monotonic()` 비교를 넣어도 **평가될 기회가 없다.**
+        #   2차 보완이 정확히 그 상태였다(계산은 steady 인데 호출이 ROS clock).
+        #   🔵 주 tick 의 시계는 **안 바꾼다** — 집결대기·HOLD 같은 임무 타이밍은
+        #     시뮬 시간을 따라야 한다. 안전 상한만 별도 steady 타이머로 뺀다.
+        self._steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.safety_timer = self.create_timer(
+            0.5, self.safety_watchdog, clock=self._steady_clock)
         self.get_logger().info('임무 노드 시작 → PATROL')
 
     # ===========================================================
@@ -796,15 +806,6 @@ class MissionNode(Node):
 
         self.speed.ensure_sync(float(self.wp['normal_speed']))
 
-        # 🔴 §88.2 — 정지 종결 무응답 상한. goal 을 안 내는 상태(HOLD·RESCUE·
-        #   NO_VICTIM)에서는 `_stop_pending` 이 소비될 계기가 없어 영원히 pending 이다.
-        if (self.stop_state == 'pending'
-                and self._stop_pending_since is not None
-                and time.monotonic() - self._stop_pending_since
-                >= STOP_CONFIRM_TIMEOUT_SEC):
-            self.on_safety_stop_unconfirmed(
-                f'CANCELED 종결 무응답 {STOP_CONFIRM_TIMEOUT_SEC:.0f}s')
-
         # 상태·싸이렌 상시 발행
         m = String()
         m.data = self.state.name
@@ -890,6 +891,7 @@ class MissionNode(Node):
                         f'🔴 훑기 {self.scan_idx + 1} 스텝이 {waited:.0f}초째 '
                         f'응답이 없다 — FAULT 로 보낸다')
                     self.scan_goal_since = None
+                    self.arm_stop_deadline(self.goal_active)   # §89.2
                     self._cancel_intent = 'safety_stop'
                     self.cancel_current_goal()
                     self.enter_fault()
@@ -1324,17 +1326,14 @@ class MissionNode(Node):
           · CANCELED 종결이 관찰돼야 `on_safety_stop_confirmed` 가 온다
         """
         had_goal = self.goal_active
-        # 🔴 **순서가 중요하다.** `stop_state` 를 취소 **앞에서** 세운다.
+        # 🔴 **순서가 중요하다.** 무장을 취소 **앞에서** 한다.
         #   취소가 동기로 CANCELED 를 관찰하면 `on_safety_stop_confirmed` 가 그
         #   자리에서 'confirmed' 를 세우는데, 뒤에서 'pending' 을 쓰면 **그것을
         #   덮어써** 정지가 영원히 확인되지 않는다(08-22 보완 중 실제로 밟았다).
         #   `BLOCKED`(§84.2)도 같은 순서다.
         # 'none' = 애초에 멈출 goal 이 없었다(예: GATHER→NO_VICTIM). 거짓 FAULT 를
         #   만들지 않으려면 이 경우를 'pending' 과 갈라야 한다.
-        self.stop_state = 'pending' if had_goal else 'none'
-        # 🔴 §88.2 — ROS clock 이 아니라 **steady clock** 이다. `/clock` 이 멈춰도
-        #   이 상한은 흘러야 한다(그때야말로 로봇이 서 있는지 알 수 없는 상황이다).
-        self._stop_pending_since = time.monotonic() if had_goal else None
+        self.arm_stop_deadline(had_goal)
         self._cancel_intent = 'safety_stop'
         self.cancel_current_goal()
 
@@ -1353,6 +1352,20 @@ class MissionNode(Node):
             self.get_logger().warn(
                 f'🔶 {where} · 정지 종결 대기 — 아직 "멈췄다" 로 읽지 말 것',
                 throttle_duration_sec=2.0)
+
+    def arm_stop_deadline(self, had_goal):
+        """🔴 08-22 §89.2 — **safety_stop 을 여는 모든 자리가 여기를 지난다.**
+
+        1차·2차 보완에서 `_confirmed_stop()` 안에만 기산을 뒀더니 `BLOCKED` 진입과
+        `SCAN` 타임아웃이 그것을 안 탔다 — 재현값 `BLOCKED / pending /
+        _stop_pending_since=None`. terminal 이 영원히 안 오면 **5초 분기가 영영
+        안 열려 E-stop 요구로 승격되지 않는다.**
+        🔵 새 safety_stop 진입을 만들면 **여기를 부르는 것이 계약**이다
+        (`test_stop_deadline` 이 `safety_stop` 세팅 전수를 대조한다).
+        """
+        self.stop_state = 'pending' if had_goal else 'none'
+        # 🔵 steady clock — `/clock` 이 멈춰도 이 상한은 흐른다.
+        self._stop_pending_since = time.monotonic() if had_goal else None
 
     def stop_confirmed(self):
         """'섰다'고 말해도 되는가. 🔴 'pending'·'unconfirmed' 는 아니다."""
@@ -1592,7 +1605,7 @@ class MissionNode(Node):
                         f'unsafe_gather fire=({fx:.2f},{fy:.2f}) '
                         f'gather=({float(eff["x"]):.2f},{float(eff["y"]):.2f}) '
                         f'dist={d_fire:.2f}<{float(min_fd):.2f}')
-                    self.stop_state = 'pending' if had_goal else 'none'
+                    self.arm_stop_deadline(had_goal)   # §89.2 — 공통 무장
                     self.state = State.BLOCKED
                     self._cancel_intent = 'safety_stop'
                     self.cancel_current_goal()
@@ -1706,6 +1719,33 @@ class MissionNode(Node):
             self.state = State.FAULT
         else:
             self.get_logger().warn(f'알 수 없는 /mission_cmd: "{msg.data}" (reset|abort)')
+
+    def safety_watchdog(self):
+        """🔴 §89.2·§89.4 — `/clock` 과 무관하게 도는 **안전 상한 전용** 감시.
+
+        여기 들어오는 것은 "시계가 멈춰도 유한해야 하는" 판정뿐이다.
+        임무 타이밍(집결대기·HOLD 기산 등)은 주 tick 에 남는다.
+        """
+        now = time.monotonic()
+        # ① 정지 종결 무응답 — goal 을 안 내는 상태에서는 봉쇄 카운터가 안 줄어든다
+        if (self.stop_state == 'pending'
+                and self._stop_pending_since is not None
+                and now - self._stop_pending_since >= STOP_CONFIRM_TIMEOUT_SEC):
+            self.on_safety_stop_unconfirmed(
+                f'CANCELED 종결 무응답 {STOP_CONFIRM_TIMEOUT_SEC:.0f}s')
+        # ② 훑기 스텝 무응답 — Nav2/action 이 반쯤 죽으면 tick 이 안 와도 여기서 센다
+        if (self.state == State.SCAN_AREA and self.scan_goal_since is not None
+                and now - self.scan_goal_since >= float(
+                    self.wp.get('scan_goal_timeout_sec',
+                                SCAN_GOAL_TIMEOUT_DEFAULT))):
+            self.get_logger().error(
+                f'🔴 훑기 스텝이 {now - self.scan_goal_since:.0f}초째 응답이 없다 '
+                f'— FAULT 로 보낸다 (steady clock)')
+            self.scan_goal_since = None
+            self.arm_stop_deadline(self.goal_active)
+            self._cancel_intent = 'safety_stop'
+            self.cancel_current_goal()
+            self.enter_fault()
 
     def enter_fault(self):
         if self.state != State.FAULT:

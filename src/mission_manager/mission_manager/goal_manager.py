@@ -157,8 +157,17 @@ class GoalManager:
         self._response_pending_seq = seq   # 수락/거부 응답 도착 전까지 '대기'로 표시
         self._log.info(
             f'[{state_name}] 목표전송 {tag} → ({wp["x"]:.1f}, {wp["y"]:.1f})')
-        self._watch(lambda: self._nav.send_goal_async(goal),
-                    partial(self._on_goal_response, seq), f'목표전송(seq={seq})')
+        if not self._watch(lambda: self._nav.send_goal_async(goal),
+                           partial(self._on_goal_response, seq),
+                           f'목표전송(seq={seq})'):
+            # 🔴 §89.3 — 등록이 실패했으면 **응답을 영원히 못 듣는다.** 요청이 이미
+            #   나갔을 수 있는데 핸들이 없어 취소할 대상도 없다. 미러를 정리하고
+            #   그 사실을 크게 남긴다 — 안 그러면 `active=True` 로 굳어 다음 goal 도 막힌다.
+            self._clear_response_pending(seq)
+            self._set(False)
+            self._log.error(
+                f'🔴 목표전송(seq={seq}) 응답 등록 실패 — 요청이 이미 나갔다면 '
+                f'**추적 불가한 goal 이 남는다.** 물리 정지를 확인할 것')
 
     def cancel_current_goal(self, intent=None):
         """현재 goal 취소. intent 로 상위 의도를 구분한다:
@@ -341,9 +350,18 @@ class GoalManager:
             self._on_fault()
             return
         self._handle = handle
-        self._watch(handle.get_result_async, partial(self._on_result, seq),
-                    f'결과감시(seq={seq})',
-                    stop_seq=(seq if self._is_stop_target(seq) else None))
+        if not self._watch(handle.get_result_async, partial(self._on_result, seq),
+                           f'결과감시(seq={seq})',
+                           stop_seq=(seq if self._is_stop_target(seq) else None)):
+            # 🔴 §89.3 — 구판은 `_on_fault()` 만 부르고 `active=True` · 핸들 보존이
+            #   남았다. `enter_fault()` 는 goal 을 취소하지 않으므로 **Nav2 goal 이
+            #   FAULT 아래서 계속 달리고 5초 뒤 자동 재개까지 했다** — 불완전한 FAULT.
+            #   🔵 핸들을 아니까 **취소할 수 있다.** 취소하고 나서 미러를 내린다.
+            self._cancel_with_confirm(
+                handle, f'결과감시 실패 목표(seq={seq})',
+                stop_seq=(seq if self._is_stop_target(seq) else None))
+            self._handle = None
+            self._set(False)
 
     def _on_result(self, seq, future):
         """현재 goal 최종결과 — 성공→on_reached, 실패→on_fault. stale 은 종결 관찰."""

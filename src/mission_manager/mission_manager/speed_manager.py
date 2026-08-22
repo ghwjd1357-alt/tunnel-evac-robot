@@ -313,7 +313,24 @@ class SpeedManager:
         #   _inflight=True 로 영구 정지한다 (자기 반증에서 발견).
         if self._deadline_at is None:
             self._deadline_at = self._now() + self._unready_timeout
-        fut.add_done_callback(partial(self._on_result, v, attempt, purpose, gen))
+        # 🔴 08-22 §89.3 — 이 등록도 **동기 예외를 낼 수 있다.** 구판은 맨몸이라
+        #   예외가 timer/콜백 밖으로 새면 **미션 프로세스가 죽고**, 그 동안 이미
+        #   active 인 Nav2 goal 은 독립적으로 계속 간다. 호출 예외는 위에서 이미
+        #   막고 있었는데 **등록 예외만 빠져 있었다** — 같은 클래스의 마지막 자리다.
+        #   🔵 실패는 호출 예외와 같은 정책으로 귀속한다(재시도 → 최종실패).
+        try:
+            fut.add_done_callback(
+                partial(self._on_result, v, attempt, purpose, gen))
+        except Exception as e:                                   # noqa: BLE001
+            self._inflight = False
+            if attempt < self.MAX_ATTEMPTS:
+                self._log.warn(
+                    f'속도 변경 응답 등록 예외({e}) — '
+                    f'재시도 {attempt + 1}/{self.MAX_ATTEMPTS}')
+                self._send(v, attempt + 1, purpose, gen)
+            else:
+                self._final_fail(v, purpose, f'응답 등록 예외: {e}', gen)
+            return
         self._log.info(f'주행속도 변경 요청 → {v} m/s (시도 {attempt})')
 
     def _on_result(self, v, attempt, purpose, gen, future):

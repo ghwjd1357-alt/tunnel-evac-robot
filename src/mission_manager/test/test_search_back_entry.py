@@ -156,6 +156,9 @@ def make_env(tf_ok=True, state=State.GUIDE):
     #   **여기도 같이 늘어난다.** 빠뜨리면 AttributeError 로 드러난다(조용하지 않다).
     node.stop_state = None
     node._stop_pending_since = None
+    node.arm_stop_deadline = lambda had: (
+        setattr(node, 'stop_state', 'pending' if had else 'none'),
+        setattr(node, '_stop_pending_since', 0.0 if had else None))[0]
     node.person_status = 'stale'
     node.person_status_t = None
     node.victim = None
@@ -168,6 +171,9 @@ def make_env(tf_ok=True, state=State.GUIDE):
     node.scan_verdict = None
     node.stop_state = None
     node._stop_pending_since = None
+    node.arm_stop_deadline = lambda had: (
+        setattr(node, 'stop_state', 'pending' if had else 'none'),
+        setattr(node, '_stop_pending_since', 0.0 if had else None))[0]
     node._guide_pending = False
     node._escaped_logged = False
     node._cancel_intent = None
