@@ -154,11 +154,18 @@ def make_env(tf_ok=True, state=State.GUIDE):
     # 🆕 08-22 — 사람 판정 게이트의 상태들. ⚠ `make_env` 는 `__new__` 로 만들어
     #   `__init__` 을 타지 않으므로, 생산 코드가 새 인스턴스 변수를 가지면
     #   **여기도 같이 늘어난다.** 빠뜨리면 AttributeError 로 드러난다(조용하지 않다).
+    node.stop_state = None
     node.person_status = 'stale'
     node.person_status_t = None
     node.victim = None
     node._rescue_logged = False
     node._no_victim_logged = False
+    node.scan_idx = 0
+    node.scan_dwell_since = None
+    node.scan_goal_since = None
+    node.scan_seen = set()
+    node.scan_verdict = None
+    node.stop_state = None
     node._guide_pending = False
     node._escaped_logged = False
     node._cancel_intent = None
@@ -175,8 +182,22 @@ def make_env(tf_ok=True, state=State.GUIDE):
     goals, cancels = [], []
     node.send_goal = lambda w, tag='': (goals.append((tag, w)),
                                         setattr(node, 'goal_active', True))[0]
-    node.cancel_current_goal = lambda: (cancels.append(1),
-                                        setattr(node, 'goal_active', False))[0]
+    # 🔴 08-22 P0 보완 — 실물에서는 취소가 **CANCELED 로 종결되는 것을 관찰**해야
+    #   `GoalManager` 가 `on_stop_confirmed` 를 부른다. 하네스가 그걸 안 하면 정지
+    #   확인이 영원히 안 와서, 정지를 전제하는 상태(HOLD·RESCUE·NO_VICTIM·BLOCKED)가
+    #   전부 대기에 갇힌다 — **실물과 다른 하네스는 시험이 틀린 것이다**(PITFALLS §19-⑤).
+    #   기본은 '건강한 취소'(즉시 종결)이고, `env.stop_ok[0] = False` 로 실패를 만든다.
+    stop_ok = [True]
+
+    def _cancel():
+        cancels.append(1)
+        node.goal_active = False
+        if stop_ok[0]:
+            node.on_safety_stop_confirmed()
+        else:
+            node.on_safety_stop_unconfirmed('하네스: 취소 종결 실패 모사')
+
+    node.cancel_current_goal = _cancel
     node.state_pub = types.SimpleNamespace(publish=lambda m: None)
     node.siren_pub = types.SimpleNamespace(publish=lambda m: None)
     node.get_clock = lambda: clock
@@ -194,7 +215,8 @@ def make_env(tf_ok=True, state=State.GUIDE):
         cancel_pending=lambda why: None)
 
     return types.SimpleNamespace(node=node, clock=clock, tf=tf, logs=logs,
-                                 goals=goals, cancels=cancels, step=0)
+                                 goals=goals, cancels=cancels, step=0,
+                                 stop_ok=stop_ok)
 
 
 def run(env, seconds, scan, dt=0.1):

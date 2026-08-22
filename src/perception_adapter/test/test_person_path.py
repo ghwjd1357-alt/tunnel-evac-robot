@@ -79,10 +79,55 @@ def test_p1_fallen_beats_ok_in_the_same_frame(node):
     assert best is not None
 
 
-def test_p2_low_confidence_detections_do_not_count(node):
-    """문턱 밑은 없는 것으로 본다 — 안 그러면 노이즈가 신고를 만든다."""
+def test_p2_low_confidence_is_unknown_not_nobody(node):
+    """🔴 08-22 §87.5 — **이 시험이 결함을 고정하고 있었다.**
+
+    구판은 `person_fallen(conf=0.2)` → `none` 이었고 시험도 그렇게 못 박았다.
+    그런데 `none` 은 "봤는데 아무도 없다" 라 4초 뒤 `NO_VICTIM` 으로 간다 —
+    **저조도에서 사람 후보가 계속 낮은 confidence 로 오면, 사람이 눈앞에 있는데
+    "아무도 없다"고 신고하고 떠난다.**
+    후보가 **있는데 못 믿는 것**은 `unknown`(판정 보류)이다.
+    """
     v, _ = node._person_frame_verdict(arr(node, det('person_fallen', conf=0.2)))
-    assert v == 'none'
+    assert v == 'unknown'
+
+
+def test_p2b_no_person_candidate_at_all_is_none(node):
+    """🔵 역회귀 — `none` 은 후보가 **전혀 없는** 프레임에만 나온다."""
+    assert node._person_frame_verdict(arr(node))[0] == 'none'
+    assert node._person_frame_verdict(arr(node, det('fire', 0.9)))[0] == 'none'
+
+
+def test_p2c_non_finite_confidence_never_becomes_ok(node):
+    """🔴 부정 회귀 — `NaN < 0.5` 는 파이썬에서 **False** 라 그대로 통과했다.
+
+    검토 재현: `person_ok(conf=NaN)` → `ok`. 쓰레기 한 프레임이 "떠나도 된다"로
+    접힌 것이다. `Inf` 와 1.0 초과도 같다.
+    """
+    for bad in (float('nan'), float('inf'), -0.1, 1.5):
+        v, _ = node._person_frame_verdict(arr(node, det('person_ok', conf=bad)))
+        assert v == 'unknown', f'conf={bad} 가 {v} 로 접혔다'
+
+
+def test_p2d_one_unclear_person_blocks_leaving(node):
+    """🔴 부정 회귀 — 여러 사람 중 하나라도 판정 불가면 떠나지 않는다.
+
+    구판은 unknown 한 명이 있어도 다른 ok 한 명 때문에 `ok` 를 냈다(§87.5 재현).
+    그 한 명이 실은 쓰러진 사람일 수 있다.
+    """
+    v, _ = node._person_frame_verdict(
+        arr(node, det('person_ok', 0.9), det('person_unknown', 0.9)))
+    assert v == 'unknown'
+    v, _ = node._person_frame_verdict(
+        arr(node, det('person_ok', 0.9), det('person_ok', 0.2)))
+    assert v == 'unknown', '못 믿는 후보가 섞였는데 떠나도 된다고 했다'
+
+
+def test_p2e_all_trusted_ok_still_means_ok(node):
+    """🔵 역회귀 — 조이면서 정상 경로를 막으면 유도가 영원히 시작 안 된다."""
+    v, _ = node._person_frame_verdict(
+        arr(node, det('person_ok', 0.9), det('person_ok', 0.8)))
+    assert v == 'ok'
 
 
 def test_p3_unknown_is_not_folded_into_ok(node):
@@ -175,3 +220,100 @@ def test_p12_person_path_survives_after_the_fire_alarm_fired(node):
     node.on_detections(arr(node, det('person_fallen'), t=1000.5))
     assert node._p_last_det_t is not None, \
         '🔴 화재 발사 뒤 사람 판정이 죽었다 — SCAN_AREA 가 통째로 안 돈다'
+
+
+# ── 🔴 08-22 §87.6 — 새 fallen 은 자기 세대 좌표만 발행한다 ────────────
+def test_p13_a_second_victim_never_reuses_the_first_position(node):
+    """🔴 부정 회귀 — 두 번째 쓰러진 사람의 TF 가 실패하면 **아무것도 안 낸다.**
+
+    구판은 `_p_victim_pos` 를 생성 때만 None 으로 두고 그 뒤로 지우지 않아,
+    두 번째 fallen 의 변환 실패 시 **첫 사람 좌표를 다시 발행**했다
+    (검토 §87.6 재현: `/victim` = [(1,2), (1,2)]). 관제가 두 번째 사람을 첫 사람
+    자리로 찾으러 가고, 그동안 진짜 사람은 그대로 있다.
+
+    ⚠ `_p_set_status` 를 직접 부르지 않는다 — 그러면 세대 경계를 우회해
+    **실제로 도는 경로를 안 본다.** 프레임을 흘려 `_update_person` 이 가르게 한다.
+    """
+    sent = []
+    node.victim_pub = type('P', (), {'publish': lambda _s, m: sent.append(
+        (m.pose.position.x, m.pose.position.y))})()
+
+    # ① 첫 쓰러진 사람 — 이 세대에서 좌표를 얻었다고 두고 확정시킨다
+    node._p_streak_class = 'fallen'
+    node._p_streak_since = 7000.0
+    node._p_streak_frames = 10
+    node._p_victim_pos = (1.0, 2.0)
+    node.now_sec = lambda: 7002.0
+    node._update_person(arr(node, det('person_fallen'), t=7002.0), 7002.0)
+    assert sent == [(1.0, 2.0)], f'첫 신고가 안 나갔다: {sent}'
+
+    # ② 그 사람이 일어났다 — 세대가 바뀐다
+    for i in range(45):
+        t = 7003.0 + i * 0.1
+        node.now_sec = lambda _t=t: _t
+        node._update_person(arr(node, det('person_ok'), t=t), t)
+    assert node._p_status == 'ok'
+
+    # ③ 두 번째 쓰러진 사람 — 이 세대에서는 TF 가 실패해 좌표를 못 얻는다
+    for i in range(30):
+        t = 7010.0 + i * 0.1
+        node.now_sec = lambda _t=t: _t
+        node._update_person(arr(node, det('person_fallen'), t=t), t)
+    assert node._p_status == 'fallen', '두 번째 확정이 안 됐다'
+    assert sent == [(1.0, 2.0)], f'🔴 첫 사람 좌표가 다시 나갔다: {sent}'
+
+
+def test_p14_a_new_fallen_streak_drops_the_previous_candidate(node):
+    """🔴 부정 회귀 — 새 fallen **세대**는 이전 후보 좌표를 물려받지 않는다.
+
+    ⚠ 이 시험은 `_p_set_status` 의 부수효과에 기대면 안 된다. 그쪽에서 지우면
+    확정 전 streak 를 쌓는 동안 매 프레임 좌표가 날아가, **확정 프레임의 TF 가
+    실패하면 신고 좌표가 없다.** 폐기는 **세대 경계**에서만 일어나야 하므로
+    여기서는 `_update_person` 을 타지 않고 그 경계만 직접 본다.
+    """
+    node._p_victim_pos = (9.0, 9.0)
+    node._p_streak_class = 'ok'
+    node._p_streak_since = 5000.0
+    node._p_streak_frames = 3
+    node.now_sec = lambda: 5000.1
+    # 'ok' → 'fallen' 로 프레임 판정이 바뀌는 순간이 세대 경계다
+    node._update_person(arr(node, det('person_fallen'), t=5000.1), 5000.1)
+    assert node._p_streak_class == 'fallen'
+    assert node._p_victim_pos is None, '이전 세대 좌표가 새 세대로 넘어왔다'
+
+
+def test_p15_a_coordinate_from_earlier_in_the_streak_survives_to_confirm(node):
+    """🔵 역회귀 — 같은 세대 안에서 앞 프레임이 얻은 좌표는 **살아 있어야** 한다.
+
+    확정되는 그 한 프레임에서만 TF 가 성공해야 신고가 나간다면, 회전 중
+    한 번씩 실패하는 실물에서 신고가 거의 안 나간다.
+    """
+    sent = []
+    node.victim_pub = type('P', (), {'publish': lambda _s, m: sent.append(
+        (m.pose.position.x, m.pose.position.y))})()
+    node._p_streak_class = 'fallen'
+    node._p_streak_since = 6000.0
+    node._p_streak_frames = 10
+    node._p_victim_pos = (3.0, 4.0)          # 이 세대의 앞 프레임이 얻은 좌표
+    node.now_sec = lambda: 6002.0
+    # 확정 프레임 — TF 는 실패해도(_person_to_map None) 세대 좌표로 신고한다
+    node._update_person(arr(node, det('person_fallen'), t=6002.0), 6002.0)
+    assert node._p_status == 'fallen'
+    assert sent == [(3.0, 4.0)], f'세대 좌표가 버려졌다: {sent}'
+
+
+def test_p16_an_interrupted_fallen_streak_drops_its_coordinate(node):
+    """🔴 세대가 끊기면 좌표도 끊긴다 — `unknown` 한 프레임이 streak 를 리셋한다.
+
+    끊긴 뒤 다시 fallen 이 서면 그것은 **새 세대**다. 옛 좌표를 물려받으면
+    그 사람이 그 자리에 있다는 보장이 없다.
+    """
+    node._p_streak_class = 'fallen'
+    node._p_streak_since = 8000.0
+    node._p_streak_frames = 5
+    node._p_victim_pos = (5.0, 6.0)
+    node.now_sec = lambda: 8001.0
+    # 자세를 못 믿는 프레임 한 장 → `_p_reset_streak`
+    node._update_person(arr(node, det('person_unknown'), t=8001.0), 8001.0)
+    assert node._p_status == 'unknown'
+    assert node._p_victim_pos is None, '세대가 끊겼는데 좌표가 남았다'

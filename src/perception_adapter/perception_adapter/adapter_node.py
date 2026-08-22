@@ -769,33 +769,58 @@ class PerceptionAdapter(Node):
                 continue
         return None
 
+    @staticmethod
+    def _conf_ok(d, min_conf):
+        """🔴 08-22 (§87.5) — 유한한 0~1 만 신뢰한다.
+
+        구판은 `conf < min_conf` 로 건너뛰기만 했다. 파이썬에서 `NaN < 0.5` 는
+        **False** 라 NaN 이 그대로 통과했고, `Inf` 도 통과했다. 검토가 실제로
+        재현했다: `person_ok(conf=NaN)` → `ok`. 즉 **쓰레기 한 프레임이
+        "떠나도 된다"로 접혔다.**
+        """
+        c = getattr(d, 'confidence', None)
+        if not isinstance(c, (int, float)) or isinstance(c, bool):
+            return False
+        return math.isfinite(c) and 0.0 <= c <= 1.0 and c >= min_conf
+
     def _person_frame_verdict(self, msg):
         """이 프레임 한 장의 판정 — fallen | ok | unknown | none.
 
-        🔴 **fallen 이 ok 를 이긴다.** 두 사람이 있고 하나가 쓰러져 있으면 프레임에
-        `person_ok` 와 `person_fallen` 이 같이 온다. 그때 'ok' 로 접으면 로봇이
-        **쓰러진 사람을 두고 떠난다.** 신고는 되돌릴 수 있고 유기는 못 되돌린다.
+        🔴 **두 층으로 나눈다** (08-22 §87.5 보완). 구판은 신뢰도 문턱을 먼저
+        적용하고 남은 것이 없으면 `none` 으로 접었다. 그래서 **저조도에서 사람
+        후보가 계속 낮은 confidence 로 오면 4초 뒤 `NO_VICTIM`** 이 됐다 —
+        사람이 눈앞에 있는데 "아무도 없다"고 신고하는 것이다.
+          ① **사람 후보가 있는가** — 신뢰도와 무관하게 class 만 본다
+          ② **자세를 신뢰할 수 있는가** — 유한한 0~1 이고 문턱 이상인가
+
+        우선순위 **fallen > unknown > ok > none**:
+          · 신뢰 가능한 `fallen` 이 하나라도 있으면 `fallen` (유기는 못 되돌린다)
+          · **모든 후보가 신뢰 가능한 `ok`** 일 때만 `ok` — 하나라도 판정 불가면
+            `unknown` 이 이긴다. 구판은 여러 사람 중 한 명이 unknown 이어도 다른
+            ok 한 명 때문에 **떠났다**(§87.5 재현).
+          · 후보가 전혀 없는 프레임에서만 `none`
         """
         min_conf = float(self.get_parameter('person_min_confidence').value)
-        seen = set()
+        cands = [d for d in msg.detections
+                 if getattr(d, 'class_name', '') in self.PERSON_CLASSES]
+        if not cands:
+            return 'none', None            # ① 후보 자체가 없다 = 정상 미탐지
+
         best_fallen = None
-        for d in msg.detections:
-            name = getattr(d, 'class_name', '')
-            if name not in self.PERSON_CLASSES:
-                continue
-            if float(getattr(d, 'confidence', 0.0)) < min_conf:
-                continue
-            seen.add(name)
-            if name == 'person_fallen' and (
-                    best_fallen is None or d.confidence > best_fallen.confidence):
-                best_fallen = d
-        if 'person_fallen' in seen:
+        all_trusted_ok = True
+        for d in cands:
+            trusted = self._conf_ok(d, min_conf)
+            name = d.class_name
+            if trusted and name == 'person_fallen':
+                if best_fallen is None or d.confidence > best_fallen.confidence:
+                    best_fallen = d
+            if not (trusted and name == 'person_ok'):
+                all_trusted_ok = False
+        if best_fallen is not None:
             return 'fallen', best_fallen
-        if 'person_ok' in seen:
+        if all_trusted_ok:
             return 'ok', None
-        if 'person_unknown' in seen:
-            return 'unknown', None
-        return 'none', None
+        return 'unknown', None             # 후보는 있는데 자세를 못 믿는다
 
     def _p_set_status(self, v):
         """상태 전이 + `fallen` 상승엣지에서 `/victim` 1회 발행."""
@@ -816,6 +841,12 @@ class PerceptionAdapter(Node):
             # 🔵 상태가 fallen 을 벗어나면 재무장한다 — 같은 임무에서 두 번째
             #   쓰러짐이 생겼을 때 신고가 막히면 안 된다.
             self._p_victim_sent = False
+            # ⚠ 08-22 — 여기서 좌표를 지우면 **안 된다.** 확정 전 streak 를 쌓는
+            #   동안 상태는 `unknown` 이라 이 가지를 매 프레임 지나간다. 그때 지우면
+            #   앞 프레임들이 얻어둔 변환 결과가 전부 버려지고, **확정되는 그 한
+            #   프레임에서 TF 가 실패하면 신고 좌표가 없다.** 검토(§87.6)가 요구한
+            #   것은 "그 **세대**에서 성공한 좌표" 이지 "확정 프레임의 좌표" 가 아니다.
+            #   폐기는 **세대 경계**(`_p_reset_streak` · 새 fallen streak)에서 한다.
         if v != self._p_status:
             self.get_logger().info(f'사람 상태 {self._p_status} → {v}')
         self._p_status = v
@@ -824,6 +855,7 @@ class PerceptionAdapter(Node):
         self._p_streak_class = None
         self._p_streak_since = None
         self._p_streak_frames = 0
+        self._p_victim_pos = None      # §87.6 — 세대가 끊기면 좌표도 끊긴다
 
     def _update_person(self, msg, t):
         """🔴 `on_detections` 의 **맨 앞**에서 불린다 — 그 아래 어떤 return 에도 걸리면 안 된다.
@@ -855,6 +887,10 @@ class PerceptionAdapter(Node):
             self._p_streak_class = verdict
             self._p_streak_since = t
             self._p_streak_frames = 0
+            if verdict == 'fallen':
+                # 🔴 새 fallen 세대는 **자기 세대에서 성공한 변환만** 쓴다.
+                #   옛 좌표를 물려받으면 못 얻었을 때 조용히 그것이 나간다.
+                self._p_victim_pos = None
         self._p_streak_frames += 1
 
         if verdict == 'fallen' and best is not None:

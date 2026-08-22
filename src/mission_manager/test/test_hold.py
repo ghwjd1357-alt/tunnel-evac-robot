@@ -156,3 +156,66 @@ def test_h10_production_config_carries_the_key():
     assert 'hold_sec' in sb, 'waypoints.yaml 에 hold_sec 이 없다'
     assert 0.0 < float(sb['hold_sec']) <= 10.0, \
         '역행(약 22초) 앞의 보험치고 너무 길거나 0 이다'
+
+
+# ── 🔴 08-22 P0 — 정지를 선언하기 전에 취소가 종결됐는지 확인한다 ──────
+# 독립 검토 §87.2. 구판은 인자 없는 `cancel_current_goal()` 을 부르고 곧바로
+# "섰다"고 선언했다. 일반 취소는 `GoalManager._stop_pending` 을 무장하지 않으므로
+# **노드의 미러만 false 가 되고 Nav2 의 옛 goal 은 계속 달릴 수 있었다.**
+# `BLOCKED` 이 §84.2 에서 바로 이 이유로 고쳐졌는데 신규 상태가 그 전 패턴을 다시 썼다.
+
+def lose_person(env, seconds=3.6):
+    T.run(env, 0.1, PERSON)
+    T.run(env, seconds, EMPTY)
+
+
+def test_h11_entering_hold_asks_for_a_confirmed_stop():
+    """🔴 일반 취소가 아니라 **safety_stop** 이어야 신규 goal 이 봉쇄된다."""
+    env = T.make_env()
+    seen = []
+    orig = env.node.cancel_current_goal
+
+    def spy():
+        seen.append(env.node._cancel_intent)
+        orig()
+    env.node.cancel_current_goal = spy
+    lose_person(env)
+    assert env.node.state == State.HOLD
+    assert seen == ['safety_stop'], f'취소 의도가 {seen} 였다 — 정지가 무장되지 않는다'
+
+
+def test_h12_a_cancel_that_never_confirms_does_not_become_a_reversal():
+    """🔴 부정 회귀 — 취소가 종결되지 않으면 **역행으로 넘어가지 않는다.**
+
+    로봇이 아직 달리고 있을 수 있는데 새 goal 을 얹으면 옛 goal 과 겹친다.
+    사람이 E-stop 으로 물리 정지를 확인해야 하는 상황이므로 그 자리에 머문다.
+    """
+    env = T.make_env()
+    env.stop_ok[0] = False                 # 취소가 CANCELED 로 안 끝난다
+    lose_person(env)
+    assert env.node.state == State.HOLD
+    assert env.node.stop_state == 'unconfirmed'
+    before = len(env.goals)
+    T.run(env, hold_sec() + 5.0, EMPTY)    # 넉넉히 넘겨도
+    assert env.node.state == State.HOLD, '정지 미확인인데 역행으로 넘어갔다'
+    assert len(env.goals) == before, '정지 미확인인데 신규 goal 이 나갔다'
+
+
+def test_h13_an_unconfirmed_stop_never_starts_the_clock():
+    """🔴 확인 전의 4초는 "서서 기다린 4초" 가 아니다 — 세면 안 된다."""
+    env = T.make_env()
+    env.stop_ok[0] = False
+    lose_person(env)
+    T.run(env, hold_sec() + 2.0, EMPTY)
+    assert env.node.hold_since is None, '정지가 확인되지 않았는데 기산이 열렸다'
+
+
+def test_h14_a_healthy_cancel_opens_the_clock_at_once():
+    """🔵 역회귀 — 정상 CANCELED 는 기다릴 이유가 없다. 거짓 FAULT 도 없다."""
+    env = T.make_env()
+    lose_person(env)
+    assert env.node.state == State.HOLD
+    assert env.node.stop_state == 'confirmed'
+    assert env.node.hold_since is not None
+    T.run(env, hold_sec() + 0.6, EMPTY)
+    assert env.node.state == State.SEARCH_BACK, '정상 취소인데 역행이 안 열렸다'

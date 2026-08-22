@@ -135,6 +135,12 @@ SCAN_STEPS_DEFAULT = 4
 # 각 스텝 도착 뒤 서서 판정 프레임을 모으는 시간. 어댑터가 10 Hz 이므로 2초면
 # 20 프레임이고, `person_min_frames`(6) 를 넉넉히 넘는다.
 SCAN_DWELL_SEC_DEFAULT = 2.0
+# 🔴 08-22 (§87.7) — 한 훑기 스텝의 **벽시계 상한**. 명시 실패(REJECTED/ABORTED)는
+#   `GoalManager` 가 `enter_fault` 로 유한 종결하지만, **응답이나 결과가 영원히 안
+#   오는 경우에는 상한이 없었다** — `goal_active=True` 가 무한 유지되고 미션이 그
+#   자리에서 멈춘다. Nav2/action 통신이 반쯤 죽으면 네 스텝 중 하나에서 걸린다.
+#   90초 = 90° 회전(약 11초) + 계획·여유. 넘으면 기존 FAULT 재시도 예산으로 보낸다.
+SCAN_GOAL_TIMEOUT_DEFAULT = 90.0
 
 
 def normalize_angle(a):
@@ -422,6 +428,36 @@ def validate_waypoints(wp):
         elif v < minimum:
             missing.append(f'{path}(최소 {minimum} 미만: {v!r})')
 
+    def need_bool(d, key, path, optional=True):
+        """🔴 08-22 (§87.9) — **엄격한 bool**. 문자열을 받지 않는다.
+
+        `person_gate: 'false'` 처럼 따옴표가 붙으면 파이썬에서 `bool('false')` 는
+        **True** 다. 즉 오타 하나가 게이트를 **켠다** — 본편 테이크에서 어댑터가
+        없는데 사람 판정이 돌아 `RESCUE` 로 빠진다. 검토가 이 자리를 실제로
+        재현했다(7변이 전부 통과했다).
+        """
+        if not isinstance(d, dict) or key not in d:
+            if not optional:
+                missing.append(path)
+            return
+        if not isinstance(d[key], bool):
+            missing.append(f'{path}(bool 아님 — 따옴표 없는 true/false: {d[key]!r})')
+
+    # 🔴 08-22 (§87.9) — B 가 더한 설정 7종이 **fail-fast 검사를 전부 우회**했다.
+    #   `hold_sec=NaN` 이면 `waited >= NaN` 이 영원히 false 라 **HOLD 에 갇힌다.**
+    #   `scan_steps=true` 는 bool 이 int 하위형이라 통과해 0 나눗셈 근처로 간다.
+    #   배포 5벌 값은 정상이지만, 촬영 직전 오타가 **기동 실패가 아니라 잘못된
+    #   전이·무한 정지**로 나타나는 것이 이 검사가 막으려는 것이다.
+    need_bool(wp, 'person_gate', 'person_gate')
+    need_num(wp, 'person_decide_timeout_sec', 'person_decide_timeout_sec',
+             positive=True, optional=True)
+    need_num(wp, 'person_status_timeout_sec', 'person_status_timeout_sec',
+             positive=True, optional=True)
+    need_int(wp, 'scan_steps', 'scan_steps', minimum=1, optional=True)
+    need_num(wp, 'scan_dwell_sec', 'scan_dwell_sec', nonneg=True, optional=True)
+    need_num(wp, 'scan_goal_timeout_sec', 'scan_goal_timeout_sec',
+             positive=True, optional=True)
+
     sb = need(wp, 'search_back', 'search_back')
     if sb is not None:
         # F6: 횟수·개수는 정수 강제 (0.5 회 시도·0.5 점 클러스터는 무의미)
@@ -436,6 +472,10 @@ def validate_waypoints(wp):
             need_num(sb, k, f'search_back.{k}', positive=True, optional=True)
         need_int(sb, 'min_points', 'search_back.min_points',
                  minimum=1, optional=True)
+        # 🆕 08-22 — HOLD 대기시간과 카메라 병행 스위치
+        need_num(sb, 'hold_sec', 'search_back.hold_sec',
+                 nonneg=True, optional=True)
+        need_bool(sb, 'camera_refind', 'search_back.camera_refind')
         # F6: 상한·상호관계 (Codex §12.4 공격 재현 봉쇄) —
         #   cone_half_deg=999 는 부채꼴이 전방위를 넘고,
         #   edge_margin >= detect_range 는 판정 존이 사라져 '항상 놓침'이 된다.
@@ -581,6 +621,12 @@ class MissionNode(Node):
         self._no_victim_logged = False
         self.scan_idx = 0              # 지금 몇 번째 훑기 스텝인가
         self.scan_dwell_since = None   # 스텝 도착 뒤 관측 시작 시각 (None = 이동 중)
+        # 🔴 08-22 (§87.8) — sweep 한 바퀴 동안 **본 것을 모은다.** 없으면 마지막
+        #   카메라 방향이 앞의 관측을 덮어, 중간 사분면에만 있는 사람을 보고도
+        #   "사람 없음" 으로 보고한다(검토 재현: none→ok→none→none → NO_VICTIM).
+        self.scan_seen = set()
+        self.scan_verdict = None       # sweep 종료 시 확정 — GATHER 가 소비한다
+        self.scan_goal_since = None    # 이번 스텝 goal 을 낸 시각 (§87.7 상한 기산)
         # ★ 직전 tick 이 '실제로 분기시킨' 상태 (08-01 검토 §26 P1 — GUIDE 진입 감지용).
         #   resume_state(FAULT 복귀 목적지)와 혼동 금지: 이건 순수한 전이 감지 재료다.
         self._prev_tick_state = None
@@ -614,7 +660,7 @@ class MissionNode(Node):
         #   'pending'     취소는 보냈고 종결 대기 — **아직 멈췄다고 말하지 않는다**
         #   'confirmed'   CANCELED 종결 관찰 = 정지 완료
         #   'unconfirmed' 취소가 거절·예외·비-CANCELED 종결 — 🔴 사람이 세워야 한다
-        self.blocked_stop = None
+        self.stop_state = None
         self.gather_wp = None           # 화재 좌표로 계산한 집결지 (없으면 yaml 고정값)
         # ★ 속도 변경의 비동기 수명주기(요청·확인·3회 재시도·stale 세대 구분·
         #   reconcile)는 전부 SpeedManager 소유 (07-20 구조 분리 1/3).
@@ -812,13 +858,48 @@ class MissionNode(Node):
                 # 이동 중 — goal 이 없으면 이번 스텝의 goal 을 낸다.
                 if not self.goal_active:
                     self.send_goal(self.scan_goal(), tag='scan')
+                    self.scan_goal_since = self.get_clock().now()
+                elif self.scan_goal_since is not None:
+                    # 🔴 §87.7 — 응답·결과가 영원히 안 오는 경우의 상한.
+                    #   명시 실패는 GoalManager 가 FAULT 로 보내지만, 아무 콜백도
+                    #   안 오면 여기 말고는 아무도 시간을 세지 않는다.
+                    waited = (self.get_clock().now()
+                              - self.scan_goal_since).nanoseconds / 1e9
+                    if waited >= float(self.wp.get('scan_goal_timeout_sec',
+                                                   SCAN_GOAL_TIMEOUT_DEFAULT)):
+                        self.get_logger().error(
+                            f'🔴 훑기 {self.scan_idx + 1} 스텝이 {waited:.0f}초째 '
+                            f'응답이 없다 — FAULT 로 보낸다')
+                        self.scan_goal_since = None
+                        self._cancel_intent = 'safety_stop'
+                        self.cancel_current_goal()
+                        self.enter_fault()
             else:
+                # 🔴 관측 창 동안 본 것을 **모은다** (§87.8). 마지막 방향이 앞의
+                #   관측을 지우면 훑기를 하는 의미가 없다.
+                live = self.fresh_person_status()
+                if live in ('ok', 'unknown', 'none'):
+                    self.scan_seen.add(live)
                 waited = (self.get_clock().now()
                           - self.scan_dwell_since).nanoseconds / 1e9
                 if waited >= self.scan_dwell_sec():
                     self.scan_idx += 1
                     self.scan_dwell_since = None
+                    self.scan_goal_since = None
                     if self.scan_idx >= self.scan_steps():
+                        # 🔴 sweep 전체를 하나의 판정으로 접는다 (§87.8).
+                        #   보수 우선: 한 방향이라도 `unknown` 이면 떠나지 않는다.
+                        #   (`unknown` 은 "사람 같은 걸 봤는데 자세를 못 믿는다" 다 —
+                        #    벽은 후보가 없어 `none` 이므로 여기 안 온다.)
+                        if 'unknown' in self.scan_seen:
+                            self.scan_verdict = 'unknown'
+                        elif 'ok' in self.scan_seen:
+                            self.scan_verdict = 'ok'
+                        elif 'none' in self.scan_seen:
+                            self.scan_verdict = 'none'
+                        self.get_logger().info(
+                            f'훑기 관측 {sorted(self.scan_seen) or "없음"} '
+                            f'→ 판정 {self.scan_verdict or "보류"}')
                         # 한 바퀴 다 돌았다 → 판정은 GATHER 가 한다(이미 있는 분기).
                         self.state = State.GATHER
                         self.gather_since = self.get_clock().now()
@@ -922,10 +1003,27 @@ class MissionNode(Node):
                     self.record_last_seen()       # 놓치기 전까지 위치 갱신
 
         elif self.state == State.HOLD:
+            # 🔴 08-22 P0 — 정지가 **확인되기 전에는** 아무 판단도 하지 않는다.
+            #   구판은 취소를 부르자마자 "서 있다"고 전제하고 4초를 셌다.
+            if not self.stop_confirmed():
+                if self.stop_state == 'unconfirmed':
+                    # 취소가 끝내 종결되지 않았다 = 로봇이 아직 달릴 수 있다.
+                    # 🔴 역행으로 넘어가지 않는다(신규 goal 금지 유지). 사람이 본다.
+                    self.get_logger().error(
+                        '🔴 HOLD · 정지 미확인 — 로봇이 아직 달리고 있을 수 있다. '
+                        '**E-stop 으로 물리 정지를 확인할 것.**',
+                        throttle_duration_sec=2.0)
+                else:
+                    self.get_logger().warn(
+                        '🔶 HOLD · 정지 종결 대기 — 아직 "멈췄다" 로 읽지 말 것',
+                        throttle_duration_sec=2.0)
+            elif self.hold_since is None:
+                # 이제서야 "서 있다" 가 참이다 — 여기서 기산을 연다.
+                self.hold_since = self.get_clock().now()
             # 🆕 08-22 — 로봇은 이미 서 있다(`enter_hold` 가 goal 을 취소했다).
             #   🔴 여기서는 goal 을 하나도 내지 않는다 — 그것이 '정지'의 구현이다
             #   (`BLOCKED` 과 같은 구조. 검증된 패턴이다).
-            if self.monitor.visible(zone='any'):
+            elif self.monitor.visible(zone='any'):
                 # 🎯 역행을 안 하고 끝났다. 08-21 리허설의 두 번이 이 가지로 왔을 것이다.
                 self.get_logger().info('★ 제자리에서 재발견 → GUIDE 복귀 (역행 안 함)')
                 self.monitor.reset('any')   # [reset-role] hold-return — 복귀 즉시 재-놓침 방지
@@ -1014,13 +1112,13 @@ class MissionNode(Node):
             #   여기서 나가는 길이다 — 그것이 "사람에게 넘긴다" 의 실제 구현이다.
             # 🔴 §84.2 — 그런데 "새 goal 을 안 낸다" 는 **필요조건일 뿐**이다.
             #   기존 goal 의 CANCELED 종결까지 봐야 "멈췄다" 라고 말할 수 있다.
-            if self.blocked_stop == 'unconfirmed':
+            if self.stop_state == 'unconfirmed':
                 self.get_logger().error(
                     f'🔴 BLOCKED · 정지 미확인 — 취소가 종결로 확인되지 않았다. '
                     f'로봇이 **아직 달리고 있을 수 있다.** 즉시 E-stop 으로 물리 정지를 '
                     f'확인할 것. 사유: {self.blocked_reason}',
                     throttle_duration_sec=2.0)
-            elif self.blocked_stop == 'pending':
+            elif self.stop_state == 'pending':
                 self.get_logger().warn(
                     '🔶 BLOCKED · 정지 종결 대기 — 아직 "멈췄다" 로 읽지 말 것',
                     throttle_duration_sec=2.0)
@@ -1114,7 +1212,13 @@ class MissionNode(Node):
         영원히 서 있을 수는 없으므로 `person_decide_timeout_sec` 뒤에는 **신고**로
         간다. 모르는 채로 떠나는 것보다 모른다고 신고하는 쪽이 되돌릴 수 있다.
         """
-        s = self.fresh_person_status()
+        # 🔴 `fallen` 은 **항상 지금 값이 이긴다** — 훑는 동안 서 있던 사람이
+        #   그 뒤에 쓰러졌을 수 있고, 그 경우 옛 판정을 쓰면 두고 나간다.
+        live = self.fresh_person_status()
+        if live == 'fallen':
+            return 'rescue'
+        # 그 외에는 sweep 이 모은 판정을 쓴다(§87.8). 훑기를 안 했으면 지금 값.
+        s = self.scan_verdict or live
         if s == 'ok':
             return 'guide'
         if s == 'fallen':
@@ -1149,6 +1253,9 @@ class MissionNode(Node):
     def enter_scan_area(self):
         self.scan_idx = 0
         self.scan_dwell_since = None
+        self.scan_seen = set()         # 새 sweep 세대 — 앞 세대 관측을 물려받지 않는다
+        self.scan_verdict = None
+        self.scan_goal_since = None
         self.state = State.SCAN_AREA
         self.get_logger().info(
             f'집결지 도착 → SCAN_AREA: 제자리로 한 바퀴 훑는다 '
@@ -1167,13 +1274,45 @@ class MissionNode(Node):
         return {'x': float(base['x']), 'y': float(base['y']),
                 'yaw': normalize_angle(yaw)}
 
-    def enter_rescue(self):
+    def _confirmed_stop(self):
+        """🔴 08-22 P0 — 정지를 전제하는 상태의 **공통 진입 절차**.
+
+        구판은 인자 없는 `cancel_current_goal()` 을 부르고 곧바로 "섰다"고 선언했다.
+        일반 취소는 `GoalManager` 의 `_stop_pending` 을 **무장하지 않는다**
+        (`goal_manager.py:175` — `guide_stop`·`safety_stop` 일 때만 선다).
+        그래서 노드의 미러만 `active=False` 가 되고 **Nav2 의 옛 goal 은 계속
+        달릴 수 있었다.** `/mission_state` 는 HOLD 인데 로봇은 간다.
+
+        🔴 `BLOCKED` 이 §84.2 에서 바로 이 이유로 `safety_stop` 으로 고쳐졌는데,
+        신규 상태 셋이 **고쳐지기 전 패턴을 다시 썼다**(독립 검토 §87.2 P0).
+
+        `safety_stop` 을 걸면 두 가지가 따라온다:
+          · `send_goal` 이 `_stop_pending` 동안 **신규 goal 을 전면 봉쇄**한다
+          · CANCELED 종결이 관찰돼야 `on_safety_stop_confirmed` 가 온다
+        """
+        had_goal = self.goal_active
+        # 🔴 **순서가 중요하다.** `stop_state` 를 취소 **앞에서** 세운다.
+        #   취소가 동기로 CANCELED 를 관찰하면 `on_safety_stop_confirmed` 가 그
+        #   자리에서 'confirmed' 를 세우는데, 뒤에서 'pending' 을 쓰면 **그것을
+        #   덮어써** 정지가 영원히 확인되지 않는다(08-22 보완 중 실제로 밟았다).
+        #   `BLOCKED`(§84.2)도 같은 순서다.
+        # 'none' = 애초에 멈출 goal 이 없었다(예: GATHER→NO_VICTIM). 거짓 FAULT 를
+        #   만들지 않으려면 이 경우를 'pending' 과 갈라야 한다.
+        self.stop_state = 'pending' if had_goal else 'none'
+        self._cancel_intent = 'safety_stop'
         self.cancel_current_goal()
+
+    def stop_confirmed(self):
+        """'섰다'고 말해도 되는가. 🔴 'pending'·'unconfirmed' 는 아니다."""
+        return self.stop_state in ('none', 'confirmed')
+
+    def enter_rescue(self):
+        self._confirmed_stop()
         self._rescue_logged = False
         self.state = State.RESCUE
 
     def enter_no_victim(self):
-        self.cancel_current_goal()
+        self._confirmed_stop()
         self._no_victim_logged = False
         self.state = State.NO_VICTIM
 
@@ -1185,8 +1324,13 @@ class MissionNode(Node):
         ⚠ `search_attempts` 를 여기서 올리지 않는다. HOLD 는 역행이 아니고,
           역행 예산(`max_attempts`)은 실제로 되돌아간 횟수여야 한다.
         """
-        self.cancel_current_goal()
-        self.hold_since = self.get_clock().now()
+        self._confirmed_stop()
+        # 🔴 08-22 P0 — 정지가 **확인된 뒤에만** 시간을 센다. 확인 전의 4초는
+        #   "서서 기다린 4초" 가 아니다 — 그동안 로봇은 아직 달리고 있을 수 있다.
+        #   🔵 취소가 그 자리에서 CANCELED 로 종결되면(흔한 경우) 기다릴 이유가
+        #     없으므로 즉시 연다. 늦어지는 경우만 tick 이 대신 연다.
+        self.hold_since = (self.get_clock().now()
+                           if self.stop_confirmed() else None)
         self.get_logger().info(
             '추종자 놓침 → 제자리 정지하고 재수집 (역행 전 단계)')
         self.state = State.HOLD
@@ -1396,7 +1540,7 @@ class MissionNode(Node):
                         f'unsafe_gather fire=({fx:.2f},{fy:.2f}) '
                         f'gather=({float(eff["x"]):.2f},{float(eff["y"]):.2f}) '
                         f'dist={d_fire:.2f}<{float(min_fd):.2f}')
-                    self.blocked_stop = 'pending' if had_goal else 'none'
+                    self.stop_state = 'pending' if had_goal else 'none'
                     self.state = State.BLOCKED
                     self._cancel_intent = 'safety_stop'
                     self.cancel_current_goal()
@@ -1426,18 +1570,24 @@ class MissionNode(Node):
         # 🔴 §85.3 — 한 번 unconfirmed 로 올라가면 같은 세대에서 내려오지 않는다.
         #   순서 수정으로 덮어쓰기는 사라졌지만, 늦은 콜백이 또 오는 경로가 있어
         #   **여기서도** 잠근다(방어 두 겹).
-        if self.blocked_stop == 'unconfirmed':
+        if self.stop_state == 'unconfirmed':
             return
-        self.blocked_stop = 'unconfirmed'
-        self.blocked_reason = f'{self.blocked_reason or "안전정지"} · 정지 미확인({reason})'
+        self.stop_state = 'unconfirmed'
+        # 🔴 08-22 — `blocked_reason` 은 **BLOCKED 전용**이다. 08-22 에 정지 확인을
+        #   HOLD·RESCUE·NO_VICTIM 까지 넓히면서 이 콜백이 공용이 됐는데, 구판 그대로
+        #   두면 HOLD 의 취소 실패가 BLOCKED 의 사유 문구를 덮어쓴다(관제가 "안전한
+        #   집결지가 없다"로 읽는다). 그래서 그 상태에서만 쓴다.
+        if self.state == State.BLOCKED:
+            self.blocked_reason = (
+                f'{self.blocked_reason or "안전정지"} · 정지 미확인({reason})')
         self.get_logger().error(
-            f'🔴 안전정지 종결 확인 실패 — {reason}. 로봇이 아직 달리고 있을 수 '
-            f'있다. **E-stop 으로 물리 정지를 확인할 것.**')
+            f'🔴 {self.state.name} · 정지 종결 확인 실패 — {reason}. 로봇이 아직 '
+            f'달리고 있을 수 있다. **E-stop 으로 물리 정지를 확인할 것.**')
 
     def on_safety_stop_confirmed(self):
         """§84.2 — CANCELED 종결 관찰. 이제서야 '멈췄다' 라고 말할 수 있다."""
-        if self.blocked_stop in ('pending', None):
-            self.blocked_stop = 'confirmed'
+        if self.stop_state in ('pending', None):
+            self.stop_state = 'confirmed'
             self._blocked_logged = False
             self.get_logger().warn('🔵 안전정지 CANCELED 종결 확인 — 로봇이 섰다')
 
@@ -1468,7 +1618,7 @@ class MissionNode(Node):
             self._guide_pending = False   # F2: 응답 유실로 남은 게이트 잔재 청소
             self.blocked_reason = None    # §83.6 — BLOCKED 탈출은 reset 뿐이다
             self._blocked_logged = False
-            self.blocked_stop = None      # §84.2
+            self.stop_state = None      # §84.2
             # 🆕 08-22 — 사람 판정 잔재. 🔴 `person_status` 를 'stale' 로 되돌리는
             #   것이 핵심이다. 'none' 으로 두면 다음 임무 첫 판정이 곧바로
             #   NO_VICTIM 이 되고, 'ok' 로 두면 사람이 없어도 유도가 시작된다.
@@ -1479,6 +1629,9 @@ class MissionNode(Node):
             self._no_victim_logged = False
             self.scan_idx = 0
             self.scan_dwell_since = None
+            self.scan_seen = set()
+            self.scan_verdict = None
+            self.scan_goal_since = None
             # 진행 중 속도 요청 전부 stale 화 — 늦은 응답이 PATROL 을 못 덮게.
             # 늦게 '적용'된 낡은 속도는 SpeedManager 가 reconcile 로 재조정.
             self.speed.cancel_pending('reset')

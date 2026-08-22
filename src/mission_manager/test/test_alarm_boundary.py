@@ -180,7 +180,7 @@ def assert_blocked(node, keyword):
     assert node._cancels == 1, f'활성 goal 취소가 {node._cancels}회'
     # 🔴 §84.2 — 일반 취소면 종결을 확인하지 않는다. 의도가 safety_stop 이어야 한다.
     assert node._intents == ['safety_stop'], node._intents
-    assert node.blocked_stop == 'pending', node.blocked_stop
+    assert node.stop_state == 'pending', node.stop_state
     assert node.blocked_reason and 'unsafe_gather' in node.blocked_reason
     assert any('알람 거부' in m and keyword in m for m in node._logs), node._logs
 
@@ -199,7 +199,7 @@ def h_node(min_fire_dist=1.5, goal_active=True):
     node.cancel_current_goal = _cancel
     node.blocked_reason = None          # MissionNode.__init__ 이 세우는 자리
     node._blocked_logged = False
-    node.blocked_stop = None
+    node.stop_state = None
     # §84.2 — GoalManager 대역. `active` 는 "취소할 goal 이 있었나" 를 준다.
     node.goals = types.SimpleNamespace(active=goal_active, stop_pending=False)
     node.wp = {
@@ -321,7 +321,7 @@ def test_s13_no_active_goal_reports_stop_as_none():
     node = h_node(goal_active=False)
     node.on_alarm(fake_alarm(1.0, -10.65))
     assert node.state == State.BLOCKED
-    assert node.blocked_stop == 'none', node.blocked_stop
+    assert node.stop_state == 'none', node.stop_state
 
 
 def test_s13_stop_unconfirmed_is_not_stopped():
@@ -332,9 +332,9 @@ def test_s13_stop_unconfirmed_is_not_stopped():
     계속 주행하는 상태가 만들어졌다."""
     node = h_node()
     node.on_alarm(fake_alarm(1.0, -10.65))
-    assert node.blocked_stop == 'pending'
+    assert node.stop_state == 'pending'
     node.on_safety_stop_unconfirmed('취소 요청 실패: injected')
-    assert node.blocked_stop == 'unconfirmed'
+    assert node.stop_state == 'unconfirmed'
     assert '정지 미확인' in node.blocked_reason
     assert any('E-stop' in m for m in node._logs), node._logs
 
@@ -343,9 +343,9 @@ def test_s13_stop_confirmed_only_after_canceled_terminal():
     """CANCELED 종결을 관찰한 뒤에만 '정지 확인됨' 이 된다."""
     node = h_node()
     node.on_alarm(fake_alarm(1.0, -10.65))
-    assert node.blocked_stop == 'pending'
+    assert node.stop_state == 'pending'
     node.on_safety_stop_confirmed()
-    assert node.blocked_stop == 'confirmed'
+    assert node.stop_state == 'confirmed'
 
 
 def test_s13_unconfirmed_is_not_overwritten_by_late_confirm():
@@ -354,7 +354,7 @@ def test_s13_unconfirmed_is_not_overwritten_by_late_confirm():
     node.on_alarm(fake_alarm(1.0, -10.65))
     node.on_safety_stop_unconfirmed('injected')
     node.on_safety_stop_confirmed()
-    assert node.blocked_stop == 'unconfirmed'
+    assert node.stop_state == 'unconfirmed'
 
 
 def test_s13_accepted_fire_uses_no_cancel_intent():
