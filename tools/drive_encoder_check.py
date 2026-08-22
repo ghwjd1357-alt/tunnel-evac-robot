@@ -70,7 +70,10 @@ import sys
 #
 # 바꿀 일이 생기면 `.ino` 를 먼저 고치고 여기를 따라 옮긴다. 보드가 실제로 뭘 들고
 # 있는지는 `/firmware/info` 의 `odom_wheel_base=` · `odom_wheel_radius=` 로 대조한다.
-ODOM_WHEEL_BASE_M = 0.829
+# 🔴 2026-08-22 재교정 0.829 -> 0.859 (`.ino` 와 한 쌍. 회귀가 `.ino` 에서 읽어 대조한다).
+#   근거 = 08-22 실측: 줄자 직진 2회가 반지름을 지지(0.9936·0.9919) · 제자리 회전
+#   3회에서 odom/IMU = 1.0431. 정본 = docs/REAL_ROBOT_VALUES.md §1-c.
+ODOM_WHEEL_BASE_M = 0.859
 ODOM_WHEEL_RADIUS_M = 0.05698
 
 # 🔴 판재 이전(08-12 까지) 증거를 다시 환산할 때 쓰는 옛 값. **현재값이 아니다.**

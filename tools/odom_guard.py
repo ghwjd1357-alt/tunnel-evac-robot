@@ -54,9 +54,9 @@ FUSED_COV_IDX = (0, 7, 35)
 COV_MIN = 1e-9
 COV_MAX = 1e6
 
-# `.ino` MAX_LINEAR_CMD = 0.12 의 2배. 실측 순항이 0.128 이므로 여유가 충분하고,
-# 관측된 쓰레기 vx(2.42 · 3.33)와는 한참 떨어져 있다.
-VX_ABS_MAX = 0.25
+# `.ino` MAX_LINEAR_CMD 의 2배. 🔴 08-22 상한이 0.12 -> 0.20 으로 올라가 같이 옮긴다
+# (0.25 -> 0.40). 관측된 쓰레기 vx(2.42 · 3.33)와는 여전히 한참 떨어져 있다.
+VX_ABS_MAX = 0.40
 
 
 def check(cov, vx, vy, wz):
@@ -75,7 +75,7 @@ def check(cov, vx, vy, wz):
         if not math.isfinite(v):
             return f'{name} 이 유한하지 않다 ({v})'
     if abs(vx) > VX_ABS_MAX:
-        return f'vx = {vx:.4f} — 물리 상한(MAX_LINEAR_CMD 0.12)의 2배를 넘는다'
+        return f'vx = {vx:.4f} — 물리 상한(MAX_LINEAR_CMD 0.20)의 2배를 넘는다'
     return None
 
 

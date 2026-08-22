@@ -37,8 +37,17 @@ import sys
 
 # 🔴 odom 계열 상수 — `.ino` ODOM_WHEEL_BASE. 명령 경로 0.62 도 물리 0.49 도 아니다.
 #   회귀(`test_bag_drive_report.py`)가 `.ino` 에서 읽어 대조한다.
-ODOM_WHEEL_BASE = 0.829
+# 🔴 2026-08-22 재교정 0.829 -> 0.859 (`.ino` 와 한 쌍. 회귀가 `.ino` 에서 읽어 대조한다).
+#   근거 = 08-22 실측: 줄자 직진 2회가 반지름을 지지(0.9936·0.9919) · 제자리 회전
+#   3회에서 odom/IMU = 1.0431. 정본 = docs/REAL_ROBOT_VALUES.md §1-c.
+ODOM_WHEEL_BASE = 0.859
 BAL_OK = 0.05        # |r| 이 이 아래면 좌우 균형 정상
+
+
+# 🔴 08-22 재교정 **이전**에 찍은 bag 은 이 값으로 풀어야 한다 — 그때 펌웨어가 쓰던
+#   눈금이기 때문이다. 새 값(0.859)으로 옛 bag 을 풀면 kR 이 조용히 어긋난다
+#   (08-21 21:32 리허설이 0.525 -> 0.507 로 읽힌다). `--pre-0822` 로 고른다.
+WHEEL_BASE_PRE_0822 = 0.829
 
 
 def solve_kr(odom_lin, odom_w, base=ODOM_WHEEL_BASE):
@@ -104,7 +113,7 @@ def segments(cmds, kind, minlen):
     return out
 
 
-def report(path):
+def report(path, base=ODOM_WHEEL_BASE):
     name = path.rstrip('/').split('/')[-1]
     d = read(path, ['/odom', '/imu/data', '/cmd_vel'])
     if not d.get('/odom') or not d.get('/cmd_vel'):
@@ -134,7 +143,8 @@ def report(path):
             lin, ow = st.median(L), st.median(W)
             iw = st.median(I) if I else None
 
-    r, weak, k = solve_kr(lin, ow) if lin is not None else (None, None, None)
+    r, weak, k = (solve_kr(lin, ow, base=base) if lin is not None
+                  else (None, None, None))
     print(f'\n──── {name} ────')
     if lin is None:
         print('  직진 구간(≥5s)이 없다 — 비대칭 판정 불가')
@@ -172,13 +182,16 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__.split('사용:')[1].split('🔴')[0].strip(), file=sys.stderr)
         return 2
+    # 🔴 옛 bag 은 옛 윤거로 푼다 (위 WHEEL_BASE_PRE_0822 주석).
+    pre = '--pre-0822' in argv
+    base = WHEEL_BASE_PRE_0822 if pre else ODOM_WHEEL_BASE
     rc = 0
-    for p in argv[1:]:
+    for p in [a for a in argv[1:] if not a.startswith('--')]:
         if not os.path.isdir(p):
             print(f'없는 경로: {p}', file=sys.stderr)
             rc = max(rc, 2)
             continue
-        rc = max(rc, report(p))
+        rc = max(rc, report(p, base=base))
     return rc
 
 

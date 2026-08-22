@@ -34,6 +34,10 @@ class StraightVerdictTest(unittest.TestCase):
     # 08-21 실측: (bag, odom속도, odom ω, IMU ω)
     HEALTHY = (0.0958, +0.0031, +0.0031)   # rehearsalD_0821 17:17
     BROKEN = (0.0772, -0.0580, +0.0058)    # rehearsal2_0821  21:32
+    # 🔴 08-22 에 ODOM_WHEEL_BASE 를 0.829 -> 0.859 로 재교정했다. 위 두 픽스처는
+    #   **그 이전** 실측이라 옛 눈금으로 풀어야 0.525 가 나온다. 새 값으로 풀면
+    #   0.507 이 되는데, 그건 도구가 틀린 게 아니라 우리가 잘못 물은 것이다.
+    BASE = dh.WHEEL_BASE_PRE_0822
 
     def test_01_healthy_run_passes(self):
         rc, out = run(dh.straight_verdict, *self.HEALTHY)
@@ -48,8 +52,8 @@ class StraightVerdictTest(unittest.TestCase):
 
     def test_03_the_factor_is_a_half_not_just_low(self):
         """계수가 **0.5** 로 나와야 '엔코더 하나' 라는 결론이 선다."""
-        rc, out = run(dh.straight_verdict, *self.BROKEN)
-        r = self.BROKEN[1] * dh.ODOM_WHEEL_BASE / (2 * self.BROKEN[0])
+        rc, out = run(dh.straight_verdict, *self.BROKEN, base=self.BASE)
+        r = self.BROKEN[1] * self.BASE / (2 * self.BROKEN[0])
         k = (1 - abs(r)) / (1 + abs(r))
         self.assertAlmostEqual(0.525, k, places=3)
         self.assertIn('0.525', out)

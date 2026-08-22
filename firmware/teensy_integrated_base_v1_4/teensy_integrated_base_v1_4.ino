@@ -201,7 +201,17 @@ static const double CMD_WHEEL_BASE = 0.62;   // command-path track width [m]
 // 🔴 이 값은 **제자리 회전**에 맞춘 값이다. 완만한 곡선에서는 odom 이 yaw 를 약 16%
 //    과소평가한다(제자리 0.991 vs 곡선 0.838) — ICR 이 선회 반경에 따라 옮겨간다.
 //    전제조건·재개방 = docs/REAL_ROBOT_VALUES.md §1-c.
-static const double ODOM_WHEEL_BASE = 0.829;
+// 🔴 2026-08-22 재교정 — 08-21 밤 바퀴 보강 뒤 실측 (§1-m 08-22).
+//   ⓐ 반지름은 **줄자로 두 번 독립 확인**했고 상수를 지지한다 — 바꾸지 않았다:
+//        1회차 odom 2.6049 / 줄자 2.5881 = 0.9936
+//        2회차 odom 2.5203 / 줄자 2.5000 = 0.9919   (0.8% 이내 일치)
+//      → 아침에 세운 "보강으로 굴림 반지름이 변했다" 는 가설은 **실측으로 기각**됐다.
+//   ⓑ 회전은 odom 이 IMU 보다 **크게** 읽는다(3회: 1.0467 · 1.0394 · 1.0433).
+//      odom_w = (v_r - v_l)/BASE 이므로 BASE 가 작으면 w 가 커진다 → 키운다:
+//        0.829 x 1.0431 x 0.9936 = 0.8592
+//   ⚠ 위 ⚠(제자리 전용 · 곡선 16% 과소평가)는 그대로 유효하다. 이 재교정은
+//     **같은 제자리 조건에서 비만 다시 맞춘 것**이고 곡선 편차를 고치지 않는다.
+static const double ODOM_WHEEL_BASE = 0.859;
 
 // odom 이 쓰는 눈금. 엔코더 1 카운트가 지면에서 몇 m 인가.
 static const double DISTANCE_PER_COUNT =
@@ -215,9 +225,27 @@ static const double DISTANCE_PER_COUNT =
 // 반지름이 제자리로 오면서 배율이 1.0(항등)이 되어 분리가 스스로 불필요해졌다.
 
 // cmd_vel and wheel-speed limits.
-static const double MAX_LINEAR_CMD = 0.12;   // [m/s]
-static const double MAX_ANGULAR_CMD = 0.50;  // [rad/s]
-static const double MAX_WHEEL_CMD = 0.15;    // [m/s]
+// 🔴 2026-08-22 상향 (사용자 결정) — 0.12/0.50/0.15 -> 0.20/0.83/0.30.
+//   ★ 세 개를 **같이** 올린다. MAX_WHEEL_CMD 는 바퀴 목표속도의 최종 관문이라
+//     (:670 clampDouble) 이것만 낮게 두면 위 둘이 아무 효과가 없다. 실제로 구판은
+//     제자리 회전 w=0.50 에서 필요한 바퀴속도 0.50*0.62/2 = 0.155 가 0.15 에 걸려
+//     **이미 잘리고 있었다** (실효 각속도 상한 0.484).
+//   검산 (CMD_WHEEL_BASE 0.62):
+//     직진 0.20 단독        -> 0.200  통과
+//     제자리 0.83 단독      -> 0.257  통과
+//     직진 0.20 + 회전 0.4  -> 0.324  살짝 잘림 = **의도한 곡률 제한**
+//   🔴 이 상한은 '천장'이지 운용값이 아니다. 실제 속도는 Nav2 가 정한다
+//      (nav2_params_real_db.yaml: desired_linear_vel 0.15 부터 시작).
+//   🔴 전기 전제 파기 — ELECTRICAL_BASELINE 의 릴레이 DC 25.2V 차단 정격 미증명
+//      조건부 수용은 "MAX_LINEAR_CMD 0.12 / MAX_ANGULAR_CMD 0.50 유지" 를 전제로
+//      한다. 이 커밋이 그 전제를 깬다. 끼임 전류 추정 11A -> 약 21A (PWM 64 -> 124).
+//      전제 재작성·재개방 조건 = ELECTRICAL_BASELINE §7·§13-a.
+//   ⚠ FF 계수(335)의 적합 구간은 재구성 PWM 54.6~66.5 뿐이다. 0.20 은 그 밖이라
+//     **명령대로 안 나온다** — 실측 0.10 명령에 실제 0.086(86%)이었다. 굽고 나서
+//     0.15/0.18/0.20 세 점을 지면에서 재기 전까지 이 상한을 "실제 속도"로 읽지 않는다.
+static const double MAX_LINEAR_CMD = 0.20;   // [m/s]
+static const double MAX_ANGULAR_CMD = 0.83;  // [rad/s]
+static const double MAX_WHEEL_CMD = 0.30;    // [m/s]
 static const double COMMAND_DEADBAND = 0.002;
 
 // Low-speed continuous-drive model.
@@ -279,12 +307,19 @@ static const bool USE_PID_D_TERM = false;
 //   KP: PWM / (m/s)
 //   KI: PWM / m
 //   KD: PWM*s / (m/s)
-static const double WHEEL_KP = 30.0;
+// 🔴 2026-08-22 상향 30 -> 60. 바퀴가 걸린 구간에서 되돌릴 권한이 없었다:
+//   오차 0.187 m/s 에 비례항이 30*0.187 = 5.6 PWM 뿐이고 적분 상한 20 을 더해도
+//   FF 86 + 26 = 112 PWM 이다. 하드웨어 상한 MAX_CONTROL_PWM 160 의 70% 만 쓴다.
+//   08-22 실차에서 제자리 회전이 5.5 -> 0 °/s 로 무너진 구간이 이 자리였다.
+static const double WHEEL_KP = 60.0;
 static const double WHEEL_KI = 5.0;
 static const double WHEEL_KD = 0.0;
 
 // Integral and derivative protection.
-static const double INTEGRAL_PWM_LIMIT = 20.0;
+// 🔴 2026-08-22 상향 20 -> 40 (WHEEL_KP 와 한 쌍). 스톨 근처에서 적분이 더 감겨
+//   걸림을 넘는다. ⚠ 그만큼 **스톨 전류가 올라간다** — 위 MAX_*_CMD 주석의 전기
+//   전제 파기가 이 값에도 그대로 걸린다.
+static const double INTEGRAL_PWM_LIMIT = 40.0;
 static const double VELOCITY_FILTER_ALPHA = 0.10;
 static const double DERIVATIVE_FILTER_ALPHA = 0.10;
 

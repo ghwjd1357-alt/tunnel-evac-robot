@@ -69,7 +69,15 @@ TURN_RATE = 0.45        # rad/s — 회전 불감대(0.2329) 를 확실히 넘�
 TRACK = 0.49            # m — URDF 의 바퀴 간격 (robot_real.urdf: y=±0.245)
 # 🔴 odom 계열 상수다 (`.ino` ODOM_WHEEL_BASE). 명령 경로의 0.62 도, 물리 0.49 도 아니다.
 #   회귀(`test_drive_health.py`)가 `.ino` 에서 읽어 대조한다 — 베껴 적고 잊는 것을 막는다.
-ODOM_WHEEL_BASE = 0.829
+# 🔴 2026-08-22 재교정 0.829 -> 0.859 (`.ino` 와 한 쌍. 회귀가 `.ino` 에서 읽어 대조한다).
+#   근거 = 08-22 실측: 줄자 직진 2회가 반지름을 지지(0.9936·0.9919) · 제자리 회전
+#   3회에서 odom/IMU = 1.0431. 정본 = docs/REAL_ROBOT_VALUES.md §1-c.
+ODOM_WHEEL_BASE = 0.859
+
+# 🔴 08-22 재교정 **이전**에 찍은 bag 은 이 값으로 풀어야 한다 — 그때 펌웨어가 쓰던
+#   눈금이기 때문이다. 새 값(0.859)으로 옛 bag 을 풀면 kR 이 조용히 어긋난다
+#   (08-21 21:32 리허설이 0.525 -> 0.507 로 읽힌다). `--pre-0822` 로 고른다.
+WHEEL_BASE_PRE_0822 = 0.829
 STRAIGHT_SPEED = 0.10   # m/s — M1 에서 안전이 증명된 속도 (guide_speed 와 같다)
 MAX_STRAIGHT_SEC = 20.0
 BAL_OK = 0.05           # |r| 이 이 아래면 좌우 균형 정상

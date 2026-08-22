@@ -14,18 +14,22 @@ class SolveKrTest(unittest.TestCase):
     """`/odom` 만으로 약한 쪽 계수를 역산한다."""
 
     # 08-21 실측 (직진 구간 중앙값)
+    # 🔴 08-22 에 ODOM_WHEEL_BASE 를 0.829 -> 0.859 로 재교정했다. 아래 픽스처는
+    #   **그 이전** bag 이므로 옛 눈금으로 풀어야 한다 — 새 값으로 풀면 0.525 가
+    #   0.507 로 어긋나고, 그건 도구가 틀린 게 아니라 우리가 잘못 물은 것이다.
+    BASE = B.WHEEL_BASE_PRE_0822
     BROKEN = (0.0772, -0.0580)     # rehearsal2_0821 21:32
     HEALTHY = (0.0958, +0.0031)    # rehearsalD_0821 17:17
 
     def test_b1_the_real_failure_solves_to_a_half(self):
         """🎯 이 숫자가 진단의 전부다 — ≈0.52 는 **합성** 비율이다(채널이 아니다)."""
-        r, weak, k = B.solve_kr(*self.BROKEN)
+        r, weak, k = B.solve_kr(*self.BROKEN, base=self.BASE)
         self.assertEqual('right', weak)
         self.assertAlmostEqual(0.525, k, places=3)
         self.assertAlmostEqual(-0.3114, r, places=4)
 
     def test_b2_the_healthy_run_is_balanced(self):
-        r, weak, k = B.solve_kr(*self.HEALTHY)
+        r, weak, k = B.solve_kr(*self.HEALTHY, base=self.BASE)
         self.assertIsNone(weak, f'정상 시행을 고장으로 읽었다 (r={r:+.4f})')
 
     def test_b3_the_weak_side_is_not_hardcoded(self):
@@ -34,7 +38,7 @@ class SolveKrTest(unittest.TestCase):
         실측이 마침 오른쪽이었으니 'right' 를 박아 두어도 위 둘은 통과한다.
         그러면 다음에 왼쪽이 고장 났을 때 도구가 거짓말한다.
         """
-        _, weak, k = B.solve_kr(self.BROKEN[0], -self.BROKEN[1])
+        _, weak, k = B.solve_kr(self.BROKEN[0], -self.BROKEN[1], base=self.BASE)
         self.assertEqual('left', weak)
         self.assertAlmostEqual(0.525, k, places=3)
 
