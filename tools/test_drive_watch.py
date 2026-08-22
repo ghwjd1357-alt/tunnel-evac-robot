@@ -24,67 +24,106 @@ def run(samples, cmd=(0.10, 0.0), hz=20.0, window=2.0):
     return w, hits
 
 
-class VerdictTest(unittest.TestCase):
+# 08-21 실측 (odom ω, IMU ω) — 이 네 경우가 판정선의 전부다
+STRAIGHT_OK = (+0.0031, +0.0031)     # rehearsalD 17:17 직진
+STRAIGHT_BAD = (-0.0580, +0.0058)    # rehearsal2  21:32 직진
+TURN_OK = (+0.1283, +0.1262)         # M2 14:00 회전
+TURN_BAD = (+0.0965, +0.1456)        # spin180b 21:26 회전
 
-    def test_w1_the_real_failure_is_caught(self):
-        r, weak = W.verdict(*BROKEN)
-        self.assertEqual('오른쪽', weak)
-        self.assertAlmostEqual(-0.311, r, places=2)
 
-    def test_w2_the_healthy_run_is_quiet(self):
-        _, weak = W.verdict(*HEALTHY)
-        self.assertIsNone(weak, '정상 시행에 경고가 떴다 — 멀쩡한 테이크를 버린다')
+def run(pairs, hz=47.0, window=2.0, lin=0.10):
+    """`/odom` 실측은 47.3 Hz 다. 3.8 Hz 는 `/detections` 이고 이 도구와 무관하다."""
+    w = W.Watch(window)
+    msgs, t = [], 0.0
+    for ow, iw in pairs:
+        t += 1.0 / hz
+        m = w.feed(t, ow, iw, lin)
+        if m:
+            msgs.append(m)
+    return w, msgs
 
-    def test_w3_the_weak_side_is_not_hardcoded(self):
-        _, weak = W.verdict(BROKEN[0], -BROKEN[1])
-        self.assertEqual('왼쪽', weak)
 
-    def test_w4_a_stopped_robot_is_undecidable(self):
-        r, weak = W.verdict(0.001, -0.05)
-        self.assertIsNone(r)
+class DiscrepancyTest(unittest.TestCase):
+    """🔴 기준은 **자이로**다 — 바퀴와 물리적으로 무관한 유일한 증인."""
+
+    def test_w1_the_real_failures_are_caught(self):
+        for tag, (ow, iw) in (('직진', STRAIGHT_BAD), ('회전', TURN_BAD)):
+            _, _, bad = W.discrepancy(ow, iw)
+            self.assertTrue(bad, f'{tag} 고장을 못 잡았다')
+
+    def test_w2_the_healthy_runs_are_quiet(self):
+        for tag, (ow, iw) in (('직진', STRAIGHT_OK), ('회전', TURN_OK)):
+            _, _, bad = W.discrepancy(ow, iw)
+            self.assertFalse(bad, f'{tag} 정상에 경고 — 멀쩡한 테이크를 버린다')
+
+    def test_w3_a_healthy_curve_is_not_a_fault(self):
+        """🔴 **부정 회귀 — 이것이 첫 판을 폐기시킨 결함이다.**
+
+        구판은 `cmd_vel` 이 직진일 때 `odom ω` 가 0 인지를 봤다. Nav2 RPP 는 곡률
+        보정을 계속 내므로(전진 명령 |ω| 중앙값 0.0468) **정상 곡선에서 124회
+        오경보**가 났다. 자이로 기준에서는 곡률이 있어도 둘이 같이 움직인다.
+        """
+        for w_ in (0.02, 0.05, 0.10, 0.30):
+            _, _, bad = W.discrepancy(w_ * 1.02, w_)   # odom 이 IMU 를 2% 안에서 따라감
+            self.assertFalse(bad, f'정상 곡선 ω={w_} 에서 오경보')
+
+    def test_w4_a_rotation_uses_a_proportional_threshold(self):
+        """회전에서는 절대 문턱만 쓰면 큰 ω 의 작은 오차에 소리친다."""
+        _, th_slow, _ = W.discrepancy(0.0, 0.0)
+        _, th_fast, _ = W.discrepancy(0.0, 0.5)
+        self.assertGreater(th_fast, th_slow)
 
 
 class WatchTest(unittest.TestCase):
 
     def test_w5_a_recurrence_during_a_take_is_reported(self):
-        _, hits = run([BROKEN] * 60)
-        self.assertTrue(hits, '🔴 재발이 났는데 아무 말도 안 했다')
-        self.assertIn('오른쪽', hits[0])
+        _, msgs = run([STRAIGHT_BAD] * 300)
+        self.assertTrue(msgs, '🔴 재발이 났는데 아무 말도 안 했다')
+        self.assertIn('오른쪽', msgs[0], '직진 지문인데 쪽을 안 말했다')
 
     def test_w6_a_healthy_take_produces_no_alert(self):
-        _, hits = run([HEALTHY] * 60)
-        self.assertEqual([], hits, '멀쩡한 주행에 경고가 떴다')
+        for pairs in ([STRAIGHT_OK] * 300, [TURN_OK] * 300):
+            _, msgs = run(pairs)
+            self.assertEqual([], msgs, '멀쩡한 주행에 경고가 떴다')
 
-    def test_w7_turning_and_stopping_are_skipped(self):
-        """🔴 회전·정지에서는 이 식이 성립하지 않는다 — 판정하면 안 된다."""
-        _, turn = run([BROKEN] * 60, cmd=(0.0, 0.45))
-        self.assertEqual([], turn, '회전 중에 직진 판정을 했다')
-        _, stop = run([BROKEN] * 60, cmd=(0.0, 0.0))
-        self.assertEqual([], stop, '정지 중에 판정을 했다')
+    def test_w7_one_event_does_not_spam(self):
+        """🔴 §89.6 — 한 사건에 계속 소리치면 로그가 묻힌다. latch 한다."""
+        w, msgs = run([STRAIGHT_BAD] * 500)
+        self.assertEqual(1, len([m for m in msgs if m.startswith('🔴')]))
+        self.assertEqual(1, w.alerts)
 
-    def test_w8_a_short_burst_is_not_enough(self):
-        """창을 못 채운 표본으로 경고하면 노이즈 한 번이 테이크를 버린다."""
-        _, hits = run([BROKEN] * 5)
-        self.assertEqual([], hits)
-
-    def test_w9_a_turn_in_the_middle_discards_the_window(self):
-        """🔴 회전이 섞이면 창을 버려야 한다 — 안 그러면 회전 표본이 직진 판정에 샌다."""
+    def test_w8_recovery_rearms_the_latch(self):
+        """복구를 보면 다시 무장한다 — 간헐 고장이라 두 번째가 온다."""
         w = W.Watch(2.0)
         t = 0.0
-        for i in range(60):
-            t += 0.05
-            w.feed(t, 0.10, 0.0, *HEALTHY)
-        t += 0.05
-        w.feed(t, 0.0, 0.45, *BROKEN)          # 회전 한 번
-        self.assertEqual([], w.buf, '회전이 들어왔는데 창이 안 비워졌다')
+        seq = ([STRAIGHT_BAD] * 200) + ([STRAIGHT_OK] * 200) + ([STRAIGHT_BAD] * 200)
+        msgs = []
+        for ow, iw in seq:
+            t += 1.0 / 47.0
+            m = w.feed(t, ow, iw, 0.10)
+            if m:
+                msgs.append(m)
+        self.assertEqual(2, w.alerts, f'두 번째 재발을 놓쳤다: {msgs}')
+        self.assertTrue(any(m.startswith('🟢') for m in msgs), '복구를 안 알렸다')
 
-    def test_w10_wheel_base_matches_the_firmware(self):
-        from tools.firmware_constants import firmware_double
-        self.assertEqual(firmware_double('ODOM_WHEEL_BASE'), W.ODOM_WHEEL_BASE)
+    def test_w9_a_short_burst_is_not_enough(self):
+        _, msgs = run([STRAIGHT_BAD] * 5)
+        self.assertEqual([], msgs)
 
+    def test_w10_being_blind_is_not_the_same_as_being_quiet(self):
+        """🔴 §89.6 — 표본이 모자라 판정이 **안 서는 것**을 조용함으로 착각하면 안 된다.
 
-if __name__ == '__main__':
-    unittest.main()
+        구판은 낮은 발행률에서 그냥 침묵했다 — 필요할 때 침묵하는 것이 제일 나쁘다.
+        """
+        w, msgs = run([STRAIGHT_BAD] * 20, hz=2.0)   # 최소 rate 미달
+        self.assertEqual([], msgs)
+        self.assertGreater(w.blind_for(20.0 / 2.0), 5.0,
+                           '판정이 안 서는데 그 사실을 보고하지 않는다')
+
+    def test_w11_wheel_base_constant_is_gone(self):
+        """🔵 자이로 기준으로 바꾸면서 윤거 상수 의존이 사라졌다 — 남아 있으면 잔재다."""
+        self.assertFalse(hasattr(W, 'ODOM_WHEEL_BASE'),
+                         'cmd 기반 잔재가 남았다')
 
 
 class ScanWatchTest(unittest.TestCase):
