@@ -988,5 +988,35 @@
     "id": "0822-regression-did-not-read-the-changed-nav2-file-87",
     "path": "src/tunnel_bringup/config/nav2_params_real_db.yaml",
     "anchor": "바꾼 파라미터 파일로 돌리지 않은 회귀는 그 변경을 검증하지 않았다"
+  },
+  {
+    "id": "0822-async-registration-outside-the-stop-boundary-88",
+    "path": "src/mission_manager/mission_manager/goal_manager.py",
+    "anchor": "동기 경로만 고친 정지 보완은 정지를 보장하지 않는다"
+  },
+  {
+    "id": "0822-no-wallclock-when-no-goal-is-issued-88",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "봉쇄 카운터가 소비되지 않는다 — 벽시계가 따로 필요하다"
+  },
+  {
+    "id": "0822-claiming-stopped-before-confirmation-88",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "정지가 확인되기 전에는 어떤 상태도"
+  },
+  {
+    "id": "0822-deadline-anchored-to-acceptance-not-attempt-88",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "상한의 기산은 결과가 아니라 최초 시도에서 연다"
+  },
+  {
+    "id": "0822-past-sweep-beats-present-silence-88",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "과거 관측이 지금의 침묵을 이기면 안 된다"
+  },
+  {
+    "id": "0822-debounce-constant-from-arithmetic-not-replay-88",
+    "path": "src/perception_adapter/perception_adapter/adapter_node.py",
+    "anchor": "평균×시간 산술로 디바운스 상수를 정하지 않는다 — 흘려서 잰다"
   }
 ]

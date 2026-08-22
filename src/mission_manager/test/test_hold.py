@@ -219,3 +219,50 @@ def test_h14_a_healthy_cancel_opens_the_clock_at_once():
     assert env.node.hold_since is not None
     T.run(env, hold_sec() + 0.6, EMPTY)
     assert env.node.state == State.SEARCH_BACK, '정상 취소인데 역행이 안 열렸다'
+
+
+# ── 🔴 08-22 §88.2 — 종결 무응답 상한 · steady clock ──────────────────
+def test_h15_a_stop_that_never_terminates_becomes_unconfirmed():
+    """🔴 부정 회귀 — 종결 콜백이 **영원히 안 오면** 상한이 실패로 승격해야 한다.
+
+    `CANCEL_STOP_MAX_BLOCKS` 는 새 goal 을 보내려는 시도에서만 소비된다. goal 을 안
+    내는 HOLD·RESCUE·NO_VICTIM 에서는 **영원히 pending** 이고, 그동안 "멈췄다" 를
+    말하면 사람이 물리 정지를 늦춘다.
+    """
+    import mission_manager.mission_node as MN
+
+    env = T.make_env()
+    env.stop_ok[0] = None                    # 확인도 실패도 안 온다
+    orig = env.node.cancel_current_goal
+    env.node.cancel_current_goal = lambda: (env.cancels.append(1),
+                                            setattr(env.node, 'goal_active', False))[0]
+    T.run(env, 0.1, PERSON)
+    T.run(env, 3.6, EMPTY)
+    assert env.node.state == State.HOLD
+    assert env.node.stop_state == 'pending', '전제 불성립'
+
+    real, fake = MN.time.monotonic, [env.node._stop_pending_since]
+    MN.time.monotonic = lambda: fake[0] + MN.STOP_CONFIRM_TIMEOUT_SEC + 0.1
+    try:
+        T.run(env, 1.0, EMPTY)
+    finally:
+        MN.time.monotonic = real
+    assert env.node.stop_state == 'unconfirmed', \
+        '🔴 종결이 영원히 안 왔는데 pending 에 머물렀다'
+    env.node.cancel_current_goal = orig
+
+
+def test_h16_the_deadline_uses_a_steady_clock_not_ros_time():
+    """🔴 `/clock` 이 멈춰도 이 상한은 흘러야 한다.
+
+    ROS clock 을 쓰면 sim clock 정지에서 상한도 같이 멈춘다 — **그때야말로 로봇이
+    서 있는지 알 수 없는 상황**이다.
+    """
+    import inspect
+
+    import mission_manager.mission_node as MN
+
+    src = inspect.getsource(MN.MissionNode._confirmed_stop)
+    assert 'time.monotonic' in src, '정지 기산이 steady clock 이 아니다'
+    assert 'get_clock' not in src.split('_stop_pending_since')[1][:200], \
+        '정지 기산에 ROS clock 이 섞였다'

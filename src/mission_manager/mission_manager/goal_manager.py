@@ -157,8 +157,8 @@ class GoalManager:
         self._response_pending_seq = seq   # 수락/거부 응답 도착 전까지 '대기'로 표시
         self._log.info(
             f'[{state_name}] 목표전송 {tag} → ({wp["x"]:.1f}, {wp["y"]:.1f})')
-        fut = self._nav.send_goal_async(goal)
-        fut.add_done_callback(partial(self._on_goal_response, seq))
+        self._watch(lambda: self._nav.send_goal_async(goal),
+                    partial(self._on_goal_response, seq), f'목표전송(seq={seq})')
 
     def cancel_current_goal(self, intent=None):
         """현재 goal 취소. intent 로 상위 의도를 구분한다:
@@ -219,7 +219,7 @@ class GoalManager:
     #: 🔴 §85.3 **패턴 수정** — 정지 실패 출구의 **개수를 계약으로 고정**한다.
     #:   §84.2 는 출구 3개만 바꾸고 2개를 놓쳤다. 손으로 세면 또 놓친다.
     #:   `tools/test_stop_exits.py` 가 이 값과 실제 `_stop_failed(` 호출 수를 대조한다.
-    STOP_FAILURE_EXITS = 7
+    STOP_FAILURE_EXITS = 8   # 08-22 §88.2 — _watch 공통 경계가 하나 늘었다
 
     def _stop_failed(self, reason):
         """🔴 §84.2 — 정지 확인 실패의 귀속처를 **의도로** 가른다.
@@ -315,8 +315,14 @@ class GoalManager:
                 self._log.warn(
                     f'뒤늦게 수락된 이전 목표(seq={seq}) 즉시 취소 '
                     f'(현재 seq={self._seq})')
-                handle.get_result_async().add_done_callback(
-                    partial(self._on_stale_result, seq))
+                # 🔴 §88.2 ① — 이 등록이 동기 예외를 내면 구판은 **다음 줄의 취소가
+                #   아예 안 불렸다.** Nav2 가 수락해 주행 중인 옛 goal 에 취소를 못
+                #   보내는 것이라 직접적인 이동 P0 였다. `_watch` 가 삼키고,
+                #   실패해도 아래 취소는 반드시 나간다.
+                self._watch(handle.get_result_async,
+                            partial(self._on_stale_result, seq),
+                            f'늦은 수락 결과감시(seq={seq})',
+                            stop_seq=(seq if self._is_stop_target(seq) else None))
                 # ★ P1: 이 goal 이 B 정지 대상이면 취소도 B 로 귀속(빈 goals_canceling·
                 #   호출 예외를 FAULT+봉쇄로). 아니면 일반 취소(로그만).
                 self._cancel_with_confirm(
@@ -335,8 +341,9 @@ class GoalManager:
             self._on_fault()
             return
         self._handle = handle
-        handle.get_result_async().add_done_callback(
-            partial(self._on_result, seq))
+        self._watch(handle.get_result_async, partial(self._on_result, seq),
+                    f'결과감시(seq={seq})',
+                    stop_seq=(seq if self._is_stop_target(seq) else None))
 
     def _on_result(self, seq, future):
         """현재 goal 최종결과 — 성공→on_reached, 실패→on_fault. stale 은 종결 관찰."""
@@ -383,6 +390,35 @@ class GoalManager:
     # ===========================================================
     # 내부 — 취소 접수·종결 확인
     # ===========================================================
+    def _watch(self, make_future, cb, tag, stop_seq=None):
+        """🔴 08-22 §88.2 — 비동기 등록의 **공통 보호 경계**.
+
+        `get_result_async()` 도 `add_done_callback()` 도 **동기 예외를 낼 수 있다.**
+        구판은 이 둘을 맨몸으로 불렀고, 재검토가 두 자리에서 예외가 밖으로 새는 것을
+        재현했다(`:318` · `:400`). 예외가 새면 그 뒤 줄이 아예 안 돌고,
+        `_stop_pending` 만 True 로 남아 **상위는 정지 여부를 영원히 모른다.**
+
+        반환 True/False. 🔴 **False 여도 호출자는 다음 일을 계속해야 한다** —
+        특히 결과 감시 등록 실패가 **취소 시도 자체를 건너뛰게 하면 안 된다**
+        (그게 §88.2 ①의 직접적인 이동 P0 였다).
+        """
+        try:
+            fut = make_future()
+            fut.add_done_callback(cb)
+            return True
+        except Exception as e:                                   # noqa: BLE001
+            self._log.error(f'★ {tag} 비동기 등록 실패: {e} — 종결 관찰 불가')
+            # 🔴 §84.2 — **정지 대상 실패는 FAULT 로 보내지 않는다.** FAULT 는 자동
+            #   재시도가 있는데, 정지가 확인 안 된 상황에서 재시도는 위험하다.
+            #   ⚠ 일반 goal 경로를 **먼저** 처리해 그 분리가 눈에 보이게 둔다
+            #     (`test_stop_exits` 가 정지 가드 아래의 직접 FAULT 를 잡는다).
+            if stop_seq is None:
+                self._on_fault()
+                return False
+            if self._is_stop_target(stop_seq):
+                self._stop_failed(f'{tag} 등록 실패: {e}')
+            return False
+
     def _cancel_with_confirm(self, handle, tag, stop_seq=None):
         """cancel_goal_async 의 응답까지 확인. 재시도는 안 한다(거절의 흔한 원인이
         '이미 종결'이라 무의미) — 진짜 이상은 경고 로그가 관제 대응 경로.
@@ -397,8 +433,10 @@ class GoalManager:
             if stop_seq is not None and self._is_stop_target(stop_seq):
                 self._stop_failed(f'취소 요청 실패: {e}')
             return
-        fut.add_done_callback(
-            partial(self._on_cancel_response, tag, stop_seq))
+        # 🔴 §88.2 ② — 구판은 이 등록이 try 밖이라 예외가 샜고, 그러면
+        #   `_stop_failed` 가 안 불려 **상위가 취소 접수 여부를 모른다.**
+        self._watch(lambda: fut, partial(self._on_cancel_response, tag, stop_seq),
+                    f'{tag} 취소응답', stop_seq=stop_seq)
 
     def _on_cancel_response(self, tag, stop_seq, future):
         try:

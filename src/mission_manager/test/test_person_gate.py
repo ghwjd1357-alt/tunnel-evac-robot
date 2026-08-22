@@ -466,20 +466,66 @@ def test_g31_a_new_sweep_does_not_inherit_the_previous_one():
 
 
 # ── 🔴 08-22 §87.7 — 훑기 goal 의 벽시계 상한 ──────────────────────────
+def advance_steady(seconds):
+    """🔵 상한이 **steady clock** 이라 가짜 ROS 시계로는 못 민다 — 그게 요점이다."""
+    import mission_manager.mission_node as MN
+    base = MN.time.monotonic()
+    MN.time.monotonic = lambda: base + seconds
+    return MN
+
+
 def test_g32_a_scan_goal_that_never_answers_ends_in_fault():
     """🔴 부정 회귀 — 응답도 결과도 안 오면 미션이 **영원히 멈춘다.**
 
-    명시 실패(REJECTED/ABORTED)는 `GoalManager` 가 FAULT 로 유한 종결하지만,
-    아무 콜백도 안 오는 경우에는 `goal_active=True` 가 무한 유지되고 아무도
-    시간을 세지 않았다. Nav2/action 통신이 반쯤 죽으면 네 스텝 중 하나에서 걸린다.
+    명시 실패는 `GoalManager` 가 FAULT 로 유한 종결하지만, 아무 콜백도 안 오는
+    경우에는 아무도 시간을 세지 않았다.
     """
+    import mission_manager.mission_node as MN
+
     env = scan_env()
     env.node.wp['scan_goal_timeout_sec'] = 3.0
-    run_live(env, 1.0, PERSON, 'none')          # goal 이 나가고
+    run_live(env, 1.0, PERSON, 'none')
     assert env.node.goal_active, '전제 불성립: goal 이 안 나갔다'
-    run_live(env, 5.0, PERSON, 'none')          # 그 뒤로 아무 응답이 없다
+    real = MN.time.monotonic
+    advance_steady(10.0)
+    try:
+        run_live(env, 1.0, PERSON, 'none')
+    finally:
+        MN.time.monotonic = real
+    assert env.node.state == State.FAULT, '응답 없는 훑기 goal 이 무한 대기로 남았다'
+
+
+def test_g32b_an_unready_action_server_is_also_finite():
+    """🔴 **§88.3** — server 가 준비 안 되면 `send_goal` 이 no-op 이라
+    `goal_active` 가 영원히 False 다. 구판은 그때 **매 tick 기산을 다시 써서**
+    무한 정지했다 — Nav2 기동 실패에서 첫 goal 도 못 낸 채 장면이 안 끝난다.
+    """
+    import mission_manager.mission_node as MN
+
+    env = scan_env()
+    env.node.wp['scan_goal_timeout_sec'] = 3.0
+    env.node.send_goal = lambda w, tag='': None      # server unready = no-op
+    run_live(env, 1.0, PERSON, 'none')
+    assert not env.node.goal_active, '전제 불성립'
+    real = MN.time.monotonic
+    advance_steady(10.0)
+    try:
+        run_live(env, 1.0, PERSON, 'none')
+    finally:
+        MN.time.monotonic = real
     assert env.node.state == State.FAULT, \
-        '응답 없는 훑기 goal 이 무한 대기로 남았다'
+        '🔴 server 미준비에서 상한이 매 tick 리셋돼 무한 정지했다'
+
+
+def test_g32c_the_scan_deadline_survives_a_frozen_ros_clock():
+    """🔴 `/clock` 이 멈춰도 상한은 흘러야 한다 — 그때야말로 알 수 없는 상황이다."""
+    import inspect
+
+    import mission_manager.mission_node as MN
+
+    src = inspect.getsource(MN.MissionNode.tick)
+    seg = src[src.index('scan_goal_since is None'):][:400]
+    assert 'time.monotonic' in seg, '훑기 상한이 steady clock 이 아니다'
 
 
 def test_g33_a_normal_scan_step_is_not_killed_by_the_deadline():
@@ -500,3 +546,100 @@ def test_g34_the_deadline_resets_between_steps():
     run_live(env, 1.0, PERSON, 'none')          # dwell 만료 → 다음 스텝
     assert env.node.scan_idx >= 1
     assert env.node.state == State.SCAN_AREA
+
+
+# ── 🔴 08-22 §88.2 ③ — 정지 전에 "멈췄다" 라고 말하지 않는다 ───────────
+def test_g35_rescue_does_not_claim_stopped_while_pending():
+    """🔴 부정 회귀 — 구판은 `stop_state` 를 **안 보고** "자동 주행을 멈췄다" 를 찍었다.
+
+    `pending` 인데 그렇게 말하면 **관제가 물리 정지를 늦춘다.** BLOCKED 은 §84.2 에서
+    이미 3분기로 나뉘어 있었는데 신규 상태 둘이 그 앞을 다시 밟았다.
+
+    ⚠ `GATHER` 에서는 낼 goal 이 없어 `stop_state='none'` 이 정상이다(`test_g22`).
+    `pending` 을 만들려면 **살아 있는 goal** 이 있어야 하므로 훑기 중에 시험한다.
+    """
+    env = scan_env()
+    env.stop_ok[0] = None                     # 확인도 실패도 안 온다 → pending 유지
+    env.node.cancel_current_goal = lambda: (
+        env.cancels.append(1), setattr(env.node, 'goal_active', False))[0]
+    run_live(env, 1.0, PERSON, 'none')        # 훑기 goal 이 나간다
+    assert env.node.goal_active, '전제 불성립: goal 이 안 나갔다'
+    run_live(env, 2.0, PERSON, 'fallen')      # 훑는 중 쓰러진 사람 확정
+    assert env.node.state == State.RESCUE
+    assert env.node.stop_state == 'pending', f'전제 불성립: {env.node.stop_state}'
+    said = ' '.join(m for m, _ in env.logs)
+    # ⚠ 경고 문구 자체에 `아직 "멈췄다" 로 읽지 말 것` 이 들어 있다 — 단순 부분
+    #   문자열로 보면 **경고를 위반으로 오독한다.** 확정 표지로 본다.
+    assert '정지 확인됨' not in said, 'RESCUE 가 정지 전에 확정을 선언했다'
+    assert '정지 종결 대기' in said or '정지 미확인' in said, \
+        'RESCUE 가 정지 미확인을 알리지 않았다'
+
+
+def test_g36_rescue_says_stopped_only_after_confirmation():
+    """🔵 역회귀 — 확인되면 그때는 분명히 말해야 한다(관제가 판단할 신호다)."""
+    env = scan_env()
+    run_live(env, 1.0, PERSON, 'none')
+    run_live(env, 2.0, PERSON, 'fallen')
+    assert env.node.state == State.RESCUE
+    assert env.node.stop_state in ('confirmed', 'none')
+    said = ' '.join(m for m, _ in env.logs)
+    assert '정지 확인됨' in said, '확인됐는데 관제에 알리지 않았다'
+
+
+# ── 🔴 08-22 §88.4 — sweep 기억 × 지금 값 결합표 ───────────────────────
+def verdict_with(sweep, live, waited=0.0):
+    env = T.make_env(state=State.GATHER)
+    env.node.wp['person_gate'] = True
+    env.node.scan_verdict = sweep
+    env.node.person_status = live
+    env.node.person_status_t = env.clock.now()
+    return env.node.person_verdict(waited)
+
+
+def test_g37_a_dead_adapter_never_lets_the_past_ok_take_us_away():
+    """🔴 부정 회귀 — **과거 ok + 지금 stale → guide** 였다.
+
+    훑을 때 서 있던 사람이 그 뒤 쓰러지지 않고 **센서만 죽어도** 옛 판정으로 떠난다.
+    가장 나쁜 방향이다.
+    """
+    assert verdict_with('ok', 'stale') == 'wait'
+    assert verdict_with('ok', 'unknown') == 'wait'
+
+
+def test_g38_a_fresh_person_beats_an_empty_sweep():
+    """🔴 부정 회귀 — **과거 none + 지금 신선한 ok → no_victim** 이었다.
+
+    훑고 난 뒤에 사람이 나타나도 "아무도 없다" 고 신고하고 선다.
+    """
+    assert verdict_with('none', 'ok') == 'guide'
+
+
+def test_g39_a_live_fallen_beats_everything():
+    for sweep in (None, 'none', 'ok', 'unknown'):
+        assert verdict_with(sweep, 'fallen') == 'rescue', sweep
+
+
+def test_g40_the_sweep_memory_still_covers_the_middle_quadrant():
+    """🔵 역회귀 — 결합표를 조이면서 §87.8 의 목적을 잃으면 안 된다.
+
+    중간 사분면에서 본 사람은 마지막 방향이 `none` 이어도 살아 있어야 한다.
+    """
+    assert verdict_with('ok', 'none') == 'guide'
+
+
+def test_g41_waiting_forever_still_ends_in_a_report():
+    """보류가 무한이면 로봇이 영원히 선다 — timeout 뒤에는 신고다."""
+    assert verdict_with('ok', 'stale', waited=999.0) == 'rescue'
+    assert verdict_with('unknown', 'none', waited=999.0) == 'rescue'
+
+
+def test_g42_the_dwell_is_long_enough_for_a_leave_verdict():
+    """🔴 **§88.4** — dwell 이 어댑터의 leave 확정시간보다 짧으면 그 방향에서
+    `ok`·`none` 이 **확정될 수 없다.** 훑기가 `unknown` 만 모으고 끝난다.
+
+    ⚠ 어댑터 기본값(`person_confirm_sec_leave`)은 다른 패키지에 있다. 여기서는
+    배포 설정의 dwell 이 그 값(4.0)보다 큰지만 본다 — 교차 계약은 `tools/` 가 본다.
+    """
+    wp = T.load_wp()
+    assert float(wp.get('scan_dwell_sec', 0)) > 4.0, \
+        f"dwell {wp.get('scan_dwell_sec')} 로는 leave 판정을 만들 수 없다"

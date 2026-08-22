@@ -150,7 +150,9 @@ person_status_timeout_sec: 1.0
 scan_steps: 4
 # 각 스텝 도착 뒤 서서 판정 프레임을 모으는 시간. 어댑터 10 Hz × 2초 = 20 프레임이라
 # `person_min_frames`(6) 를 넉넉히 넘는다.
-scan_dwell_sec: 2.0
+# 🔴 08-22 §88.4 — 어댑터의 person_confirm_sec_leave(4.0) 보다 커야 한다.
+#   짧으면 그 방향에서 ok·none 이 확정될 수 없어 훑기가 unknown 만 모은다.
+scan_dwell_sec: 4.5
 # 한 훑기 스텝의 벽시계 상한 [s]. 응답·결과가 영원히 안 오는 경우를 막는다.
 # 넘으면 기존 FAULT 재시도 예산으로 간다. 90° 회전 약 11초 + 계획·여유.
 scan_goal_timeout_sec: 90.0

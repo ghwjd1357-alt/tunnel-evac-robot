@@ -155,6 +155,7 @@ def make_env(tf_ok=True, state=State.GUIDE):
     #   `__init__` 을 타지 않으므로, 생산 코드가 새 인스턴스 변수를 가지면
     #   **여기도 같이 늘어난다.** 빠뜨리면 AttributeError 로 드러난다(조용하지 않다).
     node.stop_state = None
+    node._stop_pending_since = None
     node.person_status = 'stale'
     node.person_status_t = None
     node.victim = None
@@ -166,6 +167,7 @@ def make_env(tf_ok=True, state=State.GUIDE):
     node.scan_seen = set()
     node.scan_verdict = None
     node.stop_state = None
+    node._stop_pending_since = None
     node._guide_pending = False
     node._escaped_logged = False
     node._cancel_intent = None

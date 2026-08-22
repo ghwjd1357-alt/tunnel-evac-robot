@@ -380,12 +380,16 @@ class PerceptionAdapter(Node):
         #   관제가 확인하고 끝이다. 그러니 **떠나도 된다는 판정이 비싸다.**
         self.declare_parameter('person_confirm_sec_fallen', 1.5)
         self.declare_parameter('person_confirm_sec_leave', 4.0)   # ok · none 공용
-        # 🔴 08-22 역할 B 실측 반영 — `/detections` 는 계약 10 Hz 가 아니라 **3.8 Hz**다
-        #   (정지 상태 · 회전 중 미측정). 그러면 `fallen 1.5s` 창에 **5.7 프레임**만
-        #   들어온다. 구값 6 은 **확정을 영원히 막았다** — 쓰러진 사람을 보고도 신고가
-        #   안 나간다. 4 로 내려 1.4 프레임 여유를 둔다.
-        #   ⏸ 회전 중 발행률이 오면 다시 계산한다(더 낮으면 3 까지 내려야 할 수 있다).
-        self.declare_parameter('person_min_frames', 4)
+        # 🔴 08-22 — **여기서 내가 틀렸고 되돌린다** (독립 검토 §88.5).
+        #   `/detections` 가 실측 3.8 Hz 인 것을 보고 *"1.5s 창에 5.7 프레임뿐이니
+        #   6 은 확정을 영원히 막는다"* 고 판단해 4 로 내렸다. **그 계산이 틀렸다** —
+        #   프레임 수는 창 안이 아니라 **streak 전체에 누적**되고, 확정 조건은
+        #   `elapsed >= sec AND frames >= min` 의 AND 다. 실제로 돌려보니
+        #   **6 도 4 도 똑같이 1.58초**에 확정된다(`test_p17` replay).
+        #   → 근거 없이 오탐 방어를 낮춘 것이므로 6 으로 복구한다.
+        #   ⏸ 다시 볼 조건 = **회전 중 발행률**. 3.8 보다 크게 낮으면 6 이 지연을
+        #     지배하기 시작하므로 그때 "원하는 최대 fallen 지연" 으로 다시 고른다.
+        self.declare_parameter('person_min_frames', 6)
         self.declare_parameter('person_min_confidence', 0.50)
         # 🔴 08-22 — 계약값 0.5 를 쓰면 **정상 동작 중에 stale 이 뜬다.** 역할 B 실측
         #   프레임 간격이 min 0.000 ~ **max 0.729 s** 라 0.5 를 자주 넘는다. 그러면

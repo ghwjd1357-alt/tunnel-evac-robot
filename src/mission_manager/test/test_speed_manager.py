@@ -58,6 +58,11 @@ def make_env(ready=True, state=State.GATHER, timeout=30.0):
     node.get_logger = lambda: logger
     node._logs = logs
     node.state = state
+    # 🔴 08-22 §88.2 — tick 이 매번 정지 종결 상한을 보므로 껍데기에도 필요하다.
+    #   ⚠ `__new__` 하네스는 생산 코드가 인스턴스 변수를 늘릴 때마다 같이 늘어난다
+    #     (`PITFALLS §19-②-ⓒ`). 빠뜨리면 AttributeError 로 드러난다.
+    node.stop_state = None
+    node._stop_pending_since = None
     # tick() 의 GUIDE 진입 초크포인트가 읽는 전이 감지 재료 (08-01 §26 P1).
     # 같은 값 = "이 상태로 이미 진행 중" — 이 하네스는 진입 전이를 재현하지 않는다
     # (진입 경계 검사는 test_search_back_entry.py 담당).

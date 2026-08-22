@@ -340,18 +340,61 @@ def defaults():
         rclpy.shutdown()
 
 
-def test_p17_fallen_can_actually_confirm_at_the_measured_frame_rate():
-    """🔴 부정 회귀 — 창에 들어오는 프레임보다 `min_frames` 가 크면 **영원히 확정 안 된다.**
+def replay_confirm(min_frames, hz, want, n=60):
+    """실제 timestamp 열을 `_update_person` 에 흘려 **확정 시각**을 잰다.
 
-    계약은 10 Hz 인데 실측은 **3.8 Hz** 다. 그러면 `fallen 1.5s` 창에 5.7 프레임만
-    들어오는데 구값 `min_frames=6` 은 그것을 넘는다 — **쓰러진 사람을 보고도 신고가
-    안 나갔다.** 계약 숫자가 아니라 **실측**으로 맞춰야 한다.
+    🔴 08-22 §88.5 — 구판 `test_p17` 은 `min_frames <= rate*sec - 1` 이라는
+    **구현에 없는 부등식**을 검사했다. 확정 조건은 `elapsed >= sec AND
+    frames >= min` 이고 프레임은 창 안이 아니라 **streak 전체에 누적**된다.
+    산술로 흉내내지 말고 흘려서 재야 한다.
     """
-    d = defaults()
-    got = d['person_confirm_sec_fallen'] * ROLE_B_DETECTIONS_HZ
-    assert d['person_min_frames'] <= got - 1.0, (
-        f"fallen 창에 {got:.1f} 프레임이 들어오는데 min_frames={d['person_min_frames']} "
-        f"— 확정이 불가능하거나 여유가 없다")
+    import rclpy
+    from rclpy.parameter import Parameter
+    rclpy.init()
+    n_ = PerceptionAdapter(parameter_overrides=[
+        Parameter('person_min_frames', value=min_frames)])
+    try:
+        t0, dt = 9000.0, 1.0 / hz
+        for i in range(n):
+            t = t0 + i * dt
+            n_.now_sec = lambda _t=t: _t
+            n_._update_person(arr(n_, det('person_' + want), t=t), t)
+            if n_._p_status == want:
+                return t - t0
+        return None
+    finally:
+        n_.destroy_node()
+        rclpy.shutdown()
+
+
+def test_p17_the_measured_rate_confirms_fallen_in_time():
+    """🔴 **§88.5 — 내가 6 을 기각한 근거가 틀렸다.**
+
+    3.8 Hz 에서 `min_frames` 6 과 4 는 **똑같이 1.58초**에 확정된다. 프레임이
+    streak 전체에 누적되므로 `elapsed >= 1.5` 가 지배하기 때문이다. 즉 6 은
+    확정을 막은 적이 없고, 4 로 내린 것은 **근거 없이 오탐 방어를 낮춘 것**이었다.
+    이 시험은 산술이 아니라 **실제 timestamp 열**로 그것을 확인한다.
+    """
+    got6 = replay_confirm(6, ROLE_B_DETECTIONS_HZ, 'fallen')
+    got4 = replay_confirm(4, ROLE_B_DETECTIONS_HZ, 'fallen')
+    assert got6 is not None, '실측 발행률에서 fallen 이 확정되지 않는다'
+    assert abs(got6 - got4) < 0.3, (
+        f'min_frames 6 이 {got6:.2f}s, 4 가 {got4:.2f}s — 차이가 크면 '
+        f'"원하는 최대 지연" 으로 다시 골라야 한다')
+    assert got6 <= 2.0, f'실측 발행률에서 fallen 확정이 {got6:.2f}s 로 너무 늦다'
+
+
+def test_p17b_a_slower_rate_is_where_min_frames_starts_to_matter():
+    """⏸ 회전 중 발행률이 낮아지면 `min_frames` 가 지연을 **지배하기 시작한다.**
+
+    그때 6 을 유지할지는 "원하는 최대 fallen 지연" 으로 정한다 — 이 시험은 그
+    분기점이 존재한다는 사실만 고정한다(지금은 미측정이라 값을 못 정한다).
+    """
+    slow = 2.0
+    got6 = replay_confirm(6, slow, 'fallen')
+    got4 = replay_confirm(4, slow, 'fallen')
+    assert got6 is not None and got4 is not None
+    assert got6 > got4, '느린 발행률에서 min_frames 가 지연에 영향을 줘야 한다'
 
 
 def test_p18_leaving_still_needs_a_lot_more_evidence_than_fallen():
