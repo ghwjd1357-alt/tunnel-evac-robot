@@ -68,6 +68,8 @@ def make_env(ready=True, state=State.GATHER, timeout=30.0):
     # (진입 경계 검사는 test_search_back_entry.py 담당).
     node._prev_tick_state = state
     node._guide_pending = False
+    # 🔴 08-23 §91(3회차) P0-1 — 재발견 복귀가 두 tick 이 되며 생긴 필드.
+    node.refind_stopping = False
     node._faults = []
     node._cancels = []
     node.cancel_current_goal = lambda: node._cancels.append(1)
