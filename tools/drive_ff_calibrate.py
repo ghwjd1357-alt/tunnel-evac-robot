@@ -219,7 +219,43 @@ def parse_point(spec):
     return cmd, parts[1], tape
 
 
+# 🔴 2026-08-23 §91(2회차) P1-2 — 배너만으로는 아무것도 못 막는다.
+#   1회차에 *"08-22 이후 bag 으로 돌리면 산출 무효"* 를 **주석으로만** 적었더니,
+#   검토가 "실행 시 거부나 경고가 없다" 고 정확히 지적했다. 소스 주석은 도구를 돌리는
+#   사람에게 안 보인다. → **명시적 프로필을 요구하고, 없으면 거부한다.**
+#
+#   `pre-0822`  = 아래 상수 묶음(WHEEL_KP 30 · INTEGRAL_PWM_LIMIT 20 · FF 1300 ·
+#                 목표 0.12)이 실제로 보드에 있던 시절. **과거 산출 재현 전용.**
+#   `post-0822` = 08-22 16:20 이후 보드. 🔴 아직 이 프로필의 상수를 안 넣었다 —
+#                 새 보드로 재교정하려면 `.ino` 현재값을 여기 채운 뒤 열어라.
+_PROFILES = {
+    'pre-0822': dict(WHEEL_KP=30.0, WHEEL_KI=5.0, INTEGRAL_PWM_LIMIT=20.0,
+                     FF_IN_EFFECT=1300.0, TARGET_MPS=0.12),
+}
+_PROFILE_HELP = (
+    '🔴 --profile 을 반드시 준다. 이 도구의 상수는 "그때 보드에 뭐가 실려 있었나"에\n'
+    '   의존하고, 08-22 16:20 에 보드가 바뀌었다(WHEEL_KP 30→60 · INTEGRAL_PWM_LIMIT\n'
+    '   20→40 · MAX_LINEAR_CMD 0.12→0.20).\n'
+    '   · 과거 산출을 재현한다        → --profile pre-0822\n'
+    '   · 08-22 이후 bag 으로 재교정   → 🔴 아직 못 한다. post-0822 프로필 상수를\n'
+    '     `.ino` 현재값으로 채워 `_PROFILES` 에 추가한 뒤에 열어라 (예약 62 묶음).\n'
+    '   정본 = docs/REAL_ROBOT_VALUES.md §1-n · firmware/…v1_4.ino'
+)
+
+
 def main(argv):
+    if '--profile' not in argv:
+        print(_PROFILE_HELP, file=sys.stderr)
+        return 2
+    prof = argv[argv.index('--profile') + 1] if argv.index('--profile') + 1 < len(argv) else ''
+    if prof not in _PROFILES:
+        print(f'입력 오류 — 모르는 프로필 {prof!r}. 쓸 수 있는 것: '
+              f'{sorted(_PROFILES)}\n\n{_PROFILE_HELP}', file=sys.stderr)
+        return 2
+    # 🔵 지금은 pre-0822 하나뿐이라 상수를 덮을 일이 없다. 프로필이 늘면 여기서 덮는다.
+    #    (덮는 코드를 미리 쓰지 않는 이유 = 값이 없는데 경로만 만들면 조용히 0 이 실린다.)
+    globals().update(_PROFILES[prof])
+
     specs = [argv[i + 1] for i, a in enumerate(argv) if a == '--point' and i + 1 < len(argv)]
     if not specs:
         print(__doc__.split('사용법:')[1].strip(), file=sys.stderr)

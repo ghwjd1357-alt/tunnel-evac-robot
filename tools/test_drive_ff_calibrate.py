@@ -123,5 +123,33 @@ class FitTest(unittest.TestCase):
         self.assertEqual(1300.0, cal.FF_IN_EFFECT)
 
 
+class ProfileGateTest(unittest.TestCase):
+    """🔴 08-23 §91(2회차) P1-2 — 배너는 못 막는다. 실행 시 거부하는지 본다.
+
+    1회차에 *"08-22 이후 bag 이면 산출 무효"* 를 **소스 주석으로만** 적었고, 검토가
+    "실행 시 거부나 경고가 없다" 고 지적했다. 도구를 돌리는 사람은 소스를 안 읽는다.
+    """
+
+    def test_10_no_profile_is_refused(self):
+        """프로필 없이 부르면 rc=2 — 산출을 아예 안 한다."""
+        self.assertEqual(2, cal.main(['--point', '0.05:bag:685']))
+
+    def test_11_unknown_profile_is_refused(self):
+        """🔴 `post-0822` 는 **아직 상수가 없다.** 있는 척 통과시키면 안 된다."""
+        self.assertEqual(2, cal.main(['--profile', 'post-0822',
+                                      '--point', '0.05:bag:685']))
+
+    def test_12_profile_flag_without_value_is_refused(self):
+        """`--profile` 만 주고 값이 없는 경우도 거부."""
+        self.assertEqual(2, cal.main(['--profile']))
+
+    def test_13_known_profile_gets_past_the_gate(self):
+        """역회귀 — `pre-0822` 는 게이트를 지난다(점이 없어 usage 로 끝나도 rc=2 는
+        같지만, 거부 사유가 프로필이 아니라 입력이라는 것은 상수로 확인한다)."""
+        self.assertIn('pre-0822', cal._PROFILES)
+        self.assertEqual(0.12, cal._PROFILES['pre-0822']['TARGET_MPS'])
+        self.assertEqual(20.0, cal._PROFILES['pre-0822']['INTEGRAL_PWM_LIMIT'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

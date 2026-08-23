@@ -1093,8 +1093,29 @@ class MissionNode(Node):
                 self._cancel_intent = 'guide_stop'
                 self.cancel_current_goal()
                 self.refind_since = None
-                self.monitor.reset('any')    # [reset-role] refind-return — 복귀 즉시 재-놓침 방지
-                self.state = State.GUIDE
+                # 🔴 08-23 §91(2회차) P0-2 — **`guide_stop` 취소는 동기적으로 실패할 수
+                #   있고, 그러면 `_stop_failed()` → `enter_fault()` 가 이 줄 전에 이미
+                #   돌아 있다**(`goal_manager.py` `_cancel_with_confirm` 의 예외 경로).
+                #   구판(=내가 1회차에 넣은 코드)은 그 뒤에 무조건 `state = GUIDE` 를 써서
+                #   **FAULT 를 덮었다.** 검토 주입 관찰값:
+                #     `state=GUIDE · resume_state=SEARCH_BACK · stop_pending=True ·
+                #      goal_active=False · sent_goals=1 · FAULT 로그 있음`
+                #   = 내부는 정지 실패를 아는데 관제는 GUIDE 로 읽는다.
+                #
+                #   🔴 이 함정은 **`guide_stop`/`safety_stop` 에서만** 생긴다 — 그 둘만
+                #   `stop_seq` 를 세워 실패 경로를 연다(`goal_manager.py:193`).
+                #   취소 뒤 상태를 대입하는 자리는 넷인데(여기 · `enter_search_back` ·
+                #   `enter_approach` · 운영자 reset), 나머지 셋은 `intent=None`/`'hard'` 라
+                #   동기 실패 경로가 없다. **즉 이 구멍은 내가 1회차 보완으로 만든 것이다.**
+                #
+                #   → 취소가 FAULT 를 올렸으면 **덮지 않고 그대로 둔다.** 재개는
+                #     `enter_fault` 의 재시도 경로가 `resume_state`(=SEARCH_BACK)로 한다.
+                if self.state == State.FAULT:
+                    self.get_logger().error(
+                        '🔴 재발견 취소가 동기 실패해 FAULT 다 — GUIDE 로 덮지 않는다')
+                else:
+                    self.monitor.reset('any')    # [reset-role] refind-return — 복귀 즉시 재-놓침 방지
+                    self.state = State.GUIDE
             elif not self.goal_active and self.refind_since is None:
                 # ★ 07-23 §14 P1 — SEARCH_BACK 도 guide 유도 임무의 일부이므로
                 # 신규 역행 goal 은 저속이 controller 에 실제 적용된 뒤에만 보낸다.

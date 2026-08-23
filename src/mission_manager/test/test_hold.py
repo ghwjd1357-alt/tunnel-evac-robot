@@ -372,7 +372,11 @@ def test_h_p0_3_guide_keeps_driving_while_scan_is_dead():
     """🔴 현재 계약: /scan 이 죽어도 GUIDE 는 유지되고 goal 도 안 취소된다."""
     env = T.make_env()
     T.run(env, 1.0, PERSON)                 # 정상 유도 중
-    goals_before, cancels_before = len(env.goals), env.cancels
+    # 🔴 08-23 §91(2회차) P1-1 — 구판은 `cancels_before = env.cancels` 로 **리스트
+    #   자체를 별칭 저장**했다. 하네스가 같은 리스트에 append 하므로 아래 비교가
+    #   **항상 참**이 되어, 'stale 중에 취소가 붙는' 변이를 통과시켰다(검토가 주입해 확인).
+    #   → 정수 스냅샷으로 바꾼다.
+    goals_before, cancels_before = len(env.goals), len(env.cancels)
 
     T.tick_only(env, 3.0)                   # 🔴 /scan 한 장도 안 온다 (timeout 1.0s)
 
@@ -380,7 +384,7 @@ def test_h_p0_3_guide_keeps_driving_while_scan_is_dead():
     assert env.node.state == State.GUIDE, \
         ('GUIDE 가 유지되지 않았다. 정지를 넣기로 **결정**했다면 이 검사와 위 주석을 '
          '같이 갈아엎어라 — 조용히 통과시키지 마라.')
-    assert env.cancels == cancels_before, \
+    assert len(env.cancels) == cancels_before, \
         '🔴 거동이 바뀌었다: scan 끊김에 취소가 붙었다 (§91 P0-3 결정 없이)'
     assert len(env.goals) == goals_before, \
         '🔴 거동이 바뀌었다: scan 끊김 중에 새 goal 이 나갔다'
@@ -478,3 +482,57 @@ def test_h_p0_2_hold_return_needs_no_cancel_which_is_why_only_search_back_broke(
         # 그 사실 자체를 고정한다 (§91 P1-1 · 샷리스트 ⑪ 이 이 값에 의존한다).
         assert env.node.state == State.SEARCH_BACK, \
             f'HOLD 도 GUIDE 도 아닌 곳으로 갔다: {env.node.state}'
+
+
+# ============================================================
+# 🔴 08-23 §91(2회차) P0-2 — 취소가 **동기 실패**하면 FAULT 를 덮지 않는다
+# ============================================================
+#
+# 1회차 보완(`_cancel_intent='guide_stop'`)이 **새 P0 를 만들었다.**
+# `guide_stop` 은 `stop_seq` 를 세우는 유일한 의도 중 하나라, 취소 요청이 동기
+# 예외로 실패하면 `_stop_failed()` → `enter_fault()` 가 **그 자리에서** 돈다.
+# 그런데 그 다음 줄이 무조건 `state = GUIDE` 를 썼다 → FAULT 가 지워진다.
+# 검토 주입 관찰값: `state=GUIDE · resume_state=SEARCH_BACK · stop_pending=True ·
+#                    goal_active=False · sent_goals=1 · FAULT 로그 있음`
+#
+# ⚠ 하네스의 가짜 취소는 항상 성공한다. 그래서 이 시험은 **실패하는 취소**를
+#   직접 만들어 끼운다 — 생산 경로가 하는 것과 같은 순서로
+#   (`enter_fault()` 를 취소 안에서 부른다).
+
+
+def _make_cancel_fail_synchronously(env):
+    """취소가 `enter_fault()` 를 동기로 부르고 돌아오게 바꾼다 (생산 실패 경로 모사)."""
+    def failing_cancel():
+        env.cancels.append(1)
+        env.node._cancel_intent = None      # 생산과 같이 의도를 소비한다
+        env.node.goal_active = False
+        env.node.enter_fault()              # `_stop_failed` → `enter_fault` 와 같은 지점
+    env.node.cancel_current_goal = failing_cancel
+
+
+def test_h_p0_2_sync_cancel_failure_must_not_be_overwritten_by_guide():
+    """🎯 취소가 동기 실패해 FAULT 면, 재발견 복귀가 그것을 **덮지 않는다**."""
+    env = T.make_env()
+    _drive_to_search_back(env)
+    _make_cancel_fail_synchronously(env)
+
+    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 0.6, PERSON)
+
+    assert env.cancels, '전제 실패 — 재발견 가지가 취소를 안 불렀다'
+    assert env.node.state == State.FAULT, (
+        '🔴 §91(2회차) P0-2 재발생 — 취소가 동기 실패해 FAULT 였는데 '
+        f'{env.node.state} 로 덮였다. 내부는 정지 실패를 아는데 관제는 그걸 못 본다.')
+    assert env.node.resume_state == State.SEARCH_BACK, (
+        '재개 지점이 SEARCH_BACK 이 아니다 — FAULT 재시도가 엉뚱한 상태로 돌아간다: '
+        f'{env.node.resume_state}')
+
+
+def test_h_p0_2_healthy_cancel_still_returns_to_guide():
+    """역회귀 — 취소가 정상이면 예전처럼 GUIDE 로 복귀한다 (과잉 방어 금지)."""
+    env = T.make_env()
+    _drive_to_search_back(env)
+
+    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 0.6, PERSON)
+
+    assert env.node.state == State.GUIDE, \
+        f'정상 취소인데 GUIDE 로 복귀하지 않았다: {env.node.state}'

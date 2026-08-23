@@ -253,6 +253,12 @@ PATH_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "tools/firmware_constants.py", "tools/firmware_info_length_check.py",
         "tools/test_control_feedback_scale.py", "tools/test_applied_pwm_epoch.py",
         "tools/test_firmware_runtime_guard.py",
+        # 🔴 08-23 §91 P1-2 — 구동부 상한 정본이 `.ino` 라, 그 값을 복사해 쓰는
+        #   도구와 대조 검사는 `tools/` 에 있어도 **계약은 펌웨어가 소유한다.**
+        #   구판은 셋 다 라우팅 밖이었다(`classify_paths` 미분류).
+        "tools/test_firmware_cap_single_source.py",
+        "tools/drive_ff_calibrate.py", "tools/test_drive_ff_calibrate.py",
+        "tools/drive_linear_deadband.py", "tools/test_drive_linear_deadband.py",
         # 08-13 밤: odom 상수를 지면 실측으로 검증한다(예약 32-e) · 배선 6행 실기 도구.
         "tools/test_odom_constants.py", "tools/rearm_field_wiring.py",
         # 검토 §77.2: dmesg 판정기는 파일 위치가 tools/ 여도 계약이 펌웨어 현장 증거다.
