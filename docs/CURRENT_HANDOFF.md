@@ -20,7 +20,7 @@
 ## 🟢 08-23 실차 — 본편 확보 (`realtake6`)
 
 전 구간 완주 2판(`realtake5`·`realtake6`). 본편 = **`realtake6`**.
-증거 = `~/robot_evidence/` bag 11개(2.6 GB) + 관제화면 영상. 서사 = `0823_현황.md §12`.
+증거 = `~/robot_evidence/` bag 11개(2.6 GB) + 관제화면 영상. 서사 = `0823_현황.md §13`.
 
 ```
 PATROL → APPROACH → SCAN_AREA → GATHER → GUIDE → HOLD → SEARCH_BACK → GUIDE → ESCAPED
@@ -170,7 +170,7 @@ xy_goal_tolerance   0.25 → 도착 후 0.50   🔴 **값이 아니라 동작이
 - **`ELECTRICAL_BASELINE §4-f-7`**(전원 스위치 접점) · `§7`(G8 재실행 · `/estop/state` 4회차 회복).
 - `MASTER_PLAN §7` 예약 **75~79** · 58·62·63·73·74 · `§8` 결정 색인.
 - `PITFALLS §6`(inflation ≥ 외접반경) · `§14`·`§17`.
-- `~/Desktop/개발현황/0823_현황.md §12` — 실차 세션 전문(시간표·실패판 포함).
+- `~/Desktop/개발현황/0823_현황.md §13` — 실차 세션 전문(시간표·실패판 포함).
 - `~/Desktop/개발현황/CODEX 현황/0823검토현황.md §91` — 1~5회차 전문.
 - 운영: `~/Desktop/0823_촬영_런북.md`.
 - 증거: `~/robot_evidence/` — bag 11개(2.6 GB) + `viz/` 관제화면 영상 3편.
