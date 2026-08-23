@@ -1717,13 +1717,20 @@ class MissionNode(Node):
             f'🔴 {self.state.name} · 정지 종결 확인 실패 — {reason}. 로봇이 아직 '
             f'달리고 있을 수 있다. **E-stop 으로 물리 정지를 확인할 것.**')
 
-    def on_safety_stop_confirmed(self):
-        """§84.2 — CANCELED 종결 관찰. 이제서야 '멈췄다' 라고 말할 수 있다."""
+    def on_safety_stop_confirmed(self, intent=None):
+        """§84.2 — CANCELED 종결 관찰. 이제서야 '멈췄다' 라고 말할 수 있다.
+
+        🔴 08-23 §91(4회차) — `guide_stop` 도 여기로 온다. 구판은 `safety_stop`
+        에만 왔고, 그래서 재발견 복귀(`refind_stopping`)가 영원히 안 풀렸다.
+        `intent` 는 로그를 정확히 하려고 받는다 — 판정은 둘 다 같다("섰다").
+        """
         if self.stop_state in ('pending', None):
             self.stop_state = 'confirmed'
             self._stop_pending_since = None
             self._blocked_logged = False
-            self.get_logger().warn('🔵 안전정지 CANCELED 종결 확인 — 로봇이 섰다')
+            self.get_logger().warn(
+                f'🔵 정지 CANCELED 종결 확인 — 로봇이 섰다 '
+                f'(의도={intent or "safety_stop"})')
 
     def on_cmd(self, msg: String):
         """관제 명령 (07-07). 얇게 유지 — 명령 2개, 나머지는 무시+로그."""

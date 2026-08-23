@@ -242,8 +242,8 @@ EMI/전원 지문이고, 셋이 **버스파워 허브** 하나에 매달려 있�
 
 ## 최종 회귀
 
-- 기준선(**08-23 갱신** — §91 1~3회차 누적 +11 — 3회차 P0-1 늦은취소실패 +3): pytest **280 passed** / adapter **120** / tools **349 + skip 1** /
-  colcon **461 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** /
+- 기준선(**08-23 갱신** — §91 1~4회차 누적 +16 — 4회차 정지통보 경계 +5): pytest **285 passed** / adapter **120** / tools **369 + skip 1** /
+  colcon **477 tests, 0 fail, 3 skip** / **test_harness_guards 24 검사** /
   test_gate_regression **14 케이스**.
 - 🔴 `colcon` · `doc_check.sh` 는 **이번 묶음에서 재실행하지 않았다** — 정본 부채 때문에
   `doc_check` 는 지금 통과하지 않는 것이 정상이다.
