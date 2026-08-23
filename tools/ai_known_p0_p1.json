@@ -1073,5 +1073,70 @@
     "id": "0822-imu-watch-still-blind-on-low-rate-and-curves-90",
     "path": "src/mission_manager/mission_manager/goal_manager.py",
     "anchor": "IMU 기준 감시도 저발행률과 곡선 전환에서 판정 공백이 남는다"
+  },
+  {
+    "id": "0823-firmware-cap-broke-the-electrical-premise-91",
+    "path": "firmware/teensy_integrated_base_v1_4/teensy_integrated_base_v1_4.ino",
+    "anchor": "§91.1 상한 상향이 전기 전제를 깼다"
+  },
+  {
+    "id": "0823-refind-cancel-skipped-stop-serialization-91",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "§91.2 재발견 취소가 직렬화를 건너뛰었다"
+  },
+  {
+    "id": "0823-guide-keeps-driving-while-scan-is-dead-91",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "§91.3 라이다가 죽어도 GUIDE 가 계속 달린다"
+  },
+  {
+    "id": "0823-seen-sec-scope-claim-was-false-91",
+    "path": "src/mission_manager/config/waypoints_real_H.yaml",
+    "anchor": "§91.4 `seen_sec` 영향 범위 단정이 거짓이었다"
+  },
+  {
+    "id": "0823-no-evidence-nav2-loaded-the-db-yaml-91",
+    "path": "src/tunnel_bringup/launch/real_bringup.launch.py",
+    "anchor": "§91.5 런치 기본값이 원본 yaml 이라 조용히 느려진다"
+  },
+  {
+    "id": "0823-derived-cap-sites-were-more-than-one-91",
+    "path": "tools/apply_measurements.py",
+    "anchor": "§91.6 파생 상한 자리는 하나가 아니었다"
+  },
+  {
+    "id": "0823-shoot-branch-canon-contradicted-the-code-91",
+    "path": "docs/CURRENT_HANDOFF.md",
+    "anchor": "§91.7 촬영 브랜치 정본이 코드와 충돌했다"
+  },
+  {
+    "id": "0823-sync-cancel-failure-overwritten-by-guide-91b",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "§91.8 동기 취소 실패가 올린 FAULT 를 GUIDE 가 덮었다"
+  },
+  {
+    "id": "0823-human-estop-is-not-equal-to-auto-stop-91b",
+    "path": "src/mission_manager/mission_manager/mission_node.py",
+    "anchor": "§91.9 사람 E-stop 은 자동 정지와 등가가 아니다"
+  },
+  {
+    "id": "0823-new-regressions-had-no-detection-power-91b",
+    "path": "src/mission_manager/test/test_hold.py",
+    "anchor": "§91.10 새로 넣은 회귀 셋이 검출력 0 이었다"
+  },
+  {
+    "id": "0823-cap-still-lives-in-three-copies-91b",
+    "path": "tools/test_firmware_cap_single_source.py",
+    "anchor": "§91.11 상한 정본이 여전히 세 벌이었다"
+  },
+  {
+    "id": "0823-reservations-missing-registration-surfaces-91b",
+    "path": "docs/CURRENT_HANDOFF.md",
+    "anchor": "§91.12 예약을 `MASTER_PLAN` 한 곳에만 적었다"
+  },
+  {
+    "id": "0823-handoff-still-states-both-directions-91b",
+    "path": "docs/CURRENT_HANDOFF.md",
+    "anchor": "§91.13 핸드오프가 서로 반대 상태를 동시에 지시했다"
   }
 ]

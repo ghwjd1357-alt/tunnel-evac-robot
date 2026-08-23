@@ -47,6 +47,7 @@
 사람이 E-stop 에 손을 두고 시작한다.
 """
 
+import math
 import argparse
 import statistics
 import sys
@@ -62,6 +63,43 @@ from rclpy.node import Node
 #   따라가지 않아 **여유·판정을 틀린 기준으로 계산**했다.
 #   정본 = `docs/REAL_ROBOT_VALUES.md §1-n`.
 MAX_LINEAR_CMD = 0.20
+
+
+class UsageError(ValueError):
+    """사용자 입력이 실차로 나가기 전에 막는다."""
+
+
+def parse_steps(text):
+    """`--steps` 를 검증하며 파싱한다 (2026-08-23 §91 2회차 P1-2).
+
+    🔴 구판은 `tuple(float(x) for x in text.split(','))` 한 줄이라 **아무 검증이 없었다.**
+    이 값은 곧바로 `/cmd_vel` 로 나가는 **실제 주행 명령**이다. 음수·NaN·Inf·상한 초과·
+    역순이 그대로 통과했다 — 검토가 `0.200001` 과 역순을 넣어 확인했다.
+
+    계약: 각 계단은 **유한 · 0 초과 · `MAX_LINEAR_CMD` 이하**이고 **오름차순**이다.
+    (오름차순을 요구하는 이유 = 불감대 산출이 "낮은 쪽부터 올려 처음 움직인 지점" 을
+     찾는 절차라, 순서가 섞이면 `D_lin` 자체가 의미를 잃는다.)
+    """
+    raw = [x.strip() for x in text.split(',') if x.strip()]
+    if not raw:
+        raise UsageError('--steps 가 비어 있다')
+    out = []
+    for x in raw:
+        try:
+            v = float(x)
+        except ValueError:
+            raise UsageError(f'숫자가 아니다: {x!r}') from None
+        if not math.isfinite(v):
+            raise UsageError(f'유한값이 아니다: {x!r}')
+        if v <= 0.0:
+            raise UsageError(f'0 이하다: {v}')
+        if v > MAX_LINEAR_CMD:
+            raise UsageError(
+                f'{v} 가 구동부 명령 상한 {MAX_LINEAR_CMD} 를 넘는다 — 실차로 못 보낸다')
+        out.append(v)
+    if any(b <= a for a, b in zip(out, out[1:])):
+        raise UsageError(f'오름차순이 아니다(중복 포함): {out}')
+    return tuple(out)
 
 
 DEFAULT_STEPS = (0.04, 0.06, 0.08, 0.10, 0.12)
@@ -183,7 +221,11 @@ def main():
     ap.add_argument('--settle', type=float, default=1.5, help='계단 앞 버리는 시간 [s]')
     ap.add_argument('--dry', action='store_true')
     a = ap.parse_args()
-    steps = tuple(float(x) for x in a.steps.split(','))
+    try:
+        steps = parse_steps(a.steps)
+    except UsageError as exc:
+        print(f'입력 오류 — {exc}', file=sys.stderr)
+        return 2
 
     rclpy.init()
     node = LinearSweep(steps, a.hold, a.settle, a.dry)

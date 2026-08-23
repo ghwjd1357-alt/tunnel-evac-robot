@@ -107,8 +107,33 @@ def test_standalone_matches_launch_argument_defaults():
             f'🔴 {key} 불일치 — 런치 인자 {arg} 기본값 {want!r} vs standalone {got!r}'
 
 
-def test_standalone_has_no_extra_keys():
-    """사본에만 있는 키 = 런치에 없는 설정으로 복구된다는 뜻이다."""
-    params = _sllidar_params(_launch_tree())
-    extra = set(_standalone()) - set(params)
-    assert not extra, f'🔴 standalone 에만 있는 키: {sorted(extra)} — 런치에 없다'
+def test_key_sets_match_in_both_directions():
+    """🔴 08-23 §91(2회차) P1-1 — 구판은 `standalone - launch` **한 방향만** 봤다.
+
+    그래서 **런치에 9번째 키를 추가하면 세 검사가 전부 통과했다**(검토가 주입해 확인).
+    그 상태로 복구하면 라이다가 런치에 있는 설정 하나를 **빠뜨린 채** 돈다 — 이 파일이
+    막으려던 바로 그 drift 다. 양방향으로 대조한다.
+    """
+    launch_keys = set(_sllidar_params(_launch_tree()))
+    sa_keys = set(_standalone())
+    only_sa = sa_keys - launch_keys
+    only_launch = launch_keys - sa_keys
+    assert not only_sa, \
+        f'🔴 standalone 에만 있는 키: {sorted(only_sa)} — 런치에 없는 설정으로 복구된다'
+    assert not only_launch, \
+        (f'🔴 런치에만 있는 키: {sorted(only_launch)} — 복구용 라이다가 이 설정을 '
+         f'빠뜨린 채 돈다. lidar_standalone.yaml 에 같이 넣어라.')
+
+
+def test_the_pinned_key_list_still_covers_everything():
+    """대조 목록(`_LITERAL_KEYS` + `_FROM_LAUNCH_ARG`)이 런치 전체를 덮는지.
+
+    키가 늘었는데 목록을 안 늘리면 위 값 검사가 그 키를 **안 본다** — 집합 검사만
+    통과하고 값 불일치는 새어 나간다. 목록 자체를 계약으로 고정한다.
+    """
+    launch_keys = set(_sllidar_params(_launch_tree()))
+    covered = set(_LITERAL_KEYS) | set(_FROM_LAUNCH_ARG)
+    missing = launch_keys - covered
+    assert not missing, (
+        f'🔴 런치에 새 키가 생겼는데 대조 목록에 없다: {sorted(missing)} — '
+        f'_LITERAL_KEYS 또는 _FROM_LAUNCH_ARG 에 추가하라')
