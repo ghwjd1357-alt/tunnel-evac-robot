@@ -1,4 +1,5 @@
-"""🆘 복구용 라이다 설정이 런치와 **같은 로봇**인지 정적으로 대조한다 (2026-08-23 §91 P2-1).
+"""
+🆘 복구용 라이다 설정이 런치와 **같은 로봇**인지 정적으로 대조한다 (2026-08-23 §91 P2-1).
 
 왜 있나
 -------
@@ -108,7 +109,8 @@ def test_standalone_matches_launch_argument_defaults():
 
 
 def test_key_sets_match_in_both_directions():
-    """🔴 08-23 §91(2회차) P1-1 — 구판은 `standalone - launch` **한 방향만** 봤다.
+    """
+    🔴 08-23 §91(2회차) P1-1 — 구판은 `standalone - launch` **한 방향만** 봤다.
 
     그래서 **런치에 9번째 키를 추가하면 세 검사가 전부 통과했다**(검토가 주입해 확인).
     그 상태로 복구하면 라이다가 런치에 있는 설정 하나를 **빠뜨린 채** 돈다 — 이 파일이
@@ -126,7 +128,8 @@ def test_key_sets_match_in_both_directions():
 
 
 def test_the_pinned_key_list_still_covers_everything():
-    """대조 목록(`_LITERAL_KEYS` + `_FROM_LAUNCH_ARG`)이 런치 전체를 덮는지.
+    """
+    대조 목록(`_LITERAL_KEYS` + `_FROM_LAUNCH_ARG`)이 런치 전체를 덮는지.
 
     키가 늘었는데 목록을 안 늘리면 위 값 검사가 그 키를 **안 본다** — 집합 검사만
     통과하고 값 불일치는 새어 나간다. 목록 자체를 계약으로 고정한다.

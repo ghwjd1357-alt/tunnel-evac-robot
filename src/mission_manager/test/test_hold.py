@@ -449,8 +449,9 @@ def test_h_p0_2_refind_cancel_carries_guide_stop_intent():
     _drive_to_search_back(env)
     intents = _spy_cancel(env)
 
-    # seen_sec 연속 검출 → 재발견 가지
-    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 0.6, PERSON)
+    # seen_sec 연속 검출 → 재발견 가지. 🔴 08-23 §91(3회차) 이후 복귀는 **두 tick**
+    #   이라(취소 → 종결 확인 → GUIDE) 한 tick 여유를 더 준다.
+    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 1.2, PERSON)
 
     assert env.node.state == State.GUIDE, '재발견했는데 GUIDE 로 복귀하지 않았다'
     assert intents, '재발견 복귀인데 취소를 아예 안 불렀다 — 역행 goal 이 살아 있다'
@@ -528,11 +529,116 @@ def test_h_p0_2_sync_cancel_failure_must_not_be_overwritten_by_guide():
 
 
 def test_h_p0_2_healthy_cancel_still_returns_to_guide():
-    """역회귀 — 취소가 정상이면 예전처럼 GUIDE 로 복귀한다 (과잉 방어 금지)."""
+    """역회귀 — 취소가 정상이면 GUIDE 로 복귀한다 (과잉 방어 금지).
+
+    🔴 08-23 §91(3회차) P0-1 이후 이 복귀는 **두 tick**이다:
+      tick A — 역행 goal 을 `guide_stop` 으로 취소. 상태는 **SEARCH_BACK 유지**.
+      tick B — 정지가 CANCELED 로 종결된 것을 관찰하고 그때 GUIDE.
+    중간 상태(`refind_stopping`)를 여기서 같이 고정한다 — 이 단계가 사라지면
+    늦은 취소 실패가 다시 `resume_state=GUIDE` 를 만든다.
+    """
     env = T.make_env()
     _drive_to_search_back(env)
+    seen = float(T.load_wp()['search_back']['seen_sec'])
 
-    T.run(env, float(T.load_wp()['search_back']['seen_sec']) + 0.6, PERSON)
+    # tick A 까지만 — 취소는 나갔지만 아직 SEARCH_BACK 이어야 한다
+    T.run(env, seen + 0.6, PERSON)
+    assert env.node.state == State.SEARCH_BACK, (
+        '취소와 동시에 GUIDE 로 갔다 — 늦은 취소 실패가 GUIDE 를 resume_state 로 '
+        f'저장하는 §91(3회차) P0-1 이 되살아났다: {env.node.state}')
+    assert env.node.refind_stopping, '취소를 냈는데 대기 깃발이 안 섰다'
 
+    # tick B — 종결이 확인됐으므로 이제 GUIDE
+    T.run(env, 0.6, PERSON)
     assert env.node.state == State.GUIDE, \
-        f'정상 취소인데 GUIDE 로 복귀하지 않았다: {env.node.state}'
+        f'정지 종결이 확인됐는데 GUIDE 로 복귀하지 않았다: {env.node.state}'
+    assert not env.node.refind_stopping, '복귀했는데 대기 깃발이 안 내려갔다'
+
+
+# ============================================================
+# 🔴 08-23 §91(3회차) P0-1 — **늦게 오는** 취소 실패가 GUIDE 를 재개점으로 만들면 안 된다
+# ============================================================
+#
+# 2회차 보완은 **동기** 실패만 막았다. 검토 3회차가 늦은 실패 세 경로를 주입해
+# 같은 결함을 다시 냈다:
+#   ① 취소응답 Future 예외  ② 빈 `goals_canceling`  ③ non-CANCELED terminal
+# 셋 다 `state=FAULT · resume_state=GUIDE · stop_pending=True` 였고,
+# `RETRY_WAIT` 뒤 **정지 미확인 goal 을 안은 채 GUIDE 로 자동재개**했다.
+#
+# 원인은 타이밍이 아니라 **순서**였다 — 재발견 분기가 취소 직후 이미 GUIDE 라서,
+# 나중에 도착한 실패가 `enter_fault()` 를 부를 때 저장되는 `resume_state` 가
+# GUIDE 였던 것이다. 그래서 보완은 "실패를 잡는다" 가 아니라 **"종결 전에는 GUIDE 가
+# 되지 않는다"** 여야 한다.
+#
+# 아래 시험은 늦은 실패를 **tick 경계 뒤에** 주입해 그 순서를 고정한다.
+
+
+def _late_stop_failure(env, unconfirmed=True):
+    """취소가 나간 **뒤에** 실패가 도착하는 상황을 만든다 (생산 `_stop_failed` 경로)."""
+    if unconfirmed:
+        env.node.on_safety_stop_unconfirmed('하네스: 늦은 취소 실패 모사')
+    env.node.enter_fault()
+
+
+def test_h_p0_1_late_cancel_failure_resumes_to_search_back_not_guide():
+    """🎯 늦은 실패가 와도 재개 원점은 **SEARCH_BACK** 이어야 한다."""
+    env = T.make_env()
+    _drive_to_search_back(env)
+    env.stop_ok[0] = False              # 취소가 종결을 못 낸다
+    seen = float(T.load_wp()['search_back']['seen_sec'])
+
+    T.run(env, seen + 0.6, PERSON)      # tick A — 취소만 나간다
+    assert env.node.refind_stopping, '전제 실패 — 취소 대기 단계에 안 들어갔다'
+    assert env.node.state == State.SEARCH_BACK, \
+        f'취소와 동시에 상태가 바뀌었다: {env.node.state}'
+
+    _late_stop_failure(env)             # 늦은 실패 도착
+
+    assert env.node.state == State.FAULT, f'실패인데 FAULT 가 아니다: {env.node.state}'
+    assert env.node.resume_state == State.SEARCH_BACK, (
+        '🔴 §91(3회차) P0-1 재발생 — 재개 원점이 '
+        f'{env.node.resume_state} 다. GUIDE 면 정지 미확인 goal 을 안은 채 '
+        '자동재개한다.')
+
+
+def test_h_p0_1_no_new_goal_while_the_refind_cancel_is_unresolved():
+    """🎯 종결 전에는 **신규 goal 0**. 사람이 다시 안 보여도 역행을 새로 안 낸다.
+
+    이 가지가 이 보완의 핵심이다 — 대기 판정을 '가시성' 이 아니라 '상태' 로
+    갈랐기 때문에, 취소 뒤 사람이 사라져도 새 goal 이 안 나간다.
+    """
+    env = T.make_env()
+    _drive_to_search_back(env)
+    env.stop_ok[0] = False
+    seen = float(T.load_wp()['search_back']['seen_sec'])
+
+    T.run(env, seen + 0.6, PERSON)
+    assert env.node.refind_stopping
+    goals_before = len(env.goals)
+
+    T.run(env, 6.0, EMPTY)              # 다시 안 보인다 — 구판이면 새 역행 goal
+
+    assert len(env.goals) == goals_before, (
+        f'🔴 정지 미확인 상태에서 신규 goal 이 나갔다 '
+        f'({goals_before} → {len(env.goals)})')
+    assert env.node.state == State.SEARCH_BACK, \
+        f'대기 중에 상태가 바뀌었다: {env.node.state}'
+
+
+def test_h_p0_1_unconfirmed_stop_never_becomes_guide_on_its_own():
+    """🔴 'unconfirmed' 로 굳으면 **자동 복귀하지 않는다** — 사람이 E-stop 할 자리다."""
+    env = T.make_env()
+    _drive_to_search_back(env)
+    env.stop_ok[0] = False
+    seen = float(T.load_wp()['search_back']['seen_sec'])
+
+    T.run(env, seen + 0.6, PERSON)
+    env.node.on_safety_stop_unconfirmed('하네스: 종결 실패')
+    env.logs.clear()
+
+    T.run(env, 10.0, PERSON)            # 계속 보여도
+
+    assert env.node.state != State.GUIDE, (
+        '🔴 정지 미확인인데 GUIDE 로 갔다 — 로봇이 아직 달리고 있을 수 있다')
+    assert any('E-stop' in m for m, _ in env.logs), \
+        '정지 미확인인데 사람에게 E-stop 을 요구하지 않았다'

@@ -147,6 +147,9 @@ def make_env(tf_ok=True, state=State.GUIDE):
     node.last_seen = None
     node.search_goal = None
     node.refind_since = None
+    # 🔴 08-23 §91(3회차) P0-1 — 재발견 복귀가 두 tick 이 되며 생긴 필드.
+    #   `__new__` 하네스는 `__init__` 을 안 타므로 여기도 같이 늘어난다.
+    node.refind_stopping = False
     # --- 상태머신의 나머지 소유 필드 (진짜 전이 경로가 읽고 쓴다) ---
     node.patrol_idx = 0
     node.gather_wp = None
@@ -594,7 +597,11 @@ def test_sb16_refind_return_to_guide_does_not_relose_immediately():
     env.node.search_goal = {'x': 1.0, 'y': 2.0, 'yaw': 0.0}
     env.node.search_attempts = 1
 
-    run(env, 1.5, PERSON)                  # seen_sec(1.0) 충족 → 재발견 복귀
+    # 🔴 08-23 §91(3회차) P0-1 — 복귀가 **두 tick**이 됐다(취소 → 종결 확인 → GUIDE).
+    #   구판은 `1.5` 로 tick A 까지만 돌려 경계에 딱 걸렸다.
+    run(env, 1.5, PERSON)                  # seen_sec(1.0) 충족 → 취소(tick A)
+    assert env.node.state == State.SEARCH_BACK and env.node.refind_stopping
+    run(env, 0.6, PERSON)                  # 종결 확인(tick B) → 복귀
     assert env.node.state == State.GUIDE
     run(env, 2.5, PERSON)                  # 계속 보이는 동안은 재놓침 없음
     assert env.node.state == State.GUIDE

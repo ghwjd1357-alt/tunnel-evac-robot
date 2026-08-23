@@ -700,6 +700,10 @@ class MissionNode(Node):
         self.last_seen = None           # (x, y) — 위 규약대로만 해석할 것
         self.search_goal = None         # 이번 역행의 목표
         self.refind_since = None        # 역행 목표 도착 후 재탐색 대기 시작 시각
+        # 🔴 08-23 §91(3회차) P0-1 — 재발견 복귀는 **두 tick** 이다: ① 역행 goal 을
+        #   `guide_stop` 으로 취소하고 SEARCH_BACK 에 머문다 ② 정지가 CANCELED 로
+        #   **종결된 것을 관찰한 뒤에만** GUIDE 로 간다. 이 깃발이 ①과 ② 사이다.
+        self.refind_stopping = False
 
         # --- FAULT 자동 재시도 ---
         self.fault_retries = 0
@@ -1066,6 +1070,22 @@ class MissionNode(Node):
                         self.hold_since = None
                         self.state = State.GUIDE
 
+        elif self.state == State.SEARCH_BACK and self.refind_stopping:
+            # 🔴 08-23 §91(3회차) P0-1 — 재발견 취소를 낸 뒤 **종결 전 구간**이다.
+            #   여기서는 **아무것도 하지 않는다** — GUIDE 전이도, 새 역행 goal 도.
+            #
+            #   왜 분기를 통째로 앞에 뺐나: 취소를 낸 뒤 사람이 다시 안 보이게 되면
+            #   아래 `elif not self.goal_active …` 가지가 **정지 미확인 상태에서
+            #   새 역행 goal 을 보낸다.** 가시성으로 갈라지는 자리에 두면 그 구멍이
+            #   남는다. 상태로 갈라야 "신규 goal 0" 이 성립한다.
+            if not self.stop_confirmed():
+                self._warn_stop_unconfirmed('SEARCH_BACK 재발견')
+            else:
+                self.refind_stopping = False
+                self.monitor.reset('any')   # [reset-role] refind-return — 복귀 즉시 재-놓침 방지
+                self.state = State.GUIDE
+                self.get_logger().info('★ 정지 종결 확인 → GUIDE 복귀')
+
         elif self.state == State.SEARCH_BACK:
             # 🆕 08-22 예약 61 — 카메라 병행 재발견. 🔴 **OR 로만 더한다.**
             #   라이다 판정을 대체하지 않는다 — 라이다는 빛과 무관하고 3 m 까지
@@ -1089,8 +1109,22 @@ class MissionNode(Node):
                 #     이미 검토된 기구이고 `CANCEL_STOP_MAX_BLOCKS`(60 tick)로 유한하다.
                 #   ⚠ §90.2 의 '미지 goal(응답 등록 실패)' 봉쇄는 **여기서 안 닫힌다** —
                 #     그건 GoalManager 쪽 보완이고 예약으로 남는다.
-                self.get_logger().info('★ 추종자 재발견 → GUIDE 복귀')
+                # 🔴 08-23 §91(3회차) P0-1 — **여기서 GUIDE 로 바꾸지 않는다.**
+                #   2회차 보완은 *동기* 실패만 막았다. 늦게 오는 실패(취소응답 Future
+                #   예외 · 빈 `goals_canceling` · non-CANCELED terminal)는 그때 이미
+                #   상태가 GUIDE 라서, `enter_fault()` 가 **GUIDE 를 `resume_state`
+                #   로 저장**했다. 재현값: `state=FAULT · resume_state=GUIDE ·
+                #   stop_pending=True` → `RETRY_WAIT` 뒤 **정지 미확인 goal 을 안은
+                #   채 GUIDE 로 자동재개**한다.
+                #   → 취소만 내고 SEARCH_BACK 에 머문다. 늦은 실패가 오면 그때의
+                #     상태가 SEARCH_BACK 이므로 재개 원점도 SEARCH_BACK 이 된다.
+                #   🔵 무장은 취소 **앞**에서 한다 — 동기 CANCELED 를 관찰한
+                #     `on_safety_stop_confirmed` 를 뒤에서 덮지 않기 위해서다
+                #     (`_confirmed_stop` 과 같은 순서 계약).
+                self.get_logger().info('★ 추종자 재발견 → 역행 goal 취소 (종결 뒤 GUIDE)')
+                self.arm_stop_deadline(self.goal_active)
                 self._cancel_intent = 'guide_stop'
+                self.refind_stopping = True
                 self.cancel_current_goal()
                 self.refind_since = None
                 # 🔴 08-23 §91(2회차) P0-2 — **`guide_stop` 취소는 동기적으로 실패할 수
@@ -1110,12 +1144,10 @@ class MissionNode(Node):
                 #
                 #   → 취소가 FAULT 를 올렸으면 **덮지 않고 그대로 둔다.** 재개는
                 #     `enter_fault` 의 재시도 경로가 `resume_state`(=SEARCH_BACK)로 한다.
-                if self.state == State.FAULT:
-                    self.get_logger().error(
-                        '🔴 재발견 취소가 동기 실패해 FAULT 다 — GUIDE 로 덮지 않는다')
-                else:
-                    self.monitor.reset('any')    # [reset-role] refind-return — 복귀 즉시 재-놓침 방지
-                    self.state = State.GUIDE
+                # ⚠ 동기 실패로 이미 FAULT 면 `refind_stopping` 이 True 인 채 남는데,
+                #   그게 맞다 — FAULT 재시도가 SEARCH_BACK 으로 돌아오면 위 앞선
+                #   분기가 **종결을 다시 기다린다.** 'unconfirmed' 로 굳었으면 거기서
+                #   멈춰 사람에게 E-stop 을 요구한다(fail-closed. 자동재개 금지).
             elif not self.goal_active and self.refind_since is None:
                 # ★ 07-23 §14 P1 — SEARCH_BACK 도 guide 유도 임무의 일부이므로
                 # 신규 역행 goal 은 저속이 controller 에 실제 적용된 뒤에만 보낸다.
@@ -1492,6 +1524,9 @@ class MissionNode(Node):
         self.cancel_current_goal()
         self.search_goal = {'x': gx, 'y': gy, 'yaw': 0.0}
         self.refind_since = None
+        # 🔴 08-23 §91(3회차) — 새 역행 세대를 열 때 재발견 대기 깃발을 내린다.
+        #   안 내리면 새 세대가 **앞 세대의 종결을 기다리며** 굳는다.
+        self.refind_stopping = False
         self.state = State.SEARCH_BACK
 
     def record_last_seen(self):
@@ -1700,6 +1735,10 @@ class MissionNode(Node):
             #   (재가동을 옛 취소의 CANCELED 종결에 볼모잡히지 않게).
             self._cancel_intent = 'hard'
             self.cancel_current_goal()
+            # 🔴 08-23 §91(3회차) — `hard` 는 직렬화를 강제 해제하므로 재발견 대기도
+            #   같이 내린다. 안 내리면 PATROL 로 갔다가 SEARCH_BACK 에 다시 들어올 때
+            #   옛 세대의 종결을 기다린다.
+            self.refind_stopping = False
             self.state = State.PATROL
             self.patrol_idx = 0
             self.fire = None
