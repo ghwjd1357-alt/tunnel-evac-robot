@@ -97,7 +97,7 @@ class GoalManager:
         # §84.2 — 안전정지 종결 확인 실패 신호 (없으면 FAULT 로 떨어진다).
         self._on_stop_unconfirmed = on_stop_unconfirmed or (lambda reason: None)
         # §84.2 — 안전정지 CANCELED 종결 확인 신호.
-        self._on_stop_confirmed = on_stop_confirmed or (lambda: None)
+        self._on_stop_confirmed = on_stop_confirmed or (lambda intent=None: None)
 
         # --- 세대 토큰 + 현재 goal ---
         self._seq = 0             # send_goal/cancel 마다 +1 (stale 판별 기준)
@@ -276,10 +276,21 @@ class GoalManager:
         if status == GoalStatus.STATUS_CANCELED:
             self._log.info(
                 f'정지 취소 CANCELED 종결 확인(seq={seq}) — 신규 goal 허용')
-            safety = self._stop_intent == 'safety_stop'
+            # 🔴 08-23 §91(4회차) P0-1 — 구판은 `safety_stop` 에만 알렸다.
+            #   §84.2 당시엔 `guide_stop` 의 **성공**을 미션이 기다리지 않았기 때문이다.
+            #   그런데 3회차 보완이 재발견 복귀를 *"종결을 관찰한 뒤에만 GUIDE"* 로
+            #   바꾸면서 **미션이 기다리기 시작했다.** 그런데 알림이 안 오니
+            #   `refind_stopping` 이 영원히 안 풀리고, 5초 watchdog 이 **정상 취소를
+            #   `unconfirmed` 로 오판해 E-stop 을 요구**했다. 재현 최종값:
+            #     `state=SEARCH_BACK · refind_stopping=True · stop_state=pending ·
+            #      신규 goal=0` — 로봇은 실제로 섰는데 유도가 영구 정지한다.
+            #   → **의도와 무관하게 긍정 종결을 알린다.** 의도는 인자로 넘겨
+            #     수신측이 로그·정책을 가를 수 있게 한다.
+            #   🔵 여기는 이미 `_is_stop_target(seq)` 를 통과한 **현재 세대의 CANCELED**
+            #     뿐이다 — `hard` 해제는 이 경로를 안 지나므로 성공으로 오인되지 않는다.
+            intent = self._stop_intent
             self._clear_stop()
-            if safety:
-                self._on_stop_confirmed()      # §84.2 — 정지 완료를 미션에 알린다
+            self._on_stop_confirmed(intent)    # §84.2 · §91(4회차) — 정지 완료 통보
         else:
             self._log.error(
                 f'★ 정지 취소가 CANCELED 아닌 status={status} 로 '

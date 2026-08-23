@@ -207,10 +207,19 @@ def make_env(tf_ok=True, state=State.GUIDE):
         #   그래서 앞선 취소의 `safety_stop` 이 다음 취소까지 남아 보였다.
         #   실물과 다른 하네스는 시험이 틀린 것이다(`PITFALLS §19-⑤`) — 특히 의도를
         #   감시하는 시험이 **엉뚱한 이유로** 붉거나 푸르게 된다.
+        # 🔴 08-23 §91(4회차) P0-1 — 구판은 **의도와 무관하게 항상** 확인 콜백을
+        #   불렀다. 생산은 그렇지 않다: `stop_seq` 를 세우는 의도(`guide_stop`·
+        #   `safety_stop`)만 `_judge_stop_terminal` 을 지나 통보되고, 일반 취소
+        #   (`intent=None`)와 `hard` 는 통보되지 않는다(`goal_manager.py:193·276~`).
+        #   이 거짓말 때문에 *"`guide_stop` CANCELED 가 미션에 안 온다"* 는 P0 가
+        #   회귀 280건 전부 초록인 채로 지나갔다. `PITFALLS §19-⑤` 세 번째 발동이다.
+        intent = node._cancel_intent
         node._cancel_intent = None
         node.goal_active = False
+        if intent not in ('guide_stop', 'safety_stop'):
+            return                      # 생산: 정지 세대가 없으면 통보도 없다
         if stop_ok[0]:
-            node.on_safety_stop_confirmed()
+            node.on_safety_stop_confirmed(intent)
         else:
             node.on_safety_stop_unconfirmed('하네스: 취소 종결 실패 모사')
 

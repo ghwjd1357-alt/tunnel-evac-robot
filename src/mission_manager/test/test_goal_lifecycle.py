@@ -103,6 +103,10 @@ def make_gm(ready=True):
       env.ready    = {'ready': bool} 서비스 준비 토글
     """
     logs, reached, faults, actives = [], [], [], []
+    # 🔴 08-23 §91(4회차) P0-1 — 정지 종결 통보를 기록한다. 구판 하네스는 이 둘을
+    #   아예 배선하지 않아(기본 no-op), `guide_stop` 의 긍정 CANCELED 가 미션에
+    #   전달되는지를 **어떤 시험도 보지 않았다.**
+    stop_confirmed, stop_unconfirmed = [], []
     ready_box = {'ready': ready}
     goals, resp_cbs = [], []
     nav = types.SimpleNamespace(
@@ -112,10 +116,13 @@ def make_gm(ready=True):
         nav, _logger(logs),
         on_reached=lambda: reached.append(1),
         on_fault=lambda: faults.append(1),
-        on_active=lambda v: actives.append(v))
+        on_active=lambda v: actives.append(v),
+        on_stop_confirmed=lambda intent=None: stop_confirmed.append(intent),
+        on_stop_unconfirmed=lambda reason: stop_unconfirmed.append(reason))
     return types.SimpleNamespace(
         gm=gm, goals=goals, resp_cbs=resp_cbs, reached=reached,
-        faults=faults, actives=actives, logs=logs, ready=ready_box)
+        faults=faults, actives=actives, logs=logs, ready=ready_box,
+        stop_confirmed=stop_confirmed, stop_unconfirmed=stop_unconfirmed)
 
 
 def send_and_accept(env, wp=None, tag='patrol'):
@@ -854,3 +861,95 @@ def test_plain_cancel_does_not_serialize_which_is_why_refind_needed_the_fix():
     assert not env.gm.stop_pending
     env.gm.send_goal({'x': 0.5, 'y': -10.65}, tag='guide', state_name='GUIDE')
     assert len(env.goals) == 2              # 봉쇄 없음 = 옛 거동
+
+
+# ============================================================
+# 🔴 08-23 §91(4회차) P0-1 — 긍정 CANCELED 는 **의도와 무관하게** 미션에 통보된다
+# ============================================================
+#
+# 3회차 보완이 재발견 복귀를 *"종결을 관찰한 뒤에만 GUIDE"* 로 바꾸면서 미션층이
+# 이 통보를 **기다리기 시작**했다. 그런데 `_judge_stop_terminal` 은 `safety_stop`
+# 에만 통보하고 있었다(§84.2 당시엔 guide_stop 의 성공을 아무도 안 기다렸다).
+#
+# 결과 — 검토 4회차 재현 최종값:
+#   `state=SEARCH_BACK · refind_stopping=True · stop_state=pending · 신규 goal=0`
+#   로봇은 실제로 섰는데 유도가 **영구 정지**하고, 5초 watchdog 이 정상 취소를
+#   `unconfirmed` 로 오판해 **E-stop 을 요구**했다. 가용성 P0 다.
+#
+# 🔴 이 경계는 `test_hold.py`·`test_search_back_entry.py` 의 껍데기 하네스로는
+#   못 잡는다 — 거긴 진짜 `GoalManager` 를 안 지난다. 그래서 여기에 둔다.
+#   (검토가 "반대 변이를 넣어도 mission 280 passed" 라고 지적한 자리다.)
+
+
+def _cancel_and_terminate(env, intent, status=CANCELED):
+    """활성 goal 을 `intent` 로 취소하고 정상 응답 + terminal 까지 흘린다."""
+    handle = send_and_accept(env, tag='search_back')
+    env.gm.cancel_current_goal(intent=intent)
+    handle.cancel_response_cb(fake_cancel_response(1))
+    handle.result_cb(fake_result(status))
+    return handle
+
+
+def test_guide_stop_positive_cancel_is_reported_to_the_mission():
+    """🎯 `guide_stop` 의 CANCELED 도 미션에 **정확히 한 번** 통보돼야 한다."""
+    env = make_gm()
+    _cancel_and_terminate(env, 'guide_stop')
+
+    assert env.stop_confirmed == ['guide_stop'], (
+        '🔴 §91(4회차) P0-1 재발생 — guide_stop 의 긍정 CANCELED 가 미션에 '
+        f'통보되지 않았다: {env.stop_confirmed}. 재발견 복귀가 영원히 안 풀린다.')
+    assert not env.stop_unconfirmed, f'정상 종결인데 실패로 갔다: {env.stop_unconfirmed}'
+    assert not env.gm.stop_pending, '종결됐는데 직렬화가 안 풀렸다'
+
+
+def test_safety_stop_positive_cancel_still_reported():
+    """역회귀 — 기존 `safety_stop` 계약(§84.2)이 그대로 살아 있다."""
+    env = make_gm()
+    _cancel_and_terminate(env, 'safety_stop')
+    assert env.stop_confirmed == ['safety_stop'], \
+        f'safety_stop 통보가 깨졌다: {env.stop_confirmed}'
+
+
+def test_plain_cancel_is_not_reported_as_a_stop():
+    """🔴 일반 취소(intent=None)는 정지 세대가 아니므로 **통보하지 않는다.**
+
+    하네스가 이걸 어기고 항상 통보하고 있었고, 그것이 §91(4회차) P0 를
+    280건 초록 속에 숨긴 원인이었다(`PITFALLS §19-⑤`).
+    """
+    env = make_gm()
+    _cancel_and_terminate(env, None)
+    assert env.stop_confirmed == [], \
+        f'일반 취소인데 정지 종결로 통보했다: {env.stop_confirmed}'
+
+
+def test_non_canceled_terminal_is_a_failure_not_a_confirmation():
+    """CANCELED 가 아닌 종결은 실패다 — 통보를 성공으로 바꿔 읽으면 안 된다."""
+    env = make_gm()
+    _cancel_and_terminate(env, 'guide_stop', status=ABORTED)
+    assert env.stop_confirmed == [], \
+        f'비-CANCELED 종결인데 확인으로 통보했다: {env.stop_confirmed}'
+    assert env.stop_unconfirmed or env.faults, \
+        '비-CANCELED 종결인데 실패 경로가 아무것도 안 탔다'
+
+
+def test_stale_generation_cancel_does_not_confirm_the_new_one():
+    """🔴 옛 세대의 늦은 CANCELED 가 새 정지 세대를 confirmed 로 만들면 안 된다."""
+    env = make_gm()
+    old = send_and_accept(env, tag='search_back')
+    env.gm.cancel_current_goal(intent='guide_stop')      # 세대 1
+    env.gm.cancel_current_goal(intent='hard')            # 운영자 개입 = 강제 해제
+    env.stop_confirmed.clear()
+
+    new = send_and_accept(env, tag='search_back')        # 세대 2
+    env.gm.cancel_current_goal(intent='guide_stop')
+    old.result_cb(fake_result(CANCELED))                 # 🔴 옛 세대가 늦게 도착
+
+    assert env.stop_confirmed == [], (
+        '🔴 옛 세대의 CANCELED 가 새 세대를 confirmed 로 만들었다: '
+        f'{env.stop_confirmed}')
+    assert env.gm.stop_pending, '새 세대의 봉쇄가 옛 콜백으로 풀렸다'
+
+    new.cancel_response_cb(fake_cancel_response(1))
+    new.result_cb(fake_result(CANCELED))                 # 제 세대가 종결
+    assert env.stop_confirmed == ['guide_stop'], \
+        f'제 세대 종결이 통보되지 않았다: {env.stop_confirmed}'
