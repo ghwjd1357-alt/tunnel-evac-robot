@@ -23,6 +23,8 @@ from std_msgs.msg import Bool, String
 MEAN = {
     'PATROL':      '평시 순찰 중',
     'APPROACH':    '화재 감지 — 집결지로 출동',
+    'SCAN_AREA':   '집결지 360° 훑기 — 대피자 탐색',
+    'HOLD':        '추종자 놓침 — 제자리에서 재수집',
     'GATHER':      '집결 대기 — 대피자를 모으는 중',
     'GUIDE':       '저속 선행 유도 — 후방 감시 중',
     'SEARCH_BACK': '추종자 놓침 — 역행 재탐색',
