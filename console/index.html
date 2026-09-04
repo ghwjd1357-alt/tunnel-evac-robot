@@ -2,512 +2,384 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>터널 대피로봇 관제</title>
-<style>
-  /* ── 기본 레이아웃: 다크 관제 테마 ─────────────────────────── */
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background:#12161c; color:#dfe6ee; font-family:'Noto Sans KR',sans-serif; padding:16px; }
-  h1 { font-size:1.15rem; letter-spacing:.05em; margin-bottom:12px; }
-  .grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; max-width:1100px; }
-  .panel { background:#1b2129; border:1px solid #2a3340; border-radius:8px; padding:14px; }
-  .panel h2 { font-size:.85rem; color:#8fa3b8; margin-bottom:10px; letter-spacing:.08em; }
-  .muted { color:#5d6b7a; font-size:.8rem; }
-
-  /* 연결 상태 뱃지 */
-  #conn { float:right; font-size:.8rem; padding:2px 10px; border-radius:10px; background:#3a2020; color:#ff7b7b; }
-  #conn.ok { background:#16351f; color:#6fe08d; }
-
-  /* ── FSM 상태 표시등 ─────────────────────────────────────── */
-  .fsm { display:flex; flex-wrap:wrap; gap:6px; }
-  .fsm span { padding:6px 10px; border-radius:6px; background:#232b35; color:#5d6b7a;
-              font-size:.8rem; border:1px solid transparent; }
-  .fsm span.on  { background:#173a5e; color:#7fc4ff; border-color:#2f77b6; font-weight:700; }
-  .fsm span.on.danger { background:#5e1717; color:#ff9b9b; border-color:#b62f2f; }
-  #siren { margin-top:10px; font-size:.85rem; color:#5d6b7a; }
-  #siren.on { color:#ffb04d; font-weight:700; }
-
-  /* ── 인지 패널 (08-21 신설 — 역할 B `/detections` 직접 표시) ────────
-     🔴 지도에 3D 점을 찍지 않는 이유: `position` 은 camera optical frame 이라
-        map 으로 옮기려면 TF 사슬이 필요하고, 관제는 rosbridge 로 TF 를 전부
-        받고 있지 않다. 잘못 그린 점은 없는 것보다 나쁘다 — 그래서 수와
-        신뢰도만 정직하게 보여준다. 지도 위 화재 표시는 `/alarm` 이 담당한다. */
-  .det { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
-  .det span { padding:5px 9px; border-radius:6px; background:#232b35; color:#5d6b7a;
-              font-size:.8rem; font-variant-numeric:tabular-nums; }
-  .det span.hit  { background:#173a5e; color:#7fc4ff; font-weight:700; }
-  .det span.fire { background:#5e3a17; color:#ffb04d; font-weight:700; }
-  #detState { margin-top:8px; font-size:.85rem; }
-  #detState.stale { color:#ff9b9b; font-weight:700; }
-  #detState.live  { color:#6fe08d; }
-  #adapter { margin-top:6px; font-size:.75rem; color:#5d6b7a;
-             font-family:ui-monospace,monospace; word-break:break-all; }
-
-  /* ── 버튼 ────────────────────────────────────────────────── */
-  button { cursor:pointer; border:0; border-radius:6px; padding:10px 14px; font-size:.9rem;
-           font-weight:700; color:#fff; }
-  button:disabled { opacity:.35; cursor:not-allowed; }
-  .btn-reset { background:#2f77b6; }
-  .btn-abort { background:#8a6d1a; }
-  .btn-estop { background:#b62f2f; width:100%; margin-top:10px; padding:14px; font-size:1rem; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  input[type=number] { width:80px; background:#12161c; border:1px solid #2a3340; color:#dfe6ee;
-                       border-radius:6px; padding:8px; }
-
-  /* ── 이벤트 로그 ─────────────────────────────────────────── */
-  #log { height:220px; overflow-y:auto; font-size:.8rem; line-height:1.6; font-family:monospace; }
-  #log .fire   { color:#ff9b6a; }
-  #log .state  { color:#7fc4ff; }
-  #log .ctrl   { color:#e5d07a; }
-
-  /* 자리만 있는 패널 (영상 — C5) */
-  .placeholder { display:flex; align-items:center; justify-content:center;
-                 height:120px; color:#3d4956; border:1px dashed #2a3340; border-radius:6px; }
-
-  /* ── 지도 뷰 (C3) ─────────────────────────────────────────── */
-  .wide { grid-column: 1 / -1; }
-  #mapCanvas { width:100%; height:380px; background:#12161c; border-radius:6px; cursor:crosshair; }
-
-  /* ── 시스템 상태 (C4) ─────────────────────────────────────── */
-  .sys { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; font-size:.85rem; }
-  .sys i { font-style:normal; color:#e05a5a; }        /* 기본 = 빨강(미수신) */
-  .sys i.ok   { color:#6fe08d; }
-  .sys i.warn { color:#ffb04d; }
-  .sys b { font-weight:400; color:#8fa3b8; margin-left:4px; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>지하터널 대피로봇 관제</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/console.css">
 </head>
 <body>
 
-<h1>🚨 지하터널 대피로봇 — 관제 콘솔 <span id="conn">연결 안 됨</span></h1>
+<div id="app">
 
-<div class="grid">
+  <!-- ═══ 좌측 사이드바 ═══════════════════════════════════════ -->
+  <aside id="sidebar">
+    <div class="brand">TUNNEL</div>
+    <nav>
+      <button data-menu="main">관 제</button>
+      <button data-menu="video">영 상</button>
+      <button data-menu="diag">진 단</button>
+      <button data-menu="record">기 록</button>
+      <button data-menu="emergency">비 상</button>
+    </nav>
+  </aside>
 
-  <!-- ═══ 미션 상태 패널 (C2) ═══ -->
-  <div class="panel">
-    <h2>미션 상태 (FSM)</h2>
-    <div class="fsm" id="fsm">
-      <!-- 순서 = mission_node.py State 정의 순서와 동일 -->
-      <span data-s="PATROL">순찰 PATROL</span>
-      <span data-s="APPROACH">접근 APPROACH</span>
-      <span data-s="GATHER">집결 GATHER</span>
-      <span data-s="GUIDE">유도 GUIDE</span>
-      <span data-s="SEARCH_BACK">재탐색 SEARCH_BACK</span>
-      <span data-s="ESCAPED">탈출 ESCAPED</span>
-      <span data-s="FAULT" class="danger-slot">고장 FAULT</span>
+  <!-- ═══ 상단바 (모든 화면 공통) ═════════════════════════════ -->
+  <header id="topbar">
+    <div class="title">지하터널 대피로봇 관제</div>
+    <div id="mode-tag">평시 감시</div>
+    <div class="spacer"></div>
+
+    <!-- 진단 16항목을 하나로 요약한 신호등. 누르면 진단 화면으로 -->
+    <div id="health-summary" title="누르면 진단 화면으로">
+      <span id="health-dot" class="dot"></span><span id="health-text">연결 대기</span>
     </div>
-    <div id="siren">📢 싸이렌: OFF</div>
-    <div class="muted" style="margin-top:8px">마지막 수신: <span id="lastseen">—</span></div>
-  </div>
 
-  <!-- ═══ 인지 (역할 B `/detections`) ═══ -->
-  <div class="panel">
-    <h2>인지 — 카메라</h2>
-    <div class="det" id="detBadges">
-      <span data-c="fire">🔥 fire 0</span>
-      <span data-c="smoke">💨 smoke 0</span>
-      <span data-c="person_ok">🧍 person_ok 0</span>
-      <span data-c="person_fallen">🛌 person_fallen 0</span>
-      <span data-c="person_unknown">❓ person_unknown 0</span>
+    <div id="alert-badge">
+      <span class="dot alarm"></span><span>경보 <span id="alert-count">0</span></span>
     </div>
-    <div id="detState">— 수신 없음</div>
-    <div id="adapter">어댑터: —</div>
-  </div>
 
-  <!-- ═══ 원격 제어 (C2) ═══ -->
-  <div class="panel">
-    <h2>로봇 원격 제어</h2>
-    <div class="row">
-      <button class="btn-reset" id="btnReset">임무 재시작 (reset)</button>
-      <button class="btn-abort" id="btnAbort">임무 중단 (abort)</button>
+    <button id="btn-estop">비 상 정 지</button>
+  </header>
+
+  <!-- ═══ 본문 ════════════════════════════════════════════════ -->
+  <main id="main">
+
+    <!-- 경보 목록 (배지를 누르면 열린다) -->
+    <div id="alert-list" class="panel">
+      <h2>경보</h2>
+      <div class="body" id="alert-body"></div>
     </div>
-    <button class="btn-estop" id="btnEstop">■ 비상 정지 (소프트)</button>
-    <div class="muted" style="margin-top:6px">
-      소프트 정지 = cmd_vel 0 + abort. 하드 정지는 구동부 Teensy 0.5s 워치독 담당.
-    </div>
-  </div>
 
-  <!-- ═══ 화재 경보 입력 (C2 — 데모 트리거) ═══ -->
-  <div class="panel">
-    <h2>화재 경보 입력 (/alarm)</h2>
-    <div class="row">
-      X <input type="number" id="fx" value="14.0" step="0.5">
-      Y <input type="number" id="fy" value="0.0" step="0.5">
-      <button class="btn-abort" style="background:#b6572f" id="btnFire">🔥 화재 발생</button>
-    </div>
-    <div class="muted" style="margin-top:6px">T자 데모 (14,0) / 쌍굴 (30,0). 지도 클릭 발행은 C3 에서.</div>
-  </div>
+    <!-- ─── 화면 1 · 관제 ─────────────────────────────────── -->
+    <section class="screen" id="screen-main" data-menu="main">
 
-  <!-- ═══ 이벤트 로그 (C2) ═══ -->
-  <div class="panel">
-    <h2>탐지·이벤트 로그</h2>
-    <div id="log"></div>
-  </div>
+      <!-- 진행 막대: 12개 상태를 6단계 흐름으로 -->
+      <div id="progress">
+        <div id="progress-steps" style="display:flex;flex:1"></div>
+        <div id="progress-exception" class="exception"></div>
+      </div>
 
-  <!-- ═══ 지도·위치 뷰 (C3) ═══ -->
-  <div class="panel wide">
-    <h2>지도·위치 뷰</h2>
-    <canvas id="mapCanvas"></canvas>
-    <div class="muted" style="margin-top:6px">
-      🔺 로봇 · 🔥 화재 · <span style="color:#6fe08d">─</span> 계획 경로(/plan) ·
-      <b>지도 클릭 → 화재 좌표 입력칸에 반영</b> (발행은 🔥 버튼으로)
-    </div>
-  </div>
+      <div id="center">
 
-  <!-- ═══ 시스템 상태 (C4) ═══ -->
-  <div class="panel wide">
-    <h2>시스템 상태</h2>
-    <div class="sys" id="sys">
-      <div><i id="h-scan">●</i> LiDAR <span class="muted">/scan</span> <b id="a-scan">—</b></div>
-      <div><i id="h-odom">●</i> 오도메트리 <span class="muted">/odom</span> <b id="a-odom">—</b></div>
-      <div><i id="h-imu">●</i> IMU <span class="muted">/imu/data</span> <b id="a-imu">—</b></div>
-      <div><i id="h-nav">●</i> Nav2 <b id="a-nav">목표 없음</b></div>
-      <div><i id="h-rtt">●</i> 통신 지연 <b id="a-rtt">—</b></div>
-      <div><i style="color:#3d4956">●</i> 배터리 <b class="muted">구동부 토픽 합의 대기</b></div>
-    </div>
-  </div>
+        <!-- 좌측 정보 열 -->
+        <div id="left-col">
+          <div class="panel" id="mission-info">
+            <h2 id="mission-title">임무</h2>
+            <div class="body">
+              <div class="state-big" id="state-ko">수신 대기</div>
+              <div class="state-code" id="state-en"></div>
 
-  <!-- ═══ 자리 예약 패널 ═══ -->
-  <div class="panel wide"><h2>실시간 영상</h2><div class="placeholder">NO SIGNAL — 실차 단계 (RGB·열화상)</div></div>
+              <!-- 즉시 개입이 필요한 상태에서만 뜨는 지시문 -->
+              <div id="action-box" data-when="critical"></div>
 
+              <div class="bigstats">
+                <div><div class="l" id="bs-label">임무 경과</div><div class="v" id="mission-elapsed">—</div></div>
+                <div><div class="l">이동 거리</div><div class="v" id="mission-dist">0.0<span class="u">m</span></div></div>
+              </div>
+
+              <dl class="kv">
+                <dt>현재 단계 경과</dt><dd id="state-since">—</dd>
+                <dt>현재 속도</dt><dd id="mission-speed">0.00 m/s</dd>
+
+                <!-- 평시: 로봇이 정상인가가 주인공 -->
+                <dt data-when="normal">다음 지점까지</dt><dd data-when="normal" id="togo-n">—</dd>
+                <dt data-when="normal">구동부</dt><dd data-when="normal" id="n-drive" class="off">—</dd>
+                <dt data-when="normal">비상정지</dt><dd data-when="normal" id="n-estop" class="off">—</dd>
+                <dt data-when="normal">라이다</dt><dd data-when="normal" id="n-scan" class="off">—</dd>
+                <dt data-when="normal">통신 지연</dt><dd data-when="normal" id="n-rtt" class="off">—</dd>
+
+                <!-- 화재 대응: 사건 정보가 주인공 -->
+                <dt data-when="incident">목표까지</dt><dd data-when="incident" id="mission-togo">—</dd>
+                <dt data-when="incident">화재 위치</dt><dd data-when="incident" id="fire-pos" class="off">—</dd>
+                <dt data-when="incident">대피자 감지</dt><dd data-when="incident" id="person-v" class="off">—</dd>
+                <dt data-when="incident">싸이렌</dt><dd data-when="incident" id="siren-v" class="off">정지</dd>
+                <dt data-when="incident">주행</dt><dd data-when="incident" id="mission-nav" class="off">—</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="panel" id="controls">
+            <h2>제어</h2>
+            <div class="body">
+              <div class="btn-row" style="margin-bottom:6px">
+                <input id="fire-x" class="num" value="12.50"
+                       style="background:var(--bg);border:1px solid var(--line);color:var(--text);padding:8px;border-radius:2px;font-family:var(--mono)">
+                <input id="fire-y" class="num" value="-0.10"
+                       style="background:var(--bg);border:1px solid var(--line);color:var(--text);padding:8px;border-radius:2px;font-family:var(--mono)">
+              </div>
+              <button class="btn primary" id="btn-fire">화재 신고</button>
+              <div class="btn-row">
+                <button class="btn" id="btn-reset">임무 재시작</button>
+                <button class="btn" id="btn-abort">임무 중단</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 지도 -->
+        <div id="map-panel">
+          <canvas id="map-canvas"></canvas>
+          <div id="map-toggles">
+            <button data-layer="scan">라이다</button>
+            <button data-layer="trail">지나온 길</button>
+            <button data-layer="plan">경로</button>
+            <button data-layer="cost">장애물</button>
+          </div>
+          <div id="map-legend">
+            <div><span class="k">▲</span>로봇</div>
+            <div><span class="k">◆</span>화재</div>
+            <div><span class="k">■</span>대피자</div>
+          </div>
+          <div id="map-coord">—</div>
+        </div>
+
+        <!-- 우측 정보 열 -->
+        <div id="right-col">
+          <div class="panel" id="vision">
+            <h2>로봇 시야</h2>
+            <div class="body" id="vision-body">
+              <div id="vision-frame">CAMERA</div>
+              <div style="padding:10px 11px">
+                <dl class="kv">
+                  <dt>사람</dt><dd id="det-person">0</dd>
+                  <dt>화재·연기</dt><dd id="det-fire">0</dd>
+                  <dt>영상</dt><dd id="det-src" class="off">수신 없음</dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+          <div class="panel" id="timeline">
+            <h2>임무 진행</h2>
+            <div class="body" id="timeline-body"></div>
+          </div>
+
+          <!-- 진단 요약 — 상단바 신호등의 내역을 여기서 바로 본다 -->
+          <div class="panel" id="diag-mini" data-when="incident">
+            <h2>로봇 상태</h2>
+            <div class="body">
+              <dl class="kv">
+                <dt>구동부</dt><dd id="m-drive" class="off">—</dd>
+                <dt>비상정지</dt><dd id="m-estop" class="off">—</dd>
+                <dt>라이다</dt><dd id="m-scan" class="off">—</dd>
+                <dt>통신 지연</dt><dd id="m-rtt" class="off">—</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 로그 -->
+      <div class="panel" id="log-panel">
+        <h2>이벤트</h2>
+        <div class="body" id="log-body"></div>
+      </div>
+    </section>
+
+    <!-- ─── 디스플레이 모드 (?display=1) ────────────────────
+         로봇 몸통 7인치 1024x600 패널용. 보는 사람 = 대피자·현장 인원.
+         조작 UI 는 오조작 위험이라 숨긴다 (원안 = feature/display, 팀원 3ddef79). -->
+    <section class="screen" id="screen-display" data-menu="display">
+      <div id="big-state">
+        <div id="big-main">—</div>
+        <div id="big-sub"></div>
+      </div>
+      <div id="display-map"></div>
+    </section>
+
+    <!-- ─── 화면 2 · 영상 · 의사소통 ──────────────────────── -->
+    <section class="screen" id="screen-video" data-menu="video">
+      <div class="video-cols">
+
+        <div id="video-main">
+          <div class="panel" id="cam-rgb">
+            <h2>카메라 · RGB</h2>
+            <div class="body">
+              <div class="camview" id="cam-rgb-view">CAMERA</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="video-side">
+          <div class="panel">
+            <h2>인지 결과<span class="note" id="v-src"> · 데모 데이터</span></h2>
+            <div class="body"><dl class="kv">
+              <dt>사람</dt><dd id="v-person">0</dd>
+              <dt>화재 · 연기</dt><dd id="v-fire">0</dd>
+              <dt>마지막 수신</dt><dd id="v-age" class="off">—</dd>
+              <dt>인지 처리</dt><dd id="v-adapter" class="off">—</dd>
+            </dl></div>
+          </div>
+
+          <div class="panel" id="comm">
+            <h2>의사소통 — 로봇 디스플레이</h2>
+            <div class="body">
+              <div class="quick">
+                <button class="btn" data-say="이쪽으로 따라오세요">이쪽으로 따라오세요</button>
+                <button class="btn" data-say="잠시 멈춰 주세요">잠시 멈춰 주세요</button>
+                <button class="btn" data-say="구조대가 오고 있습니다">구조대가 오고 있습니다</button>
+                <button class="btn" data-say="탈출구는 이 방향입니다">탈출구는 이 방향입니다</button>
+              </div>
+              <div class="say-row">
+                <input id="say-text" maxlength="40" placeholder="직접 입력 (40자)">
+                <button class="btn primary" id="say-send">전송</button>
+              </div>
+              <div id="say-state" class="note">아직 보낸 문구가 없습니다</div>
+              <div id="say-log"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ─── 화면 2 · 진단 ─────────────────────────────────── -->
+    <section class="screen" id="screen-diag" data-menu="diag">
+
+      <!-- 한눈에 봐야 하는 다섯 가지 — 상단바 신호등의 내역 -->
+      <div class="tile-row">
+        <div class="tile"><div class="l">구동부</div><div class="v" id="t-drive">—</div></div>
+        <div class="tile"><div class="l">비상정지</div><div class="v" id="t-estop">—</div></div>
+        <div class="tile"><div class="l">라이다</div><div class="v" id="t-scan">—</div></div>
+        <div class="tile"><div class="l">통신 지연</div><div class="v" id="t-rtt">—</div></div>
+        <div class="tile"><div class="l">경로 추종</div><div class="v" id="t-nav">—</div></div>
+      </div>
+
+      <div class="diag-grid">
+
+        <div class="panel"><h2>구동부 · 안전</h2><div class="body"><dl class="kv">
+          <dt>구동 상태</dt><dd id="d-dstate" class="off">—</dd>
+          <dt>최근 해제 사유</dt><dd id="d-dreject" class="off">—</dd>
+          <dt>무장 요청 횟수</dt><dd id="d-dcount" class="off">—</dd>
+          <dt>비상정지</dt><dd id="d-estop" class="off">—</dd>
+          <dt>마지막 수신</dt><dd id="d-diag-age" class="off">—</dd>
+          <dt class="raw">원값 x y z</dt><dd class="raw" id="d-diag">—</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>펌웨어</h2><div class="body"><dl class="kv">
+          <dt>빌드</dt><dd id="d-fw" class="off" style="font-size:var(--fs-label)">—</dd>
+          <dt>연결 확인</dt><dd id="d-pulse" class="off">—</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>센서 수신</h2><div class="body"><dl class="kv">
+          <dt>라이다 /scan</dt><dd id="d-scan" class="off">—</dd>
+          <dt>오도메트리</dt><dd id="d-odom" class="off">—</dd>
+          <dt>IMU</dt><dd id="d-imu" class="off">—</dd>
+          <dt>좌표변환 /tf</dt><dd id="d-tf" class="off">—</dd>
+          <dt>IMU 방위</dt><dd id="d-yaw" class="off">—</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>주행 · 통신</h2><div class="body"><dl class="kv">
+          <dt>경로 추종</dt><dd id="d-nav" class="off">—</dd>
+          <dt>rosbridge</dt><dd id="d-conn" class="off">—</dd>
+          <dt>통신 지연</dt><dd id="d-rtt" class="off">—</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>위치 · 속도</h2><div class="body"><dl class="kv">
+          <dt>위치 x y 방위</dt><dd id="d-pose" class="off">—</dd>
+          <dt>속도</dt><dd id="d-speed">0.00 m/s</dd>
+          <dt>이동 거리</dt><dd id="d-dist">0.0 m</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>인지</h2><div class="body"><dl class="kv">
+          <dt>인지 처리</dt><dd id="d-adapter" class="off" style="font-size:var(--fs-label)">—</dd>
+          <dt>카메라 탐지</dt><dd id="d-det" class="off">—</dd>
+        </dl></div></div>
+
+        <div class="panel"><h2>전원 · 부하<span class="note"> · 데모 데이터</span></h2>
+          <div class="body meters">
+            <div class="meter"><div class="mh"><span>배터리</span><b id="mv-batt">—</b></div>
+              <div class="track"><i id="mb-batt"></i></div></div>
+            <div class="meter"><div class="mh"><span>CPU</span><b id="mv-cpu">—</b></div>
+              <div class="track"><i id="mb-cpu"></i></div></div>
+            <div class="meter"><div class="mh"><span>GPU</span><b id="mv-gpu">—</b></div>
+              <div class="track"><i id="mb-gpu"></i></div></div>
+            <div class="meter"><div class="mh"><span>온도</span><b id="mv-temp">—</b></div>
+              <div class="track"><i id="mb-temp"></i></div></div>
+          </div></div>
+
+      </div>
+    </section>
+
+    <!-- ─── 화면 3 · 기록 ─────────────────────────────────── -->
+    <section class="screen" id="screen-record" data-menu="record">
+      <div id="summary-grid">
+        <div class="stat"><div class="label">대응 경과</div><div class="value" id="r-elapsed">--:--</div></div>
+        <div class="stat"><div class="label">구간 이동</div><div class="value" id="r-dist">0.0</div></div>
+        <div class="stat"><div class="label">관제 가동</div><div class="value" id="r-total">--:--</div></div>
+        <div class="stat"><div class="label">이벤트</div><div class="value" id="r-events">0</div></div>
+        <div class="stat"><div class="label">경보</div><div class="value" id="r-alerts">0</div></div>
+        <div class="stat"><div class="label">임무 단계</div><div class="value" id="r-states">0</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:8px;min-height:0">
+        <div class="panel"><h2>상태별 체류 시간</h2>
+          <div class="body"><dl class="kv" id="r-dwell"></dl></div></div>
+        <div class="panel" id="record-log">
+          <h2>전체 이벤트</h2>
+          <div class="body" id="record-log-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── 화면 4 · 비상 제어 ────────────────────────────── -->
+    <section class="screen" id="screen-emg" data-menu="emergency">
+      <div id="emg-warn">
+        평상시 사용하지 않습니다. 자율주행이 멈춘 상황에서만 사람이 직접 로봇을 움직입니다.
+        버튼을 <b>누르고 있는 동안만</b> 움직이며, 떼거나 통신이 끊기면 즉시 멈춥니다.
+      </div>
+
+      <div class="emg-grid">
+        <!-- 지도는 관제 화면에서 이 자리로 옮겨 온다 (같은 캔버스를 재사용) -->
+        <div id="emg-map"></div>
+
+        <div id="emg-mid">
+          <div class="panel">
+            <h2>카메라</h2>
+            <div class="body"><div class="camview" id="emg-cam">CAMERA</div></div>
+          </div>
+          <div class="panel">
+            <h2>활성화 조건 — 넷을 모두 만족해야 열립니다</h2>
+            <div class="body gate">
+              <div class="cond"><span id="c-link" class="dot"></span><span>관제와 로봇이 연결되어 있다</span></div>
+              <div class="cond"><span id="c-abort" class="dot"></span><span>임무가 중단되어 있다 (FAULT · BLOCKED)</span></div>
+              <div class="cond"><span id="c-estop" class="dot"></span><span>하드웨어 비상정지가 해제되어 있다</span></div>
+              <div class="cond"><span id="c-drive" class="dot"></span><span>구동부가 무장되어 있다</span></div>
+              <button class="btn danger" id="emg-abort">임무 중단 후 조종 준비</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="emg-ctrl">
+          <div class="panel" id="emg-drive">
+            <h2>방향 조종 · <span id="emg-state" class="off">잠김</span></h2>
+            <div class="body">
+              <div id="dpad">
+                <div class="sp"></div><button data-dir="fwd" disabled>전진</button><div class="sp"></div>
+                <button data-dir="left" disabled>좌회전</button><div class="sp"></div><button data-dir="right" disabled>우회전</button>
+                <div class="sp"></div><button data-dir="back" disabled>후진</button><div class="sp"></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>로봇 상태</h2>
+            <div class="body"><dl class="kv">
+              <dt>임무</dt><dd id="e-mission" class="off">—</dd>
+              <dt>구동부</dt><dd id="e-drive" class="off">—</dd>
+              <dt>비상정지</dt><dd id="e-estop" class="off">—</dd>
+              <dt>통신 지연</dt><dd id="e-rtt" class="off">—</dd>
+              <dt>위치</dt><dd id="e-pose" class="off">—</dd>
+              <dt>현재 속도</dt><dd id="emg-speed">0.00 m/s</dd>
+              <dt>속도 상한</dt><dd id="emg-limit">—</dd>
+            </dl></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
 </div>
 
-<script src="roslib.min.js"></script>
-<script>
-/* ════════════════════════════════════════════════════════════════
-   관제 콘솔 C1+C2 초안 (2026-07-18)
-   - rosbridge(ws://:9090) 접속 → /mission_state·/siren 구독,
-     /mission_cmd·/alarm·/cmd_vel 발행
-   - 토픽 계약: 0718_관제시스템.md §4
-   ════════════════════════════════════════════════════════════════ */
-
-// ── 1. rosbridge 연결 (끊기면 3초마다 자동 재접속) ──────────────
-const connEl = document.getElementById('conn');
-let ros;
-function connect() {
-  ros = new ROSLIB.Ros({ url: 'ws://' + location.hostname + ':9090' });
-  ros.on('connection', () => { connEl.textContent = '연결됨';  connEl.classList.add('ok');  setupTopics(); });
-  ros.on('close',      () => { connEl.textContent = '연결 안 됨'; connEl.classList.remove('ok'); setTimeout(connect, 3000); });
-  ros.on('error',      () => {});   // close 가 뒤따르므로 별도 처리 불필요
-}
-connect();
-
-// ── 2. 이벤트 로그 ──────────────────────────────────────────────
-const logEl = document.getElementById('log');
-function log(cls, text) {
-  const t = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-  const div = document.createElement('div');
-  div.className = cls;
-  div.textContent = `[${t}] ${text}`;
-  logEl.prepend(div);                       // 최신이 위로
-  while (logEl.children.length > 200) logEl.lastChild.remove();
-}
-
-// ── 3. 토픽 배선 ────────────────────────────────────────────────
-let cmdPub, alarmPub, cmdVelPub;
-let lastState = null;
-
-function setupTopics() {
-  // 구독: 미션 상태 (상시 발행이라 폴링 불필요)
-  new ROSLIB.Topic({ ros, name: '/mission_state', messageType: 'std_msgs/msg/String' })
-    .subscribe(msg => {
-      document.getElementById('lastseen').textContent = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-      if (msg.data !== lastState) {          // 전이 시에만 로그 (상시 발행 스팸 방지)
-        if (lastState !== null) log('state', `상태 전이: ${lastState} → ${msg.data}`);
-        lastState = msg.data;
-        document.querySelectorAll('#fsm span').forEach(el => {
-          el.classList.toggle('on', el.dataset.s === msg.data);
-          el.classList.toggle('danger', el.dataset.s === 'FAULT' && msg.data === 'FAULT');
-        });
-      }
-    });
-
-  // 구독: 싸이렌
-  new ROSLIB.Topic({ ros, name: '/siren', messageType: 'std_msgs/msg/Bool' })
-    .subscribe(msg => {
-      const el = document.getElementById('siren');
-      el.textContent = '📢 싸이렌: ' + (msg.data ? 'ON' : 'OFF');
-      el.classList.toggle('on', msg.data);
-    });
-
-  // 발행 준비
-  cmdPub    = new ROSLIB.Topic({ ros, name: '/mission_cmd', messageType: 'std_msgs/msg/String' });
-  alarmPub  = new ROSLIB.Topic({ ros, name: '/alarm',       messageType: 'geometry_msgs/msg/PoseStamped' });
-  cmdVelPub = new ROSLIB.Topic({ ros, name: '/cmd_vel',     messageType: 'geometry_msgs/msg/Twist' });
-
-  setupMap();      // C3: 지도·위치 뷰 배선
-  setupHealth();   // C4: 시스템 상태 배선
-}
-
-/* ════════════════════════════════════════════════════════════════
-   C4. 시스템 상태
-   ★ 설계: Hz 측정 대신 "신선도" — 무거운 토픽(/scan 등)을 전량 받지 않고
-     500ms 스로틀 구독으로 "마지막 수신이 얼마나 됐나"만 판별.
-     (정밀 Hz 가 필요해지면 로봇 쪽 헬스체크 노드에서 계산해 결론만 발행이 정석)
-   - Nav2: 액션 상태 토픽(/navigate_to_pose/_action/status) 구독
-   - 통신 지연: /rosapi/get_time 서비스 왕복시간(RTT)
-   ════════════════════════════════════════════════════════════════ */
-const lastSeen = {};   // {id: 마지막 수신 시각 ms}
-
-function watchFreshness(topic, type, id) {
-  new ROSLIB.Topic({ ros, name: topic, messageType: type, throttle_rate: 500 })
-    .subscribe(() => { lastSeen[id] = Date.now(); });
-}
-
-const NAV_STATUS = { 1:'목표 접수', 2:'주행 중', 3:'취소 중', 4:'도달 ✓', 5:'취소됨', 6:'거부/실패 ✗' };
-
-function setupHealth() {
-  watchFreshness('/scan',     'sensor_msgs/msg/LaserScan', 'scan');
-  watchFreshness('/odom',     'nav_msgs/msg/Odometry',     'odom');
-  watchFreshness('/imu/data', 'sensor_msgs/msg/Imu',       'imu');
-
-  // Nav2 목표 상태 (미션 노드가 보낸 goal 의 진행 상황)
-  new ROSLIB.Topic({ ros, name: '/navigate_to_pose/_action/status',
-                     messageType: 'action_msgs/msg/GoalStatusArray' })
-    .subscribe(m => {
-      if (!m.status_list.length) return;
-      const st = m.status_list[m.status_list.length - 1].status;   // 최신 goal
-      const el = document.getElementById('a-nav');
-      el.textContent = NAV_STATUS[st] || `상태 ${st}`;
-      const dot = document.getElementById('h-nav');
-      dot.className = (st === 2 || st === 4) ? 'ok' : (st === 6 ? '' : 'warn');
-      if (st === 6) log('state', 'Nav2 목표 거부/실패 — FAULT 여부는 미션 상태 참조');
-    });
-
-  // 통신 지연: 2초마다 rosapi 서비스 왕복시간 측정
-  // ⚠ 패키지명 주의: rosapi 아님 → rosapi_msgs (틀리면 응답이 조용히 유실됨)
-  // ★ S2-6 (07-19 Codex §9.9): 재접속마다 setInterval 이 하나씩 '누적'되던 누수 —
-  //   구 구독은 소켓과 함께 죽지만 JS 타이머는 영원히 산다. 이전 타이머를 먼저 해제.
-  //   (window.rttTimer 전역 보관 — setupHealth 는 접속 성공 때마다 다시 불리므로)
-  if (window.rttTimer) clearInterval(window.rttTimer);
-  const timeSvc = new ROSLIB.Service({ ros, name: '/rosapi/get_time', serviceType: 'rosapi_msgs/srv/GetTime' });
-  window.rttTimer = setInterval(() => {
-    const t0 = performance.now();
-    timeSvc.callService(new ROSLIB.ServiceRequest({}), () => {
-      const rtt = Math.round(performance.now() - t0);
-      document.getElementById('a-rtt').textContent = rtt + ' ms';
-      document.getElementById('h-rtt').className = rtt < 100 ? 'ok' : (rtt < 500 ? 'warn' : '');
-    }, () => { document.getElementById('a-rtt').textContent = '측정 실패'; });
-  }, 2000);
-}
-
-// 신선도 표시 갱신: 🟢 <1.5s / 🟡 <4s / 🔴 그 이상·미수신
-setInterval(() => {
-  for (const id of ['scan', 'odom', 'imu']) {
-    const dot = document.getElementById('h-' + id);
-    const age = document.getElementById('a-' + id);
-    if (!lastSeen[id]) { age.textContent = '미수신'; dot.className = ''; continue; }
-    const sec = (Date.now() - lastSeen[id]) / 1000;
-    age.textContent = sec.toFixed(1) + '초 전';
-    dot.className = sec < 1.5 ? 'ok' : (sec < 4 ? 'warn' : '');
-  }
-}, 500);
-
-/* ════════════════════════════════════════════════════════════════
-   C3. 지도·위치 뷰
-   - /map: OccupancyGrid → 오프스크린 캔버스에 1회 렌더 (지도는 무겁게 재렌더 안 함)
-   - /tf : map→odom (slam) ∘ odom→base_footprint (diff_drive) 2D 합성 = 로봇 위치
-   - /plan: Nav2 계획 경로 폴리라인
-   - /alarm: CLI 발행분도 마커에 반영되도록 구독
-   ════════════════════════════════════════════════════════════════ */
-const mapCanvas = document.getElementById('mapCanvas');
-const mctx = mapCanvas.getContext('2d');
-let mapInfo = null, mapImage = null;      // 지도 메타 + 렌더 캐시
-let tfMapOdom = null, tfOdomBase = null;  // 2D 변환 {x,y,yaw}
-let robot = null, planPts = [], fireXY = null;
-
-const quatToYaw = q => Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
-// 2D 변환 합성 a∘b (a 좌표계에서 본 b)
-function compose(a, b) {
-  const c = Math.cos(a.yaw), s = Math.sin(a.yaw);
-  return { x: a.x + c * b.x - s * b.y, y: a.y + s * b.x + c * b.y, yaw: a.yaw + b.yaw };
-}
-
-function renderGrid(msg) {
-  mapInfo = msg.info;
-  const w = msg.info.width, h = msg.info.height;
-  const off = document.createElement('canvas');
-  off.width = w; off.height = h;
-  const octx = off.getContext('2d');
-  const img = octx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const v = msg.data[i];
-    // 지도 row 0 = 아래쪽(y-) 인데 캔버스 y 는 아래로 증가 → 상하 반전해 저장
-    const row = (i / w) | 0, col = i % w;
-    const j = ((h - 1 - row) * w + col) * 4;
-    let c;
-    if (v === -1 || v === 255) c = [27, 33, 41];        // 미탐사
-    else if (v >= 65)          c = [207, 216, 227];     // 벽(점유)
-    else                       c = [47, 57, 71];        // 주행 가능
-    img.data[j] = c[0]; img.data[j+1] = c[1]; img.data[j+2] = c[2]; img.data[j+3] = 255;
-  }
-  octx.putImageData(img, 0, 0);
-  mapImage = off;
-}
-
-function setupMap() {
-  new ROSLIB.Topic({ ros, name: '/map', messageType: 'nav_msgs/msg/OccupancyGrid' })
-    .subscribe(m => { const first = !mapInfo; renderGrid(m); if (first) log('state', `지도 수신 (${m.info.width}×${m.info.height}, ${m.info.resolution}m/셀)`); });
-
-  // slam_toolbox 는 주기 발행이라 보통 위 구독으로 충분. 5초 내 미수신 시 서비스로 1회 요청 (안전망)
-  setTimeout(() => {
-    if (mapInfo) return;
-    new ROSLIB.Service({ ros, name: '/slam_toolbox/dynamic_map', serviceType: 'nav_msgs/srv/GetMap' })
-      .callService(new ROSLIB.ServiceRequest({}),
-        r => { renderGrid(r.map); log('state', '지도 수신 (dynamic_map 서비스 폴백)'); },
-        e => log('state', '지도 미수신 — 시뮬(mission.launch) 가동 여부 확인'));
-  }, 5000);
-
-  // /tf 는 고빈도 → 100ms 스로틀. map→odom 은 천천히 변해서 샘플링 유실 무해
-  new ROSLIB.Topic({ ros, name: '/tf', messageType: 'tf2_msgs/msg/TFMessage', throttle_rate: 100 })
-    .subscribe(m => {
-      for (const t of m.transforms) {
-        const tr = { x: t.transform.translation.x, y: t.transform.translation.y,
-                     yaw: quatToYaw(t.transform.rotation) };
-        if (t.header.frame_id === 'map'  && t.child_frame_id === 'odom') tfMapOdom = tr;
-        if (t.header.frame_id === 'odom' &&
-            (t.child_frame_id === 'base_footprint' || t.child_frame_id === 'base_link')) tfOdomBase = tr;
-      }
-      if (tfMapOdom && tfOdomBase) robot = compose(tfMapOdom, tfOdomBase);
-    });
-
-  new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/msg/Path', throttle_rate: 500 })
-    .subscribe(m => { planPts = m.poses.map(p => p.pose.position); });
-
-  new ROSLIB.Topic({ ros, name: '/alarm', messageType: 'geometry_msgs/msg/PoseStamped' })
-    .subscribe(m => { fireXY = { x: m.pose.position.x, y: m.pose.position.y }; });
-
-  // ── 인지 (08-21 신설) ───────────────────────────────────────────────
-  // 🔴 계약(합의사항 §15-b)이 정한 닫힌 열거 5종. 그 밖의 값이 오면 계약 위반이라
-  //    조용히 버리지 않고 화면에 띄운다 — 알아야 하는 쪽은 사람이다.
-  new ROSLIB.Topic({ ros, name: '/detections',
-                     messageType: 'tunnel_interfaces/msg/Detection3DArray',
-                     throttle_rate: 200 })
-    .subscribe(m => {
-      detLastMs = Date.now();
-      detCount = {}; detConf = {}; detBad = [];
-      for (const d of (m.detections || [])) {
-        if (!DET_CLASSES.includes(d.class_name)) { detBad.push(d.class_name); continue; }
-        detCount[d.class_name] = (detCount[d.class_name] || 0) + 1;
-        detConf[d.class_name] = Math.max(detConf[d.class_name] || 0, d.confidence);
-      }
-    });
-
-  // 어댑터가 "왜 안 쐈는지" 를 계속 흘린다. 이게 없으면 '불이 없다'와
-  // '뭔가 막혔다'가 화면에서 똑같이 보인다 (08-20 에 세 번 당한 형태).
-  new ROSLIB.Topic({ ros, name: '/adapter_status', messageType: 'std_msgs/msg/String' })
-    .subscribe(m => { document.getElementById('adapter').textContent = '어댑터: ' + m.data; });
-}
-
-// ── 인지 상태 렌더 ────────────────────────────────────────────────────
-const DET_CLASSES = ['fire', 'smoke', 'person_ok', 'person_fallen', 'person_unknown'];
-let detLastMs = 0, detCount = {}, detConf = {}, detBad = [];
-
-function drawDetections() {
-  const el = document.getElementById('detState');
-  if (!el) return;
-  for (const span of document.querySelectorAll('#detBadges span')) {
-    const c = span.dataset.c, n = detCount[c] || 0;
-    const icon = span.textContent.split(' ')[0];
-    span.textContent = n ? `${icon} ${c} ${n} (${(detConf[c] || 0).toFixed(2)})`
-                         : `${icon} ${c} 0`;
-    span.className = n ? (c === 'fire' ? 'fire' : 'hit') : '';
-  }
-  // 🔴 계약: 0.5초 stale. 빈 배열(정상 미탐지)과 미발행(실패)은 다른 것이다.
-  const age = detLastMs ? (Date.now() - detLastMs) : Infinity;
-  if (!detLastMs)        { el.textContent = '— 수신 없음'; el.className = ''; }
-  else if (age > 500)    { el.textContent = `🔴 STALE — ${(age / 1000).toFixed(1)}초 미수신`;
-                           el.className = 'stale'; }
-  else                   { el.textContent = '🟢 수신 중 (10 Hz)'; el.className = 'live'; }
-  if (detBad.length) {
-    el.textContent += `  🔴 계약 위반 class: ${[...new Set(detBad)].join(', ')}`;
-    el.className = 'stale';
-  }
-}
-setInterval(drawDetections, 200);
-
-// 지도 좌표(m) → 캔버스 픽셀
-function m2p(x, y, scale) {
-  const cx = (x - mapInfo.origin.position.x) / mapInfo.resolution;
-  const cy = (y - mapInfo.origin.position.y) / mapInfo.resolution;
-  return [cx * scale, (mapInfo.height - cy) * scale];
-}
-
-function drawMap() {
-  if (!mapImage || !mapInfo) return;
-  const cw = mapCanvas.clientWidth, ch = 380;
-  mapCanvas.width = cw; mapCanvas.height = ch;
-  const scale = Math.min(cw / mapInfo.width, ch / mapInfo.height);
-  mctx.fillStyle = '#12161c'; mctx.fillRect(0, 0, cw, ch);
-  mctx.imageSmoothingEnabled = false;
-  mctx.drawImage(mapImage, 0, 0, mapInfo.width * scale, mapInfo.height * scale);
-
-  // 계획 경로
-  if (planPts.length > 1) {
-    mctx.strokeStyle = '#6fe08d'; mctx.lineWidth = 2; mctx.beginPath();
-    planPts.forEach((p, i) => { const [px, py] = m2p(p.x, p.y, scale); i ? mctx.lineTo(px, py) : mctx.moveTo(px, py); });
-    mctx.stroke();
-  }
-  // 화재 마커
-  if (fireXY) {
-    const [px, py] = m2p(fireXY.x, fireXY.y, scale);
-    mctx.font = '20px sans-serif'; mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
-    mctx.fillText('🔥', px, py);
-  }
-  // 로봇 (진행방향 삼각형 — 캔버스 y 반전이라 화면각 = -yaw)
-  if (robot) {
-    const [px, py] = m2p(robot.x, robot.y, scale);
-    mctx.save(); mctx.translate(px, py); mctx.rotate(-robot.yaw);
-    mctx.fillStyle = '#7fc4ff'; mctx.beginPath();
-    mctx.moveTo(10, 0); mctx.lineTo(-6, 6); mctx.lineTo(-6, -6); mctx.closePath(); mctx.fill();
-    mctx.restore();
-  }
-}
-setInterval(drawMap, 200);   // 5fps 면 관제용으로 충분
-
-// 지도 클릭 → 화재 좌표 입력칸에 반영 (발행은 버튼으로 — 오클릭 방지)
-mapCanvas.addEventListener('click', ev => {
-  if (!mapInfo) return;
-  const r = mapCanvas.getBoundingClientRect();
-  const scale = Math.min(mapCanvas.width / mapInfo.width, mapCanvas.height / mapInfo.height);
-  const x = mapInfo.origin.position.x + ((ev.clientX - r.left) / scale) * mapInfo.resolution;
-  const y = mapInfo.origin.position.y + (mapInfo.height - (ev.clientY - r.top) / scale) * mapInfo.resolution;
-  document.getElementById('fx').value = x.toFixed(1);
-  document.getElementById('fy').value = y.toFixed(1);
-  log('ctrl', `지도 클릭 → 화재 후보 좌표 (${x.toFixed(1)}, ${y.toFixed(1)})`);
-});
-
-// ── 4. 제어 버튼 ────────────────────────────────────────────────
-function sendCmd(cmd) {
-  if (!cmdPub) return;
-  cmdPub.publish(new ROSLIB.Message({ data: cmd }));
-  log('ctrl', `관제 명령 발행: ${cmd}`);
-}
-document.getElementById('btnReset').onclick = () => sendCmd('reset');
-document.getElementById('btnAbort').onclick = () => sendCmd('abort');
-
-// 소프트 비상정지: abort(목표 취소·FAULT 유지) + cmd_vel 0 을 짧게 연사.
-// 하드 정지는 Teensy 워치독(통신 두절 0.5s 내 정지)이 최후 안전장치.
-document.getElementById('btnEstop').onclick = () => {
-  sendCmd('abort');
-  if (!cmdVelPub) return;
-  const zero = new ROSLIB.Message({ linear:{x:0,y:0,z:0}, angular:{x:0,y:0,z:0} });
-  let n = 0;
-  const iv = setInterval(() => { cmdVelPub.publish(zero); if (++n >= 10) clearInterval(iv); }, 100);
-  log('ctrl', '비상 정지(소프트): abort + cmd_vel 0 ×10');
-};
-
-// ── 5. 화재 경보 발행 (기존 재발사 관례대로 2회) ────────────────
-document.getElementById('btnFire').onclick = () => {
-  if (!alarmPub) return;
-  const x = parseFloat(document.getElementById('fx').value);
-  const y = parseFloat(document.getElementById('fy').value);
-  const msg = new ROSLIB.Message({
-    header: { frame_id: 'map', stamp: { sec: 0, nanosec: 0 } },   // stamp=0 = 최신 TF (미션 함정 ① 관례)
-    pose: { position: { x, y, z: 0 }, orientation: { x:0, y:0, z:0, w:1 } },
-  });
-  alarmPub.publish(msg);
-  setTimeout(() => alarmPub.publish(msg), 300);   // /alarm 간헐 유실 대비 재발사
-  log('fire', `🔥 화재 경보 발행: (${x}, ${y})`);
-};
-</script>
+<script src="vendor/roslib.min.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
