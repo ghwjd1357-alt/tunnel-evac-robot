@@ -202,8 +202,15 @@ function wire() {
     quiet({ planPts: m.poses.map(p => [p.pose.position.x, p.pose.position.y]) });
   }, 500);
 
-  /* /alarm 은 관례상 2회 발행되고 bag 재생에서도 반복된다.
-     같은 좌표가 연달아 오면 로그를 쌓지 않는다 — 같은 사건은 한 줄이어야 한다. */
+  /* /alarm — 🔴 **정상 경로는 로봇의 화재 탐지**다.
+     perception_adapter 가 /detections 를 받아 여기로 발행한다
+     (`adapter_node.py:521` · `PROJECT_CONTEXT §4.1` — "/detections → /alarm 은 한 줄도
+     안 바뀐다"). 관제의 지도 클릭은 검출이 실패했을 때 사람이 메우는 **대체 경로**다
+     (`PROJECT_CONTEXT` — "검출은 오퍼레이터가 수동 /alarm 으로 즉시 메운다").
+     → 화면 라벨은 `화재 탐지` 다. `신고` 로 쓰면 로봇이 못 찾은 것처럼 읽힌다.
+
+     관례상 2회 발행되고 bag 재생에서도 반복된다. 같은 좌표가 연달아 오면 로그를
+     쌓지 않는다 — 같은 사건은 한 줄이어야 한다. */
   let lastAlarmKey = null, lastAlarmT = 0;
   sub('/alarm', 'geometry_msgs/msg/PoseStamped', m => {
     const xy = { x: m.pose.position.x, y: m.pose.position.y };

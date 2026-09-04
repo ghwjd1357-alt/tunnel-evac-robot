@@ -7,6 +7,7 @@ import { connect } from './ros.js';
 import { setupMap, draw as drawMap } from './map.js';
 import { setupMission } from './mission.js';
 import { setupVideo } from './video.js';
+import { setupCamFeed } from './camfeed.js';   // 🎬 DEMO-0904
 import { setupDiag } from './diag.js';
 import { setupRecord } from './record.js';
 import { setupEmergency } from './emergency.js';
@@ -115,6 +116,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupMap();
   setupMission();
   setupVideo();
+  setupCamFeed();
   setupDiag();
   setupRecord();
   setupEmergency();

@@ -10,12 +10,7 @@
 
 import { state, onChange } from './state.js';
 import { NAV_KO, DRIVE_STATE_KO, DRIVE_REJECT_KO } from './i18n.js';
-
-/* MOCK — 토픽 자체가 없는 항목. 실물이 생기면 이 블록만 지운다. */
-const MOCK = {
-  battery: { pct: 78, volt: 24.6 },        // /battery_state 미합의 (구동부팀)
-  jetson:  { cpu: 41, gpu: 27, temp: 52 }, // 자원 발행 노드 없음
-};
+import { demoPerception, demoPower } from './demo.js';   // 🎬 DEMO-0904
 
 const AGE = (t) => t ? (Date.now() - t) / 1000 : null;
 
@@ -85,17 +80,20 @@ function render(s) {
   set('d-speed', `${s.speed.toFixed(2)} m/s`);
   set('d-dist', `${s.distance.toFixed(1)} m`);
 
-  /* ── 인지 어댑터 ── */
-  set('d-adapter', s.adapter || '입력 없음', s.adapter ? '' : 'off');
-  set('d-det', s.detLastMs ? `${secTxt(AGE(s.detLastMs))}` : '미결합 (역할 B)',
-               s.detLastMs ? 'ok' : 'off');
+  /* ── 인지 ── 🎬 DEMO-0904 (값 출처 = js/demo.js) */
+  const dp = demoPerception(s);
+  set('d-adapter', dp.adapter || '입력 없음', dp.adapter ? 'ok' : 'off');
+  set('d-det', dp.ageSec == null ? '미결합 (역할 B)' : `${dp.ageSec.toFixed(1)}초 전`,
+               dp.ageSec == null ? 'off' : 'ok');
+  set('d-detn', dp.live ? `사람 ${dp.person} · 화재 ${dp.fire} · 신뢰도 ${dp.conf.toFixed(2)}` : '—',
+                dp.live ? ((dp.person || dp.fire) ? 'warn' : '') : 'off');
 
-  /* ── MOCK — 막대로 보여준다 (퍼센트는 숫자보다 막대가 빠르다) ── */
-  meter('batt', MOCK.battery.pct, `${MOCK.battery.pct}%  ${MOCK.battery.volt} V`,
-        p => p > 40 ? 'ok' : p > 20 ? 'warn' : 'alarm');
-  meter('cpu',  MOCK.jetson.cpu,  `${MOCK.jetson.cpu}%`,  p => p < 70 ? 'ok' : p < 90 ? 'warn' : 'alarm');
-  meter('gpu',  MOCK.jetson.gpu,  `${MOCK.jetson.gpu}%`,  p => p < 70 ? 'ok' : p < 90 ? 'warn' : 'alarm');
-  meter('temp', MOCK.jetson.temp, `${MOCK.jetson.temp} °C`, p => p < 70 ? 'ok' : p < 85 ? 'warn' : 'alarm');
+  /* ── 전원·부하 ── 🎬 DEMO-0904. 임무 경과·주행 속도에 얹혀 움직인다 (js/demo.js) ── */
+  const pw = demoPower(s);
+  meter('batt', pw.batt, `${pw.batt}%  ${pw.volt} V`, p => p > 40 ? 'ok' : p > 20 ? 'warn' : 'alarm');
+  meter('cpu',  pw.cpu,  `${pw.cpu}%`,  p => p < 70 ? 'ok' : p < 90 ? 'warn' : 'alarm');
+  meter('gpu',  pw.gpu,  `${pw.gpu}%`,  p => p < 70 ? 'ok' : p < 90 ? 'warn' : 'alarm');
+  meter('temp', pw.temp, `${pw.temp} °C`, p => p < 70 ? 'ok' : p < 85 ? 'warn' : 'alarm');
 }
 
 /** "version=1.6.3; build=Aug 22 2026 16:17:15; ..." → { short: "1.6.3 · Aug 22 2026" } */

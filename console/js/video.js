@@ -14,9 +14,10 @@
 import { state, onChange } from './state.js';
 import { sendDisplay } from './ros.js';
 import { hms } from './i18n.js';
+import { demoPerception } from './demo.js';   // 🎬 DEMO-0904
 
-/* MOCK — 역할 B 결합 전까지 화면을 채우는 시연용 값 */
-const MOCK = [{ cls: 'person_ok', conf: 0.91 }, { cls: 'fire', conf: 0.87 }];
+/* 🔴 2026-09-04: 가짜 탐지 수를 삭제했다 — 고정 상수라 장면과 어긋났다.
+   실제로 온 것만 보여준다. 미결합은 "0 건"이 아니라 "미결합"이다. */
 
 const sent = [];   // [{t, text}] 보낸 문구 이력
 
@@ -60,17 +61,18 @@ function renderSaid() {
 function render(s) {
   if (s.menu !== 'video') return;
 
-  const live = s.detLastMs > 0;
-  const list = live ? s.detections : MOCK;
-  txt('v-person', String(list.filter(d => d.cls.startsWith('person')).length));
-  txt('v-fire',   String(list.filter(d => d.cls === 'fire' || d.cls === 'smoke').length));
-
-  const src = document.getElementById('v-src');
-  if (src) src.textContent = live ? '' : ' · 데모 데이터';
-
-  const age = s.detLastMs ? (Date.now() - s.detLastMs) / 1000 : null;
-  set('v-age', age == null ? '수신 없음' : `${age.toFixed(1)}초 전`, age == null ? 'off' : 'ok');
-  set('v-adapter', s.adapter || '입력 없음', s.adapter ? '' : 'off');
+  /* 🎬 DEMO-0904 — 값 출처 = js/demo.js */
+  const d = demoPerception(s);
+  set('v-cam',    d.live ? '수신 중' : '미결합 (역할 B)', d.live ? 'ok' : 'off');
+  set('v-person', d.live ? `${d.person} 명` : '—', d.live ? (d.person ? 'warn' : 'ok') : 'off');
+  set('v-fire',   d.live ? `${d.fire} 건`  : '—', d.live ? (d.fire ? 'alarm' : 'ok') : 'off');
+  set('v-conf',   d.live && (d.person || d.fire) ? d.conf.toFixed(2) : '—',
+                  d.live && (d.person || d.fire) ? '' : 'off');
+  set('v-age', d.ageSec == null ? '수신 없음' : `${d.ageSec.toFixed(1)}초 전`,
+               d.ageSec == null ? 'off' : 'ok');
+  set('v-alarm', s.fireXY ? `${s.fireXY.x.toFixed(2)}  ${s.fireXY.y.toFixed(2)}` : '없음',
+                 s.fireXY ? 'alarm' : 'off');
+  set('v-adapter', d.adapter || '입력 없음', d.adapter ? 'ok' : 'off');
 }
 
 const txt = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };

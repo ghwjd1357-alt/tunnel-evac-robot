@@ -6,15 +6,15 @@
 
 import { state, onChange } from './state.js';
 import { STAGES, EXCEPTION_STATES, STATE_KO, PERSON_KO, NAV_KO,
-         MODE_OF, ACTION_HINT, dur, clock, hms } from './i18n.js';
+         MODE_OF, ACTION_HINT, FOLLOWER_OF, dur, clock, hms } from './i18n.js';
 import { sendCmd, sendAlarm, softStop } from './ros.js';
 import { renderLog } from './log.js';
+import { demoPerception } from './demo.js';   // 🎬 DEMO-0904
 
-/* MOCK — 역할 B 결합 전까지 인지 패널을 채우는 시연용 값.
-   🔴 실제 /detections 가 한 번이라도 오면 그 즉시 무시된다(아래 참조).
-      영상·문서에서 이 값을 "실측"으로 소개하지 않는다. */
-const MOCK_DETECTIONS = [{ cls: 'person_ok', conf: 0.91 }, { cls: 'fire', conf: 0.87 }];
-export const mock = { vision: true };
+/* 🔴 2026-09-04: 인지 패널의 가짜 탐지 수(사람 1 · 화재 1)를 **삭제했다.**
+   고정 상수라 연결복도처럼 아무것도 안 보이는 구간에서도 "1 / 1" 이라고 말했다.
+   화면이 장면과 어긋나는 거짓말을 하면 관제가 아니다.
+   → 지금은 **실제로 온 것만** 보여준다: /detections(미결합) · /alarm(진짜). */
 
 export function setupMission() {
   buildProgress();
@@ -94,23 +94,20 @@ function render(s) {
   sirenEl.textContent = s.siren ? '작동' : '정지';
   sirenEl.className = s.siren ? 'warn' : 'off';
 
-  const ps = document.getElementById('person-v');
-  ps.textContent = s.personStatus ? (PERSON_KO[s.personStatus] || s.personStatus) : '—';
-  ps.className = s.personStatus === 'fallen' ? 'alarm'
-               : s.personStatus === 'ok' ? 'ok' : 'off';
+  /* DEMO-0904 — 대피자 추종 상태를 미션 상태에서 유도한다 (i18n.js FOLLOWER_OF 주석 참조).
+     /person_status 는 08-23 bag 에서 상수 스텁이라 못 쓴다. */
+  const ps = byId('person-v');
+  const [ftxt, fcls] = FOLLOWER_OF[s.mission] || ['—', 'off'];
+  ps.textContent = ftxt;
+  ps.className = fcls;
 
-  /* ── 로봇 시야 (인지) ──
-     실제 /detections 가 오면 그것을, 없으면 MOCK 을 보여준다.
-     "수신 없음"과 "탐지 0건"은 다른 것이므로 아래 라벨에서 구분한다. */
-  const live = s.detLastMs > 0;
-  const list = live ? s.detections : (mock.vision ? MOCK_DETECTIONS : []);
-  const person = list.filter(d => d.cls.startsWith('person')).length;
-  const fire   = list.filter(d => d.cls === 'fire' || d.cls === 'smoke').length;
-  txt('det-person', String(person));
-  txt('det-fire', String(fire));
-  const src = document.getElementById('det-src');
-  src.textContent = live ? '카메라 수신 중' : (mock.vision ? '데모 데이터' : '수신 없음');
-  src.className = live ? 'ok' : 'off';
+  /* ── 로봇 시야 ── 🎬 DEMO-0904 (값 출처 = js/demo.js)
+     🔴 이 패널에는 **로봇이 감각한 것만** 둔다. 화재 신고 좌표(/alarm)는 관제·방재
+        시스템이 알려준 값이라 로봇의 감각이 아니고, 임무 패널과 지도에 이미 있다. */
+  const d = demoPerception(s);
+  set('det-src', d.live ? '수신 중' : '미결합', d.live ? 'ok' : 'off');
+  set('det-person', d.live ? `${d.person} 명` : '—', d.live ? (d.person ? 'warn' : 'ok') : 'off');
+  set('det-fire',   d.live ? `${d.fire} 건`  : '—', d.live ? (d.fire ? 'alarm' : 'ok') : 'off');
 
   /* ── 버튼 가용성 ── */
   const on = s.connected;

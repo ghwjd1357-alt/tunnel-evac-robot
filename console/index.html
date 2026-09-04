@@ -90,8 +90,8 @@
 
                 <!-- 화재 대응: 사건 정보가 주인공 -->
                 <dt data-when="incident">목표까지</dt><dd data-when="incident" id="mission-togo">—</dd>
-                <dt data-when="incident">화재 위치</dt><dd data-when="incident" id="fire-pos" class="off">—</dd>
-                <dt data-when="incident">대피자 감지</dt><dd data-when="incident" id="person-v" class="off">—</dd>
+                <dt data-when="incident">화재 탐지</dt><dd data-when="incident" id="fire-pos" class="off">—</dd>
+                <dt data-when="incident">대피자 추종</dt><dd data-when="incident" id="person-v" class="off">—</dd>
                 <dt data-when="incident">싸이렌</dt><dd data-when="incident" id="siren-v" class="off">정지</dd>
                 <dt data-when="incident">주행</dt><dd data-when="incident" id="mission-nav" class="off">—</dd>
               </dl>
@@ -137,12 +137,12 @@
           <div class="panel" id="vision">
             <h2>로봇 시야</h2>
             <div class="body" id="vision-body">
-              <div id="vision-frame">CAMERA</div>
+              <div id="vision-frame" class="camview"><video class="camfeed" muted loop playsinline></video><span class="camnote">CAMERA</span></div>
               <div style="padding:10px 11px">
                 <dl class="kv">
-                  <dt>사람</dt><dd id="det-person">0</dd>
-                  <dt>화재·연기</dt><dd id="det-fire">0</dd>
-                  <dt>영상</dt><dd id="det-src" class="off">수신 없음</dd>
+                  <dt>카메라</dt><dd id="det-src" class="off">미결합</dd>
+                  <dt>사람</dt><dd id="det-person" class="off">—</dd>
+                  <dt>화재 · 연기</dt><dd id="det-fire" class="off">—</dd>
                 </dl>
               </div>
             </div>
@@ -194,18 +194,21 @@
           <div class="panel" id="cam-rgb">
             <h2>카메라 · RGB</h2>
             <div class="body">
-              <div class="camview" id="cam-rgb-view">CAMERA</div>
+              <div class="camview" id="cam-rgb-view"><video class="camfeed" muted loop playsinline></video><span class="camnote">CAMERA</span></div>
             </div>
           </div>
         </div>
 
         <div id="video-side">
           <div class="panel">
-            <h2>인지 결과<span class="note" id="v-src"> · 데모 데이터</span></h2>
+            <h2>인지 결과<span class="note" id="v-src"></span></h2>
             <div class="body"><dl class="kv">
-              <dt>사람</dt><dd id="v-person">0</dd>
-              <dt>화재 · 연기</dt><dd id="v-fire">0</dd>
+              <dt>카메라</dt><dd id="v-cam" class="off">—</dd>
+              <dt>사람</dt><dd id="v-person" class="off">—</dd>
+              <dt>화재 · 연기</dt><dd id="v-fire" class="off">—</dd>
+              <dt>신뢰도</dt><dd id="v-conf" class="off">—</dd>
               <dt>마지막 수신</dt><dd id="v-age" class="off">—</dd>
+              <dt>화재 탐지 좌표</dt><dd id="v-alarm" class="off">—</dd>
               <dt>인지 처리</dt><dd id="v-adapter" class="off">—</dd>
             </dl></div>
           </div>
@@ -282,7 +285,8 @@
 
         <div class="panel"><h2>인지</h2><div class="body"><dl class="kv">
           <dt>인지 처리</dt><dd id="d-adapter" class="off" style="font-size:var(--fs-label)">—</dd>
-          <dt>카메라 탐지</dt><dd id="d-det" class="off">—</dd>
+          <dt>마지막 수신</dt><dd id="d-det" class="off">—</dd>
+          <dt>탐지 내용</dt><dd id="d-detn" class="off">—</dd>
         </dl></div></div>
 
         <div class="panel"><h2>전원 · 부하<span class="note"> · 데모 데이터</span></h2>
@@ -335,7 +339,7 @@
         <div id="emg-mid">
           <div class="panel">
             <h2>카메라</h2>
-            <div class="body"><div class="camview" id="emg-cam">CAMERA</div></div>
+            <div class="body"><div class="camview" id="emg-cam"><video class="camfeed" muted loop playsinline></video><span class="camnote">CAMERA</span></div></div>
           </div>
           <div class="panel">
             <h2>활성화 조건 — 넷을 모두 만족해야 열립니다</h2>

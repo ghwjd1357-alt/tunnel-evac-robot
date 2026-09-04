@@ -235,6 +235,7 @@ body[data-mode="normal"] #progress .exception { display: none; }
 /* 로봇 시야 */
 #vision-body { padding: 0; }
 #vision-frame {
+  position: relative;
   width: 100%; aspect-ratio: 16/10; background: var(--bg);
   border-bottom: 1px solid var(--line-soft);
   display: flex; align-items: center; justify-content: center;
@@ -358,7 +359,14 @@ body.display #map-toggles { display: none; }
   display: flex; align-items: center; justify-content: center;
   color: var(--dimmer); font-size: 1rem; letter-spacing: .3em;
 }
-.camview img, .camview video { width: 100%; height: 100%; object-fit: contain; }
+.camview { position: relative; }
+.camview img { width: 100%; height: 100%; object-fit: contain; }
+/* 🎬 DEMO-0904 — 로봇에 붙여 찍은 실사 클립을 카메라 자리에 재생한다.
+   파일이 없으면 video 를 숨기고 CAMERA 글자만 남는다 (js/camfeed.js). */
+.camfeed { display: none; width: 100%; height: 100%; object-fit: cover; }
+.camview.live .camfeed { display: block; }
+.camview.live .camnote { display: none; }
+.camnote { color: var(--dimmer); font-size: 1rem; letter-spacing: .3em; }
 
 #video-side { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; min-height: 0; }
 #video-side > .panel { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }

@@ -113,6 +113,23 @@ export const DRIVE_REJECT_KO = {
   8: '무장 응답 전송 실패',
 };
 
+/* ═══ DEMO-0904 ═══ 촬영 후 원복 검토 대상 (console/README.md '시연용 임시 변경')
+   대피자 추종 상태를 **미션 상태에서 유도**한다.
+
+   🔵 근거 — 거짓말이 아니다. SEARCH_BACK 은 추종감시가 lost() 를 선언해서 들어간
+      상태이고, HOLD 는 그 직전 '놓침 확정 직후 제자리 재수집'이다. 즉 미션 상태
+      자체가 "놓쳤다"의 증거다 (mission_node.py State 주석).
+   🔴 그래도 이것은 **센서 토픽이 아니라 상태에서 뒤집어 읽은 값**이다.
+      진짜 판정값(FollowerMonitor.visible/lost)은 미션 노드 안에만 있고 토픽으로
+      안 나온다 — /mission_status 가 생기면 그걸 직접 쓰고 이 표는 지운다.
+   🔴 08-23 bag 의 /person_status 는 1,651건 전부 'ok' 인 **상수 스텁**이라 못 쓴다. */
+export const FOLLOWER_OF = {
+  GUIDE:       ['감지', 'ok'],
+  ESCAPED:     ['감지', 'ok'],
+  HOLD:        ['미탐지', 'alarm'],
+  SEARCH_BACK: ['미탐지', 'alarm'],
+};
+
 export const NAV_KO = {
   1: '목표 접수', 2: '주행 중', 3: '취소 중',
   4: '도달', 5: '취소됨', 6: '거부·실패',
