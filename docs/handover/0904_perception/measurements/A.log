@@ -1,0 +1,397 @@
+[INFO] [1788502138.897540063] [perception_node]: Loading RF-DETR from /home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt ...
+[2026-09-04 15:09:05] [WARNING] rf-detr - Using a different number of positional encodings than DINOv2, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:09:05] [WARNING] rf-detr - Using patch size 16 instead of 14, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:09:06] [WARNING] rf-detr - load_pretrain_weights: args.num_queries absent; inferred ckpt_num_queries=300 from tensor rows 3900 ÷ ckpt_group_detr=13.
+[2026-09-04 15:09:06] [WARNING] rf-detr - Pretrained weights at '/home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt' loaded only partially — this typically produces lower accuracy. 1 model parameter(s) not in checkpoint (left at random init): [_kp_active_mask]. Check that the model configuration (encoder, hidden_dim, out_feature_indexes, projector_scale, ...) matches the architecture the checkpoint was trained with.
+[INFO] [1788502146.987594704] [perception_node]: Optimizing fire model for FP16 inference...
+/tmp/perftest/pn_A.py:121: FutureWarning: The `optimize_for_inference` was deprecated since v1.9.0 in favor of `rfdetr.detr.inference`. It will be removed in v1.11.0.
+  self.fire_model.optimize_for_inference(compile=True, dtype=torch.float16)
+[transformers] `loss_type=None` was set in the config but it is unrecognized. Using the default loss: `ForCausalLMLoss`.
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2.py:273: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  assert x.shape[2] % block_size == 0 and x.shape[3] % block_size == 0, (
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2_with_windowed_attn.py:436: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if height % divisor != 0 or width % divisor != 0:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2_with_windowed_attn.py:327: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if num_channels != self.num_channels:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2.py:262: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if num_patches == num_positions and (height, width) == shape:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/__init__.py:54: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if cross_attn_feats is None and pos.ndim == 4 and pos.shape[1] == 1:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:378: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  topk = min(self.num_queries, enc_outputs_class_unselected_gidx.shape[-2])
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:63: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if pos_tensor.size(-1) == 2:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:65: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  elif pos_tensor.size(-1) == 4:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/torch/__init__.py:2253: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if not condition:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:188: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if n_ref_levels not in (1, self.n_levels):
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:203: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if n_ref_levels == 1:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:205: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if reference_points.shape[-1] == 2:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:212: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  elif reference_points.shape[-1] == 4:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/functions/ms_deform_attn_func.py:45: TracerWarning: Converting a tensor to a Python integer might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  value_list = value.split([int(height) * int(width) for height, width in shapes], dim=3)  # type: ignore[no-untyped-call]
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/functions/ms_deform_attn_func.py:52: TracerWarning: Converting a tensor to a Python integer might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  value_l_ = value_list[level_index].view(batch_size * n_heads, head_dim, int(height), int(width))
+[INFO] [1788502154.910103540] [perception_node]: Loading pose model from /home/hanhan/pose_finetuned_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify', 'pose', 'obb' or 'semantic'.
+[INFO] [1788502155.632734282] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[INFO] [1788502155.638817299] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+Loading /home/hanhan/pose_finetuned_meta.engine for TensorRT inference...
+[09/04/2026-15:09:20] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-15:09:20] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +10, now: CPU 0, GPU 15 (MiB)
+[WARN] [1788502160.348180059] [perception_node]: debug_image 발행 실패: 'PerceptionNode' object has no attribute '_timing_count'
+[ERROR] [1788502160.351348116] [perception_node]: WATCHDOG depth_frames_stale (color_pub=1 depth_pub=1 depth_frames=1 depth_age=4.7s cb_age=4.7s uptime=5s)
+[INFO] [1788502160.772860972] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=2 depth_age=0.2s cb_age=0.2s uptime=5s)
+[INFO] [1788502162.236017531] [perception_node]: TIMING2 fire=125.3ms pose=71.8ms judge=0.4ms publish=0.2ms debug_img=20.3ms TOTAL=219.9ms
+[INFO] [1788502162.429833359] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502164.235704013] [perception_node]: TIMING2 fire=120.1ms pose=53.8ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=195.2ms
+[INFO] [1788502164.442300616] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502166.295696700] [perception_node]: TIMING2 fire=117.9ms pose=53.5ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=192.8ms
+[INFO] [1788502166.494353640] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502168.329620994] [perception_node]: TIMING2 fire=122.8ms pose=62.2ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=206.9ms
+[INFO] [1788502168.529778791] [perception_node]: TIMING3 copy=1.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502170.349036826] [perception_node]: TIMING2 fire=119.8ms pose=53.8ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=193.8ms
+[INFO] [1788502170.558864400] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502172.438911380] [perception_node]: TIMING2 fire=131.9ms pose=64.9ms judge=0.3ms publish=0.3ms debug_img=20.3ms TOTAL=219.7ms
+[INFO] [1788502172.645611890] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502174.418325195] [perception_node]: TIMING2 fire=118.0ms pose=52.5ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=190.6ms
+[INFO] [1788502174.619704701] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.8ms pub=2.5ms
+[INFO] [1788502176.433281420] [perception_node]: TIMING2 fire=109.0ms pose=61.0ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=190.2ms
+[INFO] [1788502176.623734781] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502178.407652859] [perception_node]: TIMING2 fire=125.3ms pose=63.0ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=208.4ms
+[INFO] [1788502178.615352254] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502180.415676172] [perception_node]: TIMING2 fire=116.1ms pose=60.8ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=197.1ms
+[INFO] [1788502180.620611174] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502182.462224058] [perception_node]: TIMING2 fire=120.2ms pose=55.7ms judge=0.4ms publish=0.2ms debug_img=18.3ms TOTAL=197.0ms
+[INFO] [1788502182.661979629] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502184.501086655] [perception_node]: TIMING2 fire=121.6ms pose=64.9ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=206.6ms
+[INFO] [1788502184.692366029] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.3ms pub=2.1ms
+[INFO] [1788502186.602784193] [perception_node]: TIMING2 fire=134.2ms pose=65.6ms judge=0.4ms publish=0.2ms debug_img=20.2ms TOTAL=222.3ms
+[INFO] [1788502186.807193797] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502188.668101681] [perception_node]: TIMING2 fire=133.6ms pose=67.5ms judge=0.4ms publish=0.2ms debug_img=20.3ms TOTAL=223.6ms
+[INFO] [1788502188.884530336] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.1ms pub=2.2ms
+[INFO] [1788502190.614167600] [perception_node]: TIMING2 fire=114.1ms pose=53.4ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=187.6ms
+[INFO] [1788502190.814751073] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502192.632115335] [perception_node]: TIMING2 fire=135.1ms pose=68.4ms judge=0.3ms publish=0.2ms debug_img=19.5ms TOTAL=225.4ms
+[INFO] [1788502192.858954466] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=17.5ms pub=2.5ms
+[INFO] [1788502194.766912298] [perception_node]: TIMING2 fire=114.3ms pose=54.0ms judge=0.3ms publish=0.2ms debug_img=20.9ms TOTAL=191.7ms
+[INFO] [1788502194.976344269] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=16.3ms pub=2.0ms
+[INFO] [1788502196.845606122] [perception_node]: TIMING2 fire=116.7ms pose=64.2ms judge=0.3ms publish=0.2ms debug_img=21.9ms TOTAL=205.2ms
+[INFO] [1788502197.045044847] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.3ms pub=2.1ms
+[INFO] [1788502198.921918060] [perception_node]: TIMING2 fire=129.5ms pose=66.6ms judge=0.4ms publish=0.2ms debug_img=24.5ms TOTAL=223.5ms
+[INFO] [1788502199.146082912] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.9ms pub=2.4ms
+[INFO] [1788502200.964956018] [perception_node]: TIMING2 fire=112.0ms pose=50.3ms judge=0.3ms publish=0.2ms debug_img=22.2ms TOTAL=186.6ms
+[INFO] [1788502201.153399762] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.3ms pub=2.0ms
+[INFO] [1788502202.930295805] [perception_node]: TIMING2 fire=113.7ms pose=52.5ms judge=0.4ms publish=0.2ms debug_img=22.3ms TOTAL=191.3ms
+[INFO] [1788502203.131318621] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.0ms pub=2.0ms
+[INFO] [1788502204.967004043] [perception_node]: TIMING2 fire=126.9ms pose=60.2ms judge=0.3ms publish=0.2ms debug_img=22.1ms TOTAL=211.7ms
+[INFO] [1788502205.168860298] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.3ms pub=2.0ms
+[INFO] [1788502206.998711126] [perception_node]: TIMING2 fire=112.9ms pose=51.7ms judge=0.3ms publish=0.2ms debug_img=21.8ms TOTAL=188.7ms
+[INFO] [1788502207.190512181] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.4ms pub=2.0ms
+[INFO] [1788502209.070197582] [perception_node]: TIMING2 fire=112.7ms pose=53.0ms judge=0.3ms publish=0.2ms debug_img=21.9ms TOTAL=189.9ms
+[INFO] [1788502209.298821930] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=17.9ms pub=2.3ms
+[INFO] [1788502211.155854303] [perception_node]: TIMING2 fire=121.0ms pose=51.3ms judge=0.3ms publish=0.2ms debug_img=22.6ms TOTAL=197.8ms
+[INFO] [1788502211.368853862] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.3ms pub=2.0ms
+[INFO] [1788502213.298476748] [perception_node]: TIMING2 fire=142.3ms pose=64.7ms judge=0.3ms publish=0.2ms debug_img=23.1ms TOTAL=232.7ms
+[INFO] [1788502213.529810160] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=18.6ms pub=2.5ms
+[INFO] [1788502215.480871077] [perception_node]: TIMING2 fire=131.7ms pose=71.9ms judge=0.3ms publish=0.3ms debug_img=24.4ms TOTAL=230.5ms
+[INFO] [1788502215.687656510] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=16.3ms pub=2.4ms
+[INFO] [1788502217.543659170] [perception_node]: TIMING2 fire=114.4ms pose=66.0ms judge=0.3ms publish=0.2ms debug_img=22.7ms TOTAL=205.5ms
+[INFO] [1788502217.789924959] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.1ms pub=2.0ms
+[INFO] [1788502219.692741179] [perception_node]: TIMING2 fire=112.8ms pose=66.2ms judge=0.3ms publish=0.2ms debug_img=22.1ms TOTAL=203.3ms
+[INFO] [1788502219.887963226] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.5ms pub=2.0ms
+[INFO] [1788502221.690059437] [perception_node]: TIMING2 fire=107.7ms pose=54.8ms judge=0.3ms publish=0.2ms debug_img=22.2ms TOTAL=187.0ms
+[INFO] [1788502221.882254232] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.4ms pub=2.0ms
+[INFO] [1788502223.743271762] [perception_node]: TIMING2 fire=117.3ms pose=55.4ms judge=0.3ms publish=0.2ms debug_img=22.8ms TOTAL=197.7ms
+[INFO] [1788502223.949598873] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=16.4ms pub=2.0ms
+[INFO] [1788502225.742088247] [perception_node]: TIMING2 fire=113.5ms pose=54.6ms judge=0.3ms publish=0.2ms debug_img=22.2ms TOTAL=192.6ms
+[INFO] [1788502225.948309881] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.5ms pub=2.0ms
+[INFO] [1788502227.790106479] [perception_node]: TIMING2 fire=118.5ms pose=61.0ms judge=0.4ms publish=0.2ms debug_img=25.2ms TOTAL=207.3ms
+[INFO] [1788502228.006952231] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.4ms pub=2.0ms
+[INFO] [1788502229.952781022] [perception_node]: TIMING2 fire=112.0ms pose=53.4ms judge=0.3ms publish=0.2ms debug_img=22.8ms TOTAL=190.4ms
+[INFO] [1788502230.164404558] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=16.7ms pub=2.2ms
+[INFO] [1788502232.090505681] [perception_node]: TIMING2 fire=127.8ms pose=56.5ms judge=0.3ms publish=0.2ms debug_img=23.2ms TOTAL=210.0ms
+[INFO] [1788502232.314808389] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.3ms pub=2.1ms
+[INFO] [1788502234.176543403] [perception_node]: TIMING2 fire=113.9ms pose=53.0ms judge=0.3ms publish=0.2ms debug_img=22.2ms TOTAL=191.3ms
+[INFO] [1788502234.366003884] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.5ms pub=2.0ms
+[INFO] [1788502236.140525615] [perception_node]: TIMING2 fire=112.2ms pose=53.8ms judge=0.3ms publish=0.2ms debug_img=22.3ms TOTAL=190.5ms
+[INFO] [1788502236.340777643] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=16.4ms pub=2.1ms
+[INFO] [1788502238.189187280] [perception_node]: TIMING2 fire=115.5ms pose=58.2ms judge=0.3ms publish=0.2ms debug_img=22.6ms TOTAL=198.5ms
+[INFO] [1788502238.408380991] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.6ms pub=2.1ms
+[INFO] [1788502240.357399297] [perception_node]: TIMING2 fire=112.0ms pose=53.7ms judge=0.3ms publish=0.2ms debug_img=22.3ms TOTAL=190.3ms
+[INFO] [1788502240.564377790] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=18.8ms pub=2.0ms
+[INFO] [1788502242.431671566] [perception_node]: TIMING2 fire=129.1ms pose=70.8ms judge=0.4ms publish=0.2ms debug_img=20.1ms TOTAL=222.5ms
+[INFO] [1788502242.668772936] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.3ms pub=2.4ms
+[INFO] [1788502244.489140949] [perception_node]: TIMING2 fire=137.9ms pose=69.3ms judge=0.3ms publish=0.2ms debug_img=20.6ms TOTAL=230.1ms
+[INFO] [1788502244.703708468] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502246.480758729] [perception_node]: TIMING2 fire=119.3ms pose=53.6ms judge=0.3ms publish=0.2ms debug_img=17.8ms TOTAL=192.8ms
+[INFO] [1788502246.682209202] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.4ms pub=1.9ms
+[INFO] [1788502248.549907529] [perception_node]: TIMING2 fire=116.6ms pose=55.5ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=192.8ms
+[INFO] [1788502248.753154038] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.4ms pub=2.2ms
+[INFO] [1788502250.601686446] [perception_node]: TIMING2 fire=118.4ms pose=56.0ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=194.9ms
+[INFO] [1788502250.805689848] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.1ms
+[INFO] [1788502252.747559736] [perception_node]: TIMING2 fire=123.0ms pose=63.0ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=206.5ms
+[INFO] [1788502252.952130136] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.3ms
+[INFO] [1788502254.812888637] [perception_node]: TIMING2 fire=143.8ms pose=68.7ms judge=0.3ms publish=0.2ms debug_img=20.3ms TOTAL=235.3ms
+[INFO] [1788502255.035179681] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502256.807372912] [perception_node]: TIMING2 fire=125.5ms pose=61.6ms judge=0.3ms publish=0.1ms debug_img=18.4ms TOTAL=207.8ms
+[INFO] [1788502257.041285358] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=18.0ms pub=2.8ms
+[INFO] [1788502258.950438213] [perception_node]: TIMING2 fire=112.9ms pose=64.4ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=198.1ms
+[INFO] [1788502259.151884493] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.8ms pub=2.1ms
+[INFO] [1788502261.004977382] [perception_node]: TIMING2 fire=111.0ms pose=62.0ms judge=0.3ms publish=0.2ms debug_img=17.8ms TOTAL=193.0ms
+[INFO] [1788502261.196331052] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502263.018820883] [perception_node]: TIMING2 fire=117.3ms pose=64.3ms judge=0.3ms publish=0.2ms debug_img=18.9ms TOTAL=202.8ms
+[INFO] [1788502263.228144358] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502265.042928100] [perception_node]: TIMING2 fire=112.8ms pose=62.3ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=195.4ms
+[INFO] [1788502265.249003579] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788502266.987889576] [perception_node]: TIMING2 fire=112.0ms pose=54.3ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=186.4ms
+[INFO] [1788502267.177425383] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502268.938286872] [perception_node]: TIMING2 fire=107.0ms pose=62.0ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=189.0ms
+[INFO] [1788502269.136883089] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.2ms
+[INFO] [1788502270.899192726] [perception_node]: TIMING2 fire=122.0ms pose=54.9ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=197.0ms
+[INFO] [1788502271.111995693] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502273.260119984] [perception_node]: TIMING2 fire=132.1ms pose=103.5ms judge=0.4ms publish=0.2ms debug_img=20.3ms TOTAL=258.5ms
+[INFO] [1788502273.475534730] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[ERROR] [1788502274.702602695] [perception_node]: WATCHDOG depth_frames_stale (color_pub=1 depth_pub=1 depth_frames=176 depth_age=2.1s cb_age=0.3s uptime=119s)
+[INFO] [1788502275.526234469] [perception_node]: TIMING2 fire=114.2ms pose=55.6ms judge=0.4ms publish=0.2ms debug_img=18.2ms TOTAL=190.5ms
+[INFO] [1788502275.733129242] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502275.735929412] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=178 depth_age=0.4s cb_age=0.2s uptime=120s)
+[INFO] [1788502277.571321542] [perception_node]: TIMING2 fire=111.4ms pose=59.4ms judge=0.3ms publish=0.2ms debug_img=17.7ms TOTAL=190.8ms
+[INFO] [1788502277.766347990] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.8ms pub=1.9ms
+[INFO] [1788502279.591090464] [perception_node]: TIMING2 fire=111.3ms pose=60.6ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=192.2ms
+[INFO] [1788502279.781255510] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788502281.660767755] [perception_node]: TIMING2 fire=121.8ms pose=76.2ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=218.4ms
+[INFO] [1788502281.879240419] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=16.2ms pub=2.0ms
+[INFO] [1788502283.767666374] [perception_node]: TIMING2 fire=134.2ms pose=73.3ms judge=0.3ms publish=0.2ms debug_img=18.5ms TOTAL=228.2ms
+[INFO] [1788502284.032569578] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502285.939935103] [perception_node]: TIMING2 fire=124.4ms pose=72.7ms judge=0.3ms publish=0.2ms debug_img=18.5ms TOTAL=217.7ms
+[INFO] [1788502286.161836846] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502288.136599838] [perception_node]: TIMING2 fire=121.2ms pose=69.8ms judge=0.4ms publish=0.2ms debug_img=18.8ms TOTAL=212.0ms
+[INFO] [1788502288.386663015] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=18.0ms pub=2.8ms
+[INFO] [1788502290.350395019] [perception_node]: TIMING2 fire=121.9ms pose=58.4ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=200.3ms
+[INFO] [1788502290.556183630] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502292.440268347] [perception_node]: TIMING2 fire=111.5ms pose=106.5ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=238.2ms
+[INFO] [1788502292.653265587] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502294.474966112] [perception_node]: TIMING2 fire=111.3ms pose=57.8ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=189.4ms
+[INFO] [1788502294.674212743] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=1.9ms
+[INFO] [1788502296.501964793] [perception_node]: TIMING2 fire=114.1ms pose=56.7ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=190.9ms
+[INFO] [1788502296.704887918] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.0ms pub=2.5ms
+[INFO] [1788502298.585238434] [perception_node]: TIMING2 fire=122.0ms pose=60.6ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=202.8ms
+[INFO] [1788502298.829016824] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.9ms pub=2.2ms
+[INFO] [1788502300.695972775] [perception_node]: TIMING2 fire=113.1ms pose=58.1ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=191.7ms
+[INFO] [1788502300.901617603] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502303.000743910] [perception_node]: TIMING2 fire=123.4ms pose=62.3ms judge=0.3ms publish=0.2ms debug_img=18.5ms TOTAL=206.8ms
+[INFO] [1788502303.209597757] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502305.147805463] [perception_node]: TIMING2 fire=116.6ms pose=76.7ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=214.5ms
+[INFO] [1788502305.343688764] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502307.255030122] [perception_node]: TIMING2 fire=135.7ms pose=66.7ms judge=0.3ms publish=0.2ms debug_img=18.8ms TOTAL=223.4ms
+[INFO] [1788502307.467136158] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.3ms
+[INFO] [1788502309.292557861] [perception_node]: TIMING2 fire=113.7ms pose=36.4ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=170.7ms
+[INFO] [1788502309.484428304] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.8ms pub=2.6ms
+[INFO] [1788502311.265813209] [perception_node]: TIMING2 fire=112.8ms pose=38.8ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=171.9ms
+[INFO] [1788502311.444189372] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502313.157731445] [perception_node]: TIMING2 fire=115.2ms pose=34.9ms judge=0.3ms publish=0.1ms debug_img=18.3ms TOTAL=170.7ms
+[INFO] [1788502313.332897373] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502315.039603405] [perception_node]: TIMING2 fire=116.9ms pose=37.4ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=174.7ms
+[INFO] [1788502315.244815606] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.3ms
+[INFO] [1788502316.872965083] [perception_node]: TIMING2 fire=110.9ms pose=40.1ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=171.1ms
+[INFO] [1788502317.060284405] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502318.697532149] [perception_node]: TIMING2 fire=119.4ms pose=34.1ms judge=0.3ms publish=0.1ms debug_img=18.1ms TOTAL=173.9ms
+[INFO] [1788502318.879753931] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502320.580242981] [perception_node]: TIMING2 fire=133.3ms pose=46.6ms judge=0.3ms publish=0.2ms debug_img=21.3ms TOTAL=203.5ms
+[INFO] [1788502320.756313871] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.2ms
+[INFO] [1788502322.395522358] [perception_node]: TIMING2 fire=112.5ms pose=38.1ms judge=0.9ms publish=0.2ms debug_img=18.0ms TOTAL=171.4ms
+[INFO] [1788502322.584334952] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.1ms
+[INFO] [1788502324.284979268] [perception_node]: TIMING2 fire=123.5ms pose=42.6ms judge=0.8ms publish=0.2ms debug_img=18.4ms TOTAL=187.4ms
+[INFO] [1788502324.461685702] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.1ms pub=2.0ms
+[ERROR] [1788502325.760400693] [perception_node]: WATCHDOG depth_frames_stale (color_pub=1 depth_pub=1 depth_frames=255 depth_age=2.1s cb_age=0.2s uptime=170s)
+[INFO] [1788502326.113950590] [perception_node]: TIMING2 fire=116.0ms pose=33.3ms judge=0.3ms publish=0.2ms debug_img=18.6ms TOTAL=170.6ms
+[INFO] [1788502326.302381985] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=1.9ms
+[INFO] [1788502326.686833324] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=256 depth_age=0.2s cb_age=0.2s uptime=171s)
+[INFO] [1788502327.959359020] [perception_node]: TIMING2 fire=131.3ms pose=40.1ms judge=0.8ms publish=0.2ms debug_img=18.1ms TOTAL=192.1ms
+[INFO] [1788502328.145477430] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502329.836057993] [perception_node]: TIMING2 fire=137.0ms pose=45.8ms judge=1.0ms publish=0.2ms debug_img=20.8ms TOTAL=206.5ms
+[INFO] [1788502330.055934564] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=17.1ms pub=2.4ms
+[INFO] [1788502331.685331943] [perception_node]: TIMING2 fire=116.6ms pose=33.3ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=170.0ms
+[INFO] [1788502331.868359450] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.2ms
+[INFO] [1788502333.469413275] [perception_node]: TIMING2 fire=112.5ms pose=51.3ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=184.3ms
+[INFO] [1788502333.696800309] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502335.300942411] [perception_node]: TIMING2 fire=113.1ms pose=33.2ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=166.8ms
+[INFO] [1788502335.506924399] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.8ms pub=2.3ms
+[INFO] [1788502337.101572694] [perception_node]: TIMING2 fire=113.8ms pose=33.4ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=167.9ms
+[INFO] [1788502337.282031174] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502338.940230355] [perception_node]: TIMING2 fire=124.1ms pose=42.9ms judge=0.3ms publish=0.2ms debug_img=22.7ms TOTAL=191.8ms
+[INFO] [1788502339.110972974] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502340.696461009] [perception_node]: TIMING2 fire=114.3ms pose=32.9ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=167.6ms
+[INFO] [1788502340.889122517] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502342.584472048] [perception_node]: TIMING2 fire=121.2ms pose=43.6ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=185.4ms
+[INFO] [1788502342.757433151] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=17.3ms pub=2.1ms
+[INFO] [1788502344.487161568] [perception_node]: TIMING2 fire=120.9ms pose=43.2ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=184.5ms
+[INFO] [1788502344.663368268] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.3ms
+[INFO] [1788502346.340931095] [perception_node]: TIMING2 fire=119.3ms pose=35.4ms judge=0.3ms publish=0.2ms debug_img=22.7ms TOTAL=179.7ms
+[INFO] [1788502346.514888205] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502348.184036275] [perception_node]: TIMING2 fire=117.4ms pose=34.8ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=172.3ms
+[INFO] [1788502348.358158351] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.8ms pub=2.0ms
+[INFO] [1788502350.046867554] [perception_node]: TIMING2 fire=114.2ms pose=35.8ms judge=0.3ms publish=0.2ms debug_img=22.7ms TOTAL=174.9ms
+[INFO] [1788502350.241600756] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=17.5ms pub=2.1ms
+[INFO] [1788502351.952794468] [perception_node]: TIMING2 fire=118.5ms pose=36.1ms judge=0.3ms publish=0.2ms debug_img=22.5ms TOTAL=179.5ms
+[INFO] [1788502352.134162837] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=18.0ms pub=2.2ms
+[INFO] [1788502353.921989248] [perception_node]: TIMING2 fire=115.0ms pose=36.5ms judge=0.3ms publish=0.2ms debug_img=23.2ms TOTAL=177.1ms
+[INFO] [1788502354.097450703] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=17.4ms pub=2.0ms
+[INFO] [1788502355.810166581] [perception_node]: TIMING2 fire=137.4ms pose=47.0ms judge=0.3ms publish=0.2ms debug_img=20.5ms TOTAL=207.7ms
+[INFO] [1788502356.003770907] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.4ms
+[INFO] [1788502357.701171571] [perception_node]: TIMING2 fire=115.5ms pose=36.1ms judge=0.3ms publish=0.2ms debug_img=22.6ms TOTAL=176.4ms
+[INFO] [1788502357.887324731] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502359.554674832] [perception_node]: TIMING2 fire=119.7ms pose=43.9ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=183.8ms
+[INFO] [1788502359.763742119] [perception_node]: TIMING3 copy=0.9ms draw=0.0ms tobytes=17.4ms pub=2.4ms
+[INFO] [1788502361.481072216] [perception_node]: TIMING2 fire=120.6ms pose=46.7ms judge=0.3ms publish=0.2ms debug_img=23.0ms TOTAL=192.7ms
+[INFO] [1788502361.663004030] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.5ms pub=2.0ms
+[INFO] [1788502363.438671499] [perception_node]: TIMING2 fire=124.6ms pose=34.4ms judge=0.3ms publish=0.2ms debug_img=18.6ms TOTAL=180.2ms
+[INFO] [1788502363.622872071] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.2ms
+[INFO] [1788502365.354184876] [perception_node]: TIMING2 fire=139.2ms pose=47.4ms judge=0.3ms publish=0.2ms debug_img=20.1ms TOTAL=208.9ms
+[INFO] [1788502365.538850618] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.2ms
+[INFO] [1788502367.328552541] [perception_node]: TIMING2 fire=126.7ms pose=43.0ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=190.4ms
+[INFO] [1788502367.521030391] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788502369.248303164] [perception_node]: TIMING2 fire=118.9ms pose=43.4ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=182.8ms
+[INFO] [1788502369.429557031] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502371.155171051] [perception_node]: TIMING2 fire=118.1ms pose=35.3ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=173.7ms
+[INFO] [1788502371.346184876] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502372.983952227] [perception_node]: TIMING2 fire=118.8ms pose=37.5ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=176.9ms
+[INFO] [1788502373.159263305] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502374.827904606] [perception_node]: TIMING2 fire=126.9ms pose=32.8ms judge=0.3ms publish=0.1ms debug_img=18.1ms TOTAL=179.9ms
+[INFO] [1788502375.011862864] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502376.652867071] [perception_node]: TIMING2 fire=113.1ms pose=36.6ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=169.8ms
+[INFO] [1788502376.850687493] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502378.577596050] [perception_node]: TIMING2 fire=116.6ms pose=36.2ms judge=0.3ms publish=0.1ms debug_img=22.0ms TOTAL=177.0ms
+[INFO] [1788502378.754320366] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502380.430874765] [perception_node]: TIMING2 fire=121.0ms pose=36.8ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=178.1ms
+[INFO] [1788502380.603391239] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502382.257984474] [perception_node]: TIMING2 fire=132.0ms pose=46.9ms judge=0.3ms publish=0.2ms debug_img=20.8ms TOTAL=202.3ms
+[INFO] [1788502382.443067254] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502384.161772130] [perception_node]: TIMING2 fire=118.3ms pose=43.0ms judge=0.3ms publish=0.2ms debug_img=19.4ms TOTAL=183.1ms
+[INFO] [1788502384.349177303] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502385.975407942] [perception_node]: TIMING2 fire=125.3ms pose=34.8ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=180.4ms
+[INFO] [1788502386.159563326] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502387.819201100] [perception_node]: TIMING2 fire=125.6ms pose=33.9ms judge=0.4ms publish=0.2ms debug_img=19.0ms TOTAL=181.1ms
+[INFO] [1788502388.018079609] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.8ms pub=2.3ms
+[INFO] [1788502389.685908351] [perception_node]: TIMING2 fire=134.0ms pose=43.5ms judge=0.3ms publish=0.2ms debug_img=20.3ms TOTAL=200.2ms
+[INFO] [1788502389.902219560] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.9ms pub=2.4ms
+[INFO] [1788502391.566476964] [perception_node]: TIMING2 fire=133.1ms pose=45.1ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=198.4ms
+[INFO] [1788502391.763836214] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502393.501199844] [perception_node]: TIMING2 fire=121.0ms pose=47.8ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=189.3ms
+[INFO] [1788502393.720713319] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502395.606648629] [perception_node]: TIMING2 fire=125.2ms pose=50.2ms judge=0.4ms publish=0.2ms debug_img=20.2ms TOTAL=197.9ms
+[INFO] [1788502395.828703034] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=17.8ms pub=2.4ms
+[INFO] [1788502397.521931782] [perception_node]: TIMING2 fire=114.6ms pose=51.9ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=186.8ms
+[INFO] [1788502397.717787550] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788502399.440149382] [perception_node]: TIMING2 fire=138.5ms pose=43.9ms judge=0.3ms publish=0.2ms debug_img=18.6ms TOTAL=203.7ms
+[INFO] [1788502399.645516426] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.2ms
+[INFO] [1788502401.371338004] [perception_node]: TIMING2 fire=144.0ms pose=46.0ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=210.8ms
+[INFO] [1788502401.590813621] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.1ms pub=2.4ms
+[INFO] [1788502403.309622353] [perception_node]: TIMING2 fire=117.0ms pose=35.3ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=172.6ms
+[INFO] [1788502403.526840955] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.2ms pub=2.4ms
+[INFO] [1788502405.249664270] [perception_node]: TIMING2 fire=112.5ms pose=42.3ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=175.0ms
+[INFO] [1788502405.428423733] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502407.086752574] [perception_node]: TIMING2 fire=115.9ms pose=32.8ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=168.9ms
+[INFO] [1788502407.274717798] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.1ms
+[INFO] [1788502408.987320429] [perception_node]: TIMING2 fire=116.9ms pose=36.5ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=174.2ms
+[INFO] [1788502409.182385029] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502410.893281673] [perception_node]: TIMING2 fire=137.1ms pose=48.5ms judge=0.4ms publish=0.2ms debug_img=20.7ms TOTAL=208.6ms
+[INFO] [1788502411.083272447] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502412.738630319] [perception_node]: TIMING2 fire=119.0ms pose=42.2ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=182.0ms
+[INFO] [1788502412.915497421] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=1.9ms
+[INFO] [1788502414.659716107] [perception_node]: TIMING2 fire=115.5ms pose=46.4ms judge=0.3ms publish=0.2ms debug_img=21.0ms TOTAL=185.3ms
+[INFO] [1788502414.844756066] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502416.456570057] [perception_node]: TIMING2 fire=126.2ms pose=33.8ms judge=0.3ms publish=0.2ms debug_img=19.1ms TOTAL=181.4ms
+[INFO] [1788502416.650953350] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502418.309219521] [perception_node]: TIMING2 fire=114.5ms pose=32.7ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=167.7ms
+[INFO] [1788502418.502720924] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.0ms pub=2.3ms
+[INFO] [1788502420.153910406] [perception_node]: TIMING2 fire=116.8ms pose=41.7ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=179.0ms
+[INFO] [1788502420.330091752] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=1.9ms
+[INFO] [1788502422.027791239] [perception_node]: TIMING2 fire=120.8ms pose=43.8ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=185.2ms
+[INFO] [1788502422.220166390] [perception_node]: TIMING3 copy=0.7ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502424.005109444] [perception_node]: TIMING2 fire=114.1ms pose=38.0ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=172.2ms
+[INFO] [1788502424.188455449] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502425.899464562] [perception_node]: TIMING2 fire=119.8ms pose=40.2ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=180.5ms
+[INFO] [1788502426.081261644] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502427.855933292] [perception_node]: TIMING2 fire=117.1ms pose=48.8ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=186.2ms
+[INFO] [1788502428.067249520] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=16.7ms pub=2.3ms
+[INFO] [1788502429.789484852] [perception_node]: TIMING2 fire=141.7ms pose=53.6ms judge=0.4ms publish=0.1ms debug_img=21.0ms TOTAL=219.4ms
+[INFO] [1788502429.987191343] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502431.715054696] [perception_node]: TIMING2 fire=121.1ms pose=47.6ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=188.9ms
+[INFO] [1788502431.919131767] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502433.649578418] [perception_node]: TIMING2 fire=121.2ms pose=39.9ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=181.5ms
+[INFO] [1788502433.849507041] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788502435.590897470] [perception_node]: TIMING2 fire=119.1ms pose=40.0ms judge=0.3ms publish=0.2ms debug_img=19.0ms TOTAL=180.5ms
+[INFO] [1788502435.791384450] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=1.9ms
+[INFO] [1788502437.601495847] [perception_node]: TIMING2 fire=134.3ms pose=52.5ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=207.1ms
+[INFO] [1788502437.792736937] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502439.534367146] [perception_node]: TIMING2 fire=118.9ms pose=42.8ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=181.9ms
+[INFO] [1788502439.713835145] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502441.385193955] [perception_node]: TIMING2 fire=121.8ms pose=39.5ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=181.4ms
+[INFO] [1788502441.580937682] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502443.375680739] [perception_node]: TIMING2 fire=131.6ms pose=57.4ms judge=0.3ms publish=0.2ms debug_img=20.0ms TOTAL=211.4ms
+[INFO] [1788502443.574120952] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=1.9ms
+[INFO] [1788502445.395285084] [perception_node]: TIMING2 fire=113.5ms pose=41.2ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=174.8ms
+[INFO] [1788502445.590555800] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.9ms pub=2.1ms
+[INFO] [1788502447.410427752] [perception_node]: TIMING2 fire=133.6ms pose=46.0ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=200.0ms
+[INFO] [1788502447.604283694] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.3ms
+[INFO] [1788502449.410051679] [perception_node]: TIMING2 fire=120.7ms pose=39.4ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=180.9ms
+[INFO] [1788502449.608977063] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502451.451532728] [perception_node]: TIMING2 fire=119.9ms pose=61.5ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=201.7ms
+[INFO] [1788502451.651718320] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502453.463747373] [perception_node]: TIMING2 fire=124.6ms pose=44.2ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=189.3ms
+[INFO] [1788502453.671732495] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.2ms
+[INFO] [1788502455.492477369] [perception_node]: TIMING2 fire=115.9ms pose=36.2ms judge=0.3ms publish=0.1ms debug_img=18.1ms TOTAL=173.2ms
+[INFO] [1788502455.664969643] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502457.422381783] [perception_node]: TIMING2 fire=118.9ms pose=51.0ms judge=0.3ms publish=0.1ms debug_img=18.0ms TOTAL=190.0ms
+[INFO] [1788502457.608451569] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502459.442692732] [perception_node]: TIMING2 fire=135.0ms pose=61.5ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=216.7ms
+[INFO] [1788502459.675075780] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.3ms pub=2.4ms
+[INFO] [1788502461.588349633] [perception_node]: TIMING2 fire=132.4ms pose=55.6ms judge=0.3ms publish=0.2ms debug_img=20.8ms TOTAL=211.0ms
+[INFO] [1788502461.783595770] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502463.504765685] [perception_node]: TIMING2 fire=114.7ms pose=49.2ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=184.3ms
+[INFO] [1788502463.708706266] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.3ms
+[INFO] [1788502465.561062197] [perception_node]: TIMING2 fire=122.1ms pose=53.3ms judge=0.3ms publish=0.1ms debug_img=18.5ms TOTAL=196.1ms
+[INFO] [1788502465.790150910] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.2ms pub=2.5ms
+[INFO] [1788502467.720701547] [perception_node]: TIMING2 fire=123.0ms pose=53.7ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=196.8ms
+[INFO] [1788502467.902763722] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.9ms pub=2.1ms
+[INFO] [1788502469.638921725] [perception_node]: TIMING2 fire=117.9ms pose=34.4ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=172.4ms
+[INFO] [1788502469.817499351] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502471.535815644] [perception_node]: TIMING2 fire=123.1ms pose=44.2ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=187.7ms
+[INFO] [1788502471.716231708] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502473.471571146] [perception_node]: TIMING2 fire=135.1ms pose=48.5ms judge=0.4ms publish=0.2ms debug_img=20.1ms TOTAL=205.9ms
+[INFO] [1788502473.668010640] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.0ms pub=2.4ms
+[INFO] [1788502475.337146742] [perception_node]: TIMING2 fire=121.1ms pose=44.0ms judge=0.4ms publish=0.2ms debug_img=19.9ms TOTAL=187.2ms
+[INFO] [1788502475.540037074] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.9ms pub=2.3ms
+[INFO] [1788502477.461549658] [perception_node]: TIMING2 fire=135.1ms pose=56.3ms judge=0.3ms publish=0.2ms debug_img=20.3ms TOTAL=214.0ms
+[INFO] [1788502477.658401967] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502479.432075990] [perception_node]: TIMING2 fire=125.3ms pose=45.2ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=190.8ms
+[INFO] [1788502479.619894673] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.8ms
+[INFO] [1788502481.377924351] [perception_node]: TIMING2 fire=118.6ms pose=48.0ms judge=0.3ms publish=0.2ms debug_img=19.2ms TOTAL=188.0ms
+[INFO] [1788502481.615917499] [perception_node]: TIMING3 copy=0.7ms draw=0.0ms tobytes=16.5ms pub=2.1ms
+[INFO] [1788502483.497448002] [perception_node]: TIMING2 fire=139.5ms pose=69.9ms judge=0.4ms publish=0.2ms debug_img=22.1ms TOTAL=234.1ms
+[INFO] [1788502483.727391082] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.2ms pub=3.4ms
+[INFO] [1788502485.549330820] [perception_node]: TIMING2 fire=119.4ms pose=54.8ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=194.9ms
+[INFO] [1788502485.734910344] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502487.437341343] [perception_node]: TIMING2 fire=115.0ms pose=49.9ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=185.2ms
+[INFO] [1788502487.643112296] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788502489.441307025] [perception_node]: TIMING2 fire=116.3ms pose=48.9ms judge=0.3ms publish=0.1ms debug_img=18.2ms TOTAL=186.2ms
+[INFO] [1788502489.632311781] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502491.423096272] [perception_node]: TIMING2 fire=115.0ms pose=54.6ms judge=0.3ms publish=0.1ms debug_img=18.0ms TOTAL=189.8ms
+[INFO] [1788502491.630937288] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502493.432475342] [perception_node]: TIMING2 fire=120.5ms pose=54.3ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=194.9ms
+[INFO] [1788502493.621612729] [perception_node]: TIMING3 copy=0.6ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502495.373633620] [perception_node]: TIMING2 fire=116.9ms pose=45.6ms judge=0.3ms publish=0.2ms debug_img=17.8ms TOTAL=182.8ms
+[INFO] [1788502495.576157185] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502497.500913937] [perception_node]: TIMING2 fire=136.8ms pose=54.0ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=211.4ms
+[INFO] [1788502497.708169170] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788502499.500916161] [perception_node]: TIMING2 fire=133.4ms pose=55.2ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=208.9ms
+[INFO] [1788502499.703542961] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.7ms pub=2.1ms

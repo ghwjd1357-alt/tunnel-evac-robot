@@ -1,0 +1,58 @@
+[INFO] [launch]: All log files can be found below /home/hanhan/.ros/log/2026-09-04-16-25-10-903174-jetson-10368
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [component_container-1]: process started with pid [10399]
+[component_container-1] [INFO] [1788506711.781354904] [camera.camera_container]: Load Library: /home/hanhan/percep_ws/install/orbbec_camera/lib/liborbbec_camera.so
+[component_container-1] [INFO] [1788506712.159709309] [camera.camera_container]: Found class: rclcpp_components::NodeFactoryTemplate<orbbec_camera::OBCameraNodeDriver>
+[component_container-1] [INFO] [1788506712.161203904] [camera.camera_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<orbbec_camera::OBCameraNodeDriver>
+[component_container-1] [INFO] [1788506712.178746999] [camera.camera]: SDK log file path set to: /home/hanhan/.ros/Log/camera/OrbbecSDK_20260904_162512.log
+[component_container-1] [INFO] [1788506712.208241641] [camera.camera]: Device access mode: Default (4)
+[component_container-1] [INFO] [1788506712.208326573] [camera.camera]: Set UVC backend to libuvc
+[component_container-1] [INFO] [1788506714.333267818] [camera.camera]: startDevice called
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/camera/camera' in container '/camera/camera_container'
+[component_container-1] [INFO] [1788506714.433592786] [camera.camera]: Connecting to the default device
+[component_container-1] [INFO] [1788506714.478257711] [camera.camera]: OBCameraNode: use_intra_process: OFF
+[component_container-1] [INFO] [1788506714.650429116] [camera.camera]: Current time domain: global
+[component_container-1] [INFO] [1788506714.650655526] [camera.camera]: depthModeList[0]: Unbinned Dense Default
+[component_container-1] [INFO] [1788506714.650706376] [camera.camera]: depthModeList[1]: Binned Sparse Default
+[component_container-1] [INFO] [1788506714.650734281] [camera.camera]: depthModeList[2]: Unbinned Sparse Default
+[component_container-1] [INFO] [1788506714.650758443] [camera.camera]: depthModeList[3]: In-scene Calibration
+[component_container-1] [INFO] [1788506714.650779756] [camera.camera]: depthModeList[4]: Obstacle Avoidance
+[component_container-1] [INFO] [1788506714.650855247] [camera.camera]: Set device preset: Unbinned Dense Default
+[component_container-1] [INFO] [1788506714.766043541] [camera.camera]: Current heartbeat: OFF
+[component_container-1] [INFO] [1788506714.766216636] [camera.camera]: Set firmware log to OFF
+[component_container-1] [INFO] [1788506714.767909065] [camera.camera]: Disparity to depth mode: SW
+[component_container-1] [INFO] [1788506714.774628951] [camera.camera]: Current LDP: ON
+[component_container-1] [INFO] [1788506714.774763805] [camera.camera]: Current sync mode: OB_MULTI_DEVICE_SYNC_MODE_STANDALONE
+[component_container-1] [INFO] [1788506714.774923813] [camera.camera]: Current color flip: OFF
+[component_container-1] [INFO] [1788506714.775021737] [camera.camera]: Current depth flip: OFF
+[component_container-1] [INFO] [1788506714.775133582] [camera.camera]: Current ir flip: OFF
+[component_container-1] [INFO] [1788506714.776631570] [camera.camera]: Current color auto white balance: ON
+[component_container-1] [INFO] [1788506714.781127164] [camera.camera]: Current color auto exposure: ON
+[component_container-1] [INFO] [1788506714.788119383] [camera.camera]: Current IR auto exposure: ON
+[component_container-1] [INFO] [1788506714.788235900] [camera.camera]: Current noise_removal_filter_min_diff: 256
+[component_container-1] [INFO] [1788506714.788304704] [camera.camera]: Current noise_removal_filter_max_size: 200
+[component_container-1] [INFO] [1788506714.788366210] [camera.camera]: Set noise removal filter to true
+[component_container-1] [INFO] [1788506714.789041953] [camera.camera]: Set depth filter SpatialAdvancedFilter to disabled
+[component_container-1] [INFO] [1788506714.789159718] [camera.camera]: Set depth filter TemporalFilter to disabled
+[component_container-1] [INFO] [1788506714.789210344] [camera.camera]: Set depth filter HoleFillingFilter to disabled
+[component_container-1] [INFO] [1788506714.789245738] [camera.camera]: Set depth filter DisparityTransform to enabled
+[component_container-1] [INFO] [1788506714.789274123] [camera.camera]: Set depth filter ThresholdFilter to disabled
+[component_container-1] [INFO] [1788506714.798250240] [camera.camera]: stream gyro full scale range 1000dps sample rate 100hz
+[component_container-1] [INFO] [1788506714.798443240] [camera.camera]: stream accel full scale range 4g sample rate 100hz
+[component_container-1] [INFO] [1788506715.211543801] [camera.camera]: Device Orbbec Gemini 2 connected
+[component_container-1] [INFO] [1788506715.211690816] [camera.camera]: Serial number: AY6KC5200F1
+[component_container-1] [INFO] [1788506715.211744482] [camera.camera]: Firmware version: 1.4.92
+[component_container-1] [INFO] [1788506715.211774755] [camera.camera]: ROS Wrapper version: 2.9.3
+[component_container-1] [INFO] [1788506715.211821350] [camera.camera]: SDK version: 2.9.3
+[component_container-1] [INFO] [1788506715.211851623] [camera.camera]: Hardware version: 1.0
+[component_container-1] [INFO] [1788506715.217714415] [camera.camera]: usb connect type: USB3.0
+[component_container-1] [INFO] [1788506715.217837749] [camera.camera]: device unique id: 2-2-4
+[component_container-1] [INFO] [1788506715.217931897] [camera.camera]: Current node pid: 10399
+[component_container-1] [INFO] [1788506715.229723788] [camera.camera]: start accel stream with range: 4g,rate:100hz, and start gyro stream with range:1000dps,rate:100hz
+[component_container-1] [INFO] [1788506715.229987960] [camera.camera]: set align mode to HW
+[component_container-1] [INFO] [1788506715.230045658] [camera.camera]: enable depth scale ON
+[component_container-1] [INFO] [1788506715.253199405] [camera.camera]: Enable frame sync
+[component_container-1] [INFO] [1788506715.399294561] [camera.camera]: ir Frame - Width: 1280 Height: 800 fps: 30 Format: Y8
+[component_container-1] [INFO] [1788506715.400020418] [camera.camera]: color Frame - Width: 1280 Height: 720 fps: 30 Format: MJPG
+[component_container-1] [INFO] [1788506715.400100518] [camera.camera]: depth Frame - Width: 1280 Height: 720 fps: 30 Format: Y16
+[component_container-1] [INFO] [1788506716.253390434] [camera.camera]: Initialize device cost: 1776 ms

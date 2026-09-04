@@ -1,0 +1,130 @@
+[INFO] [1788506416.032322545] [perception_node]: Loading RF-DETR from /home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt ...
+[2026-09-04 16:20:21] [WARNING] rf-detr - Using a different number of positional encodings than DINOv2, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 16:20:21] [WARNING] rf-detr - Using patch size 16 instead of 14, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 16:20:23] [WARNING] rf-detr - load_pretrain_weights: args.num_queries absent; inferred ckpt_num_queries=300 from tensor rows 3900 ÷ ckpt_group_detr=13.
+[2026-09-04 16:20:23] [WARNING] rf-detr - Pretrained weights at '/home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt' loaded only partially — this typically produces lower accuracy. 1 model parameter(s) not in checkpoint (left at random init): [_kp_active_mask]. Check that the model configuration (encoder, hidden_dim, out_feature_indexes, projector_scale, ...) matches the architecture the checkpoint was trained with.
+[INFO] [1788506423.116723936] [perception_node]: Optimizing fire model for FP16 inference...
+/tmp/perftest/pn_val_bytetrack.py:121: FutureWarning: The `optimize_for_inference` was deprecated since v1.9.0 in favor of `rfdetr.detr.inference`. It will be removed in v1.11.0.
+  self.fire_model.optimize_for_inference(compile=False, dtype=torch.float16)
+[INFO] [1788506423.889653328] [perception_node]: Loading pose model from /home/hanhan/yolo11n-pose_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+[INFO] [1788506424.935039452] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[ERROR] [1788506425.938954265] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=0 depth_age=-- cb_age=-- uptime=1s)
+[INFO] [1788506427.939351181] [perception_node]: WATCHDOG waiting_first_frame (color_pub=1 depth_pub=1 depth_frames=0 depth_age=-- cb_age=-- uptime=3s)
+[INFO] [1788506429.016055262] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+Loading /home/hanhan/yolo11n-pose_meta.engine for TensorRT inference...
+[09/04/2026-16:20:30] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-16:20:30] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +11, now: CPU 0, GPU 16 (MiB)
+[WARN] [1788506431.206691645] [perception_node]: debug_image 발행 실패: 'PerceptionNode' object has no attribute '_timing_count'
+[WARN] [1788506431.209952962] [perception_node]: WATCHDOG callback_stale (color_pub=1 depth_pub=1 depth_frames=0 depth_age=-- cb_age=2.2s uptime=6s)
+[INFO] [1788506431.957507700] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=1 depth_age=0.0s cb_age=0.2s uptime=7s)
+[INFO] [1788506433.358321109] [perception_node]: TIMING2 fire=136.2ms pose=64.2ms judge=1.2ms publish=0.4ms debug_img=18.1ms TOTAL=220.1ms
+[INFO] [1788506433.589333722] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=15.7ms pub=2.0ms
+[INFO] [1788506435.703904233] [perception_node]: TIMING2 fire=146.7ms pose=65.6ms judge=1.1ms publish=0.4ms debug_img=22.5ms TOTAL=236.3ms
+[INFO] [1788506435.939577645] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=17.0ms pub=2.3ms
+[INFO] [1788506438.035979886] [perception_node]: TIMING2 fire=140.1ms pose=64.7ms judge=1.0ms publish=0.4ms debug_img=18.2ms TOTAL=224.4ms
+[INFO] [1788506438.265267488] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788506440.352215692] [perception_node]: TIMING2 fire=137.5ms pose=65.2ms judge=1.4ms publish=0.4ms debug_img=18.7ms TOTAL=223.2ms
+[INFO] [1788506440.606599200] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788506442.699718666] [perception_node]: TIMING2 fire=139.8ms pose=66.4ms judge=1.1ms publish=0.4ms debug_img=17.9ms TOTAL=225.7ms
+[INFO] [1788506442.927605407] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788506445.116536632] [perception_node]: TIMING2 fire=138.3ms pose=71.4ms judge=1.1ms publish=0.4ms debug_img=17.9ms TOTAL=229.2ms
+[INFO] [1788506445.348977632] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=15.3ms pub=2.0ms
+[WARN] [1788506446.068289862] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.97 arearatio=1.01)
+[INFO] [1788506447.557262689] [perception_node]: TIMING2 fire=144.4ms pose=73.3ms judge=1.1ms publish=0.4ms debug_img=18.1ms TOTAL=237.3ms
+[INFO] [1788506447.793946387] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.4ms pub=1.9ms
+[WARN] [1788506448.032377883] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.62 overlap=0.91 arearatio=1.10)
+[WARN] [1788506448.295440816] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.38 overlap=0.91 arearatio=1.10)
+[WARN] [1788506448.535675278] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.51 overlap=0.90 arearatio=1.11)
+[WARN] [1788506448.767482950] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.61 overlap=0.91 arearatio=1.07)
+[WARN] [1788506449.003838401] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.91 arearatio=1.07)
+[WARN] [1788506449.238134992] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.92 arearatio=1.05)
+[WARN] [1788506449.471399691] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.72 overlap=0.92 arearatio=1.05)
+[WARN] [1788506449.708686991] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.68 overlap=0.93 arearatio=1.04)
+[WARN] [1788506449.956078798] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.92 arearatio=1.05)
+[INFO] [1788506449.975945232] [perception_node]: TIMING2 fire=154.1ms pose=65.1ms judge=2.5ms publish=0.3ms debug_img=18.0ms TOTAL=240.1ms
+[WARN] [1788506450.191371914] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.05)
+[INFO] [1788506450.211567324] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.7ms pub=1.9ms
+[WARN] [1788506450.419877585] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.04)
+[WARN] [1788506450.651424209] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.92 arearatio=1.05)
+[WARN] [1788506450.880276553] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.05)
+[WARN] [1788506451.112474823] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.62 overlap=0.92 arearatio=1.05)
+[WARN] [1788506451.344798791] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.67 overlap=0.93 arearatio=1.04)
+[WARN] [1788506451.579461533] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.67 overlap=0.92 arearatio=1.05)
+[WARN] [1788506451.820444879] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.70 overlap=0.93 arearatio=1.04)
+[WARN] [1788506452.052599462] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.93 arearatio=1.04)
+[WARN] [1788506452.299258670] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.92 arearatio=1.06)
+[INFO] [1788506452.327547284] [perception_node]: TIMING2 fire=146.4ms pose=69.5ms judge=4.0ms publish=0.5ms debug_img=25.3ms TOTAL=245.7ms
+[WARN] [1788506452.548991247] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.75 overlap=0.90 arearatio=1.07)
+[INFO] [1788506452.568903154] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.4ms pub=2.0ms
+[WARN] [1788506452.781470386] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.61 overlap=0.93 arearatio=1.05)
+[WARN] [1788506453.015713997] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.93 arearatio=1.04)
+[WARN] [1788506453.275817998] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.41 overlap=0.92 arearatio=1.04)
+[WARN] [1788506453.507919705] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.41 overlap=0.92 arearatio=1.04)
+[WARN] [1788506454.272621130] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.47 overlap=0.93 arearatio=1.03)
+[WARN] [1788506454.506329536] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.49 overlap=0.93 arearatio=1.03)
+[WARN] [1788506454.749485165] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.40 overlap=0.93 arearatio=1.03)
+[INFO] [1788506454.769703646] [perception_node]: TIMING2 fire=141.8ms pose=73.4ms judge=2.4ms publish=0.3ms debug_img=18.3ms TOTAL=236.3ms
+[WARN] [1788506454.984029643] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.45 overlap=0.93 arearatio=1.04)
+[INFO] [1788506455.003922957] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.3ms pub=2.0ms
+[WARN] [1788506455.219471538] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.47 overlap=0.93 arearatio=1.04)
+[WARN] [1788506455.445685388] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.46 overlap=0.94 arearatio=1.04)
+[WARN] [1788506455.683837305] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.51 overlap=0.94 arearatio=1.03)
+[WARN] [1788506456.162353214] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.38 overlap=0.94 arearatio=1.04)
+[WARN] [1788506456.402281343] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.46 overlap=0.94 arearatio=1.03)
+[WARN] [1788506456.896847901] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.41 overlap=0.91 arearatio=1.05)
+[WARN] [1788506457.130831282] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.39 overlap=0.92 arearatio=1.05)
+[INFO] [1788506457.151250348] [perception_node]: TIMING2 fire=136.9ms pose=70.7ms judge=2.4ms publish=0.3ms debug_img=18.4ms TOTAL=228.8ms
+[WARN] [1788506457.378788541] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.44 overlap=0.90 arearatio=1.08)
+[INFO] [1788506457.399076400] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.4ms pub=1.9ms
+[WARN] [1788506457.616374947] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.51 overlap=0.91 arearatio=1.07)
+[WARN] [1788506458.351765876] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.44 overlap=0.91 arearatio=1.06)
+[WARN] [1788506458.578863146] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.91 arearatio=1.07)
+[WARN] [1788506458.808182478] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.42 overlap=0.91 arearatio=1.07)
+[WARN] [1788506459.045474142] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.46 overlap=0.90 arearatio=1.08)
+[WARN] [1788506459.295098929] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.45 overlap=0.91 arearatio=1.08)
+[WARN] [1788506459.519640129] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.51 overlap=0.91 arearatio=1.07)
+[INFO] [1788506459.539831791] [perception_node]: TIMING2 fire=134.5ms pose=63.7ms judge=2.4ms publish=0.3ms debug_img=18.3ms TOTAL=219.2ms
+[WARN] [1788506459.751559490] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.43 overlap=0.92 arearatio=1.06)
+[INFO] [1788506459.772120962] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.6ms pub=2.3ms
+[WARN] [1788506459.992983675] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.45 overlap=0.92 arearatio=1.06)
+[WARN] [1788506460.227213161] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.50 overlap=0.94 arearatio=1.04)
+[WARN] [1788506460.456825105] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.48 overlap=0.91 arearatio=1.08)
+[WARN] [1788506460.685938880] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.50 overlap=0.89 arearatio=1.09)
+[WARN] [1788506460.923924201] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.50 overlap=0.91 arearatio=1.08)
+[INFO] [1788506461.900632264] [perception_node]: TIMING2 fire=140.6ms pose=67.2ms judge=1.0ms publish=0.4ms debug_img=18.1ms TOTAL=227.4ms
+[INFO] [1788506462.132690305] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788506464.331666013] [perception_node]: TIMING2 fire=154.3ms pose=73.1ms judge=1.1ms publish=0.5ms debug_img=18.1ms TOTAL=247.0ms
+[INFO] [1788506464.571022771] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.4ms pub=1.9ms
+[INFO] [1788506466.763275429] [perception_node]: TIMING2 fire=171.2ms pose=71.7ms judge=1.0ms publish=0.4ms debug_img=18.1ms TOTAL=262.4ms
+[INFO] [1788506466.998820756] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788506469.148583660] [perception_node]: TIMING2 fire=139.4ms pose=79.3ms judge=1.2ms publish=0.4ms debug_img=18.4ms TOTAL=238.7ms
+[INFO] [1788506469.409424912] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788506471.541866808] [perception_node]: TIMING2 fire=137.6ms pose=55.6ms judge=0.3ms publish=0.3ms debug_img=17.7ms TOTAL=211.5ms
+[INFO] [1788506471.776274066] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788506473.811737127] [perception_node]: TIMING2 fire=136.4ms pose=55.2ms judge=0.3ms publish=0.3ms debug_img=17.7ms TOTAL=209.9ms
+[INFO] [1788506474.030873027] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788506476.047610032] [perception_node]: TIMING2 fire=141.9ms pose=55.2ms judge=0.3ms publish=0.3ms debug_img=18.2ms TOTAL=216.0ms
+[INFO] [1788506476.269614698] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.3ms pub=2.1ms
+[INFO] [1788506478.278413097] [perception_node]: TIMING2 fire=141.1ms pose=54.5ms judge=1.0ms publish=0.4ms debug_img=18.3ms TOTAL=215.3ms
+[INFO] [1788506478.535623523] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=16.7ms pub=1.9ms
+[INFO] [1788506480.663468777] [perception_node]: TIMING2 fire=137.6ms pose=76.2ms judge=1.0ms publish=0.4ms debug_img=18.1ms TOTAL=233.4ms
+[INFO] [1788506480.920995527] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=15.5ms pub=2.1ms
+[INFO] [1788506483.058409009] [perception_node]: TIMING2 fire=137.5ms pose=74.8ms judge=1.2ms publish=0.4ms debug_img=18.0ms TOTAL=231.9ms
+[INFO] [1788506483.294340278] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.4ms pub=1.9ms
+[INFO] [1788506485.421483572] [perception_node]: TIMING2 fire=139.2ms pose=69.0ms judge=1.1ms publish=0.4ms debug_img=18.5ms TOTAL=228.2ms
+[INFO] [1788506485.656525762] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.2ms pub=2.0ms
+[INFO] [1788506487.783695344] [perception_node]: TIMING2 fire=137.5ms pose=76.1ms judge=1.1ms publish=0.4ms debug_img=18.0ms TOTAL=233.1ms
+[INFO] [1788506488.029491557] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788506490.151613544] [perception_node]: TIMING2 fire=138.8ms pose=68.2ms judge=1.4ms publish=0.5ms debug_img=18.6ms TOTAL=227.6ms
+[INFO] [1788506490.388190024] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.7ms pub=2.1ms
+[ERROR] [1788506492.040023487] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=0.5s cb_age=0.2s uptime=67s)
+[INFO] [1788506492.489730667] [perception_node]: TIMING2 fire=133.2ms pose=67.4ms judge=1.2ms publish=0.4ms debug_img=17.9ms TOTAL=220.3ms
+[INFO] [1788506492.717171808] [perception_node]: TIMING3 copy=0.4ms draw=0.3ms tobytes=15.3ms pub=2.1ms
+[ERROR] [1788506494.939170183] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=3.4s cb_age=1.5s uptime=70s)
+[ERROR] [1788506504.939625446] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=13.4s cb_age=11.5s uptime=80s)
+[ERROR] [1788506514.939809503] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=23.4s cb_age=21.5s uptime=90s)
+[ERROR] [1788506524.939643642] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=33.4s cb_age=31.5s uptime=100s)
+[ERROR] [1788506534.939608662] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=43.4s cb_age=41.5s uptime=110s)
+[ERROR] [1788506544.939512083] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=116 depth_age=53.4s cb_age=51.5s uptime=120s)

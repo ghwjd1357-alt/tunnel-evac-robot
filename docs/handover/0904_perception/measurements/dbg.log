@@ -1,0 +1,50 @@
+[INFO] [1788506080.059768897] [perception_node]: Loading RF-DETR from /home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt ...
+[2026-09-04 16:14:46] [WARNING] rf-detr - Using a different number of positional encodings than DINOv2, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 16:14:46] [WARNING] rf-detr - Using patch size 16 instead of 14, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 16:14:48] [WARNING] rf-detr - load_pretrain_weights: args.num_queries absent; inferred ckpt_num_queries=300 from tensor rows 3900 ÷ ckpt_group_detr=13.
+[2026-09-04 16:14:48] [WARNING] rf-detr - Pretrained weights at '/home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt' loaded only partially — this typically produces lower accuracy. 1 model parameter(s) not in checkpoint (left at random init): [_kp_active_mask]. Check that the model configuration (encoder, hidden_dim, out_feature_indexes, projector_scale, ...) matches the architecture the checkpoint was trained with.
+[INFO] [1788506088.133606693] [perception_node]: Optimizing fire model for FP16 inference...
+/tmp/perftest/pn_val_bytetrack.py:121: FutureWarning: The `optimize_for_inference` was deprecated since v1.9.0 in favor of `rfdetr.detr.inference`. It will be removed in v1.11.0.
+  self.fire_model.optimize_for_inference(compile=False, dtype=torch.float16)
+[INFO] [1788506088.912656201] [perception_node]: Loading pose model from /home/hanhan/pose_finetuned_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify', 'pose', 'obb' or 'semantic'.
+[INFO] [1788506090.044254271] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[ERROR] [1788506091.048306308] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=0 depth_age=-- cb_age=-- uptime=1s)
+[INFO] [1788506093.049319679] [perception_node]: WATCHDOG waiting_first_frame (color_pub=1 depth_pub=1 depth_frames=0 depth_age=-- cb_age=-- uptime=3s)
+[INFO] [1788506094.913663189] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+Loading /home/hanhan/pose_finetuned_meta.engine for TensorRT inference...
+[09/04/2026-16:14:57] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-16:14:57] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +10, now: CPU 0, GPU 15 (MiB)
+[WARN] [1788506097.589350769] [perception_node]: debug_image 발행 실패: 'PerceptionNode' object has no attribute '_timing_count'
+[ERROR] [1788506097.593924942] [perception_node]: WATCHDOG depth_frames_stale (color_pub=1 depth_pub=1 depth_frames=1 depth_age=2.7s cb_age=2.6s uptime=8s)
+[INFO] [1788506098.087235707] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=2 depth_age=0.2s cb_age=0.2s uptime=8s)
+[INFO] [1788506099.667439282] [perception_node]: TIMING2 fire=138.9ms pose=60.8ms judge=0.3ms publish=0.3ms debug_img=17.8ms TOTAL=218.2ms
+[INFO] [1788506099.891160391] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.8ms pub=2.0ms
+[INFO] [1788506101.979544464] [perception_node]: TIMING2 fire=162.4ms pose=61.2ms judge=0.3ms publish=0.3ms debug_img=18.3ms TOTAL=242.6ms
+[INFO] [1788506102.205376399] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=18.6ms pub=2.0ms
+[INFO] [1788506104.216159866] [perception_node]: TIMING2 fire=137.1ms pose=59.3ms judge=0.3ms publish=0.3ms debug_img=18.1ms TOTAL=215.2ms
+[INFO] [1788506104.448199342] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.5ms
+[INFO] [1788506106.470751732] [perception_node]: TIMING2 fire=137.3ms pose=60.3ms judge=0.3ms publish=0.3ms debug_img=18.6ms TOTAL=216.9ms
+[INFO] [1788506106.695078688] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=1.9ms
+[INFO] [1788506108.759494696] [perception_node]: TIMING2 fire=143.8ms pose=64.8ms judge=0.3ms publish=0.3ms debug_img=18.1ms TOTAL=227.4ms
+[INFO] [1788506108.987457522] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788506111.111739398] [perception_node]: TIMING2 fire=140.8ms pose=71.5ms judge=0.4ms publish=0.4ms debug_img=20.8ms TOTAL=233.8ms
+[INFO] [1788506111.354550509] [perception_node]: TIMING3 copy=0.5ms draw=10.8ms tobytes=15.3ms pub=2.5ms
+[INFO] [1788506113.464728965] [perception_node]: TIMING2 fire=139.3ms pose=68.0ms judge=1.0ms publish=0.4ms debug_img=18.2ms TOTAL=227.0ms
+[INFO] [1788506113.700868040] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=16.0ms pub=2.8ms
+[INFO] [1788506115.803791982] [perception_node]: TIMING2 fire=136.1ms pose=59.9ms judge=1.0ms publish=0.5ms debug_img=18.1ms TOTAL=215.6ms
+[INFO] [1788506116.029234692] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=15.6ms pub=2.3ms
+[ERROR] [1788506117.158864739] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=0.0s cb_age=0.2s uptime=27s)
+[INFO] [1788506118.023790891] [perception_node]: TIMING2 fire=131.9ms pose=58.4ms judge=1.1ms publish=0.4ms debug_img=18.1ms TOTAL=209.9ms
+[INFO] [1788506118.240566424] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=15.2ms pub=2.1ms
+[ERROR] [1788506120.048259898] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=2.9s cb_age=1.2s uptime=30s)
+[ERROR] [1788506130.048776934] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=12.9s cb_age=11.2s uptime=40s)
+[ERROR] [1788506140.048802669] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=22.9s cb_age=21.2s uptime=50s)
+[ERROR] [1788506150.048681720] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=32.9s cb_age=31.2s uptime=60s)
+[ERROR] [1788506160.048689004] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=42.9s cb_age=41.2s uptime=70s)
+[ERROR] [1788506170.048914732] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=52.9s cb_age=51.2s uptime=80s)
+[ERROR] [1788506180.048926629] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=62.9s cb_age=61.2s uptime=90s)
+[ERROR] [1788506190.048889658] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=72.9s cb_age=71.2s uptime=100s)
+[ERROR] [1788506200.048928142] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=41 depth_age=82.9s cb_age=81.2s uptime=110s)

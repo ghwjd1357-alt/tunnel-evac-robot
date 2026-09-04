@@ -1,0 +1,59 @@
+[INFO] [1788502064.061711301] [perception_node]: Loading RF-DETR from /home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt ...
+[2026-09-04 15:07:49] [WARNING] rf-detr - Using a different number of positional encodings than DINOv2, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:07:49] [WARNING] rf-detr - Using patch size 16 instead of 14, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:07:51] [WARNING] rf-detr - load_pretrain_weights: args.num_queries absent; inferred ckpt_num_queries=300 from tensor rows 3900 ÷ ckpt_group_detr=13.
+[2026-09-04 15:07:51] [WARNING] rf-detr - Pretrained weights at '/home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt' loaded only partially — this typically produces lower accuracy. 1 model parameter(s) not in checkpoint (left at random init): [_kp_active_mask]. Check that the model configuration (encoder, hidden_dim, out_feature_indexes, projector_scale, ...) matches the architecture the checkpoint was trained with.
+[INFO] [1788502071.688045707] [perception_node]: Optimizing fire model for FP16 inference...
+/tmp/perftest/pn_base.py:121: FutureWarning: The `optimize_for_inference` was deprecated since v1.9.0 in favor of `rfdetr.detr.inference`. It will be removed in v1.11.0.
+  self.fire_model.optimize_for_inference(compile=False, dtype=torch.float16)
+[INFO] [1788502072.509877957] [perception_node]: Loading pose model from /home/hanhan/pose_finetuned_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify', 'pose', 'obb' or 'semantic'.
+[INFO] [1788502073.597107839] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[INFO] [1788502073.602842203] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+Loading /home/hanhan/pose_finetuned_meta.engine for TensorRT inference...
+[09/04/2026-15:07:55] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-15:07:55] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +10, now: CPU 0, GPU 15 (MiB)
+[WARN] [1788502075.414880961] [perception_node]: debug_image 발행 실패: 'PerceptionNode' object has no attribute '_timing_count'
+[INFO] [1788502075.418201665] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=2 depth_age=1.8s cb_age=1.7s uptime=2s)
+[INFO] [1788502077.819976597] [perception_node]: TIMING2 fire=151.5ms pose=72.8ms judge=0.3ms publish=0.2ms debug_img=18.4ms TOTAL=245.2ms
+[INFO] [1788502078.063344071] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.0ms pub=2.3ms
+[INFO] [1788502080.483673241] [perception_node]: TIMING2 fire=156.5ms pose=91.6ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=268.8ms
+[INFO] [1788502080.756733085] [perception_node]: TIMING3 copy=1.2ms draw=0.0ms tobytes=17.2ms pub=2.4ms
+[INFO] [1788502082.943669876] [perception_node]: TIMING2 fire=153.6ms pose=62.0ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=235.8ms
+[INFO] [1788502083.195706065] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.5ms pub=2.4ms
+[INFO] [1788502085.592869051] [perception_node]: TIMING2 fire=139.0ms pose=94.6ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=253.9ms
+[INFO] [1788502085.836451443] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502088.296505022] [perception_node]: TIMING2 fire=148.5ms pose=78.5ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=247.5ms
+[INFO] [1788502088.560069619] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.3ms pub=2.0ms
+[INFO] [1788502091.013409045] [perception_node]: TIMING2 fire=146.7ms pose=105.2ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=272.5ms
+[INFO] [1788502091.300881596] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.2ms pub=2.5ms
+[INFO] [1788502093.575386001] [perception_node]: TIMING2 fire=137.8ms pose=98.6ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=256.7ms
+[INFO] [1788502093.815484705] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502096.146423968] [perception_node]: TIMING2 fire=145.5ms pose=136.6ms judge=0.3ms publish=0.2ms debug_img=17.9ms TOTAL=302.2ms
+[INFO] [1788502096.423144266] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502098.767050098] [perception_node]: TIMING2 fire=152.6ms pose=131.9ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=305.0ms
+[INFO] [1788502099.017754999] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.1ms
+[INFO] [1788502101.361512529] [perception_node]: TIMING2 fire=159.6ms pose=78.4ms judge=0.3ms publish=0.3ms debug_img=19.5ms TOTAL=259.8ms
+[INFO] [1788502101.615153830] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.8ms pub=2.1ms
+[INFO] [1788502103.907069527] [perception_node]: TIMING2 fire=151.5ms pose=86.8ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=258.7ms
+[INFO] [1788502104.177937726] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.0ms
+[INFO] [1788502106.534304045] [perception_node]: TIMING2 fire=164.3ms pose=106.2ms judge=0.3ms publish=0.2ms debug_img=18.2ms TOTAL=291.1ms
+[INFO] [1788502106.810739145] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.8ms pub=2.1ms
+[INFO] [1788502109.329763077] [perception_node]: TIMING2 fire=161.9ms pose=93.4ms judge=0.3ms publish=0.2ms debug_img=17.8ms TOTAL=275.6ms
+[INFO] [1788502109.617082913] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.7ms pub=2.1ms
+[INFO] [1788502111.969336226] [perception_node]: TIMING2 fire=175.4ms pose=71.7ms judge=0.4ms publish=0.2ms debug_img=19.8ms TOTAL=269.3ms
+[INFO] [1788502112.251386483] [perception_node]: TIMING3 copy=0.4ms draw=0.0ms tobytes=15.8ms pub=2.1ms
+[INFO] [1788502114.449029037] [perception_node]: TIMING2 fire=147.1ms pose=68.1ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=235.5ms
+[INFO] [1788502114.687239855] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.0ms
+[INFO] [1788502116.957686342] [perception_node]: TIMING2 fire=142.5ms pose=89.8ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=252.8ms
+[INFO] [1788502117.223959641] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.4ms pub=2.1ms
+[INFO] [1788502119.419945670] [perception_node]: TIMING2 fire=146.9ms pose=57.4ms judge=0.3ms publish=0.2ms debug_img=18.0ms TOTAL=224.5ms
+[INFO] [1788502119.654073322] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.5ms pub=2.0ms
+[INFO] [1788502121.873368590] [perception_node]: TIMING2 fire=178.9ms pose=73.1ms judge=0.3ms publish=0.2ms debug_img=18.3ms TOTAL=272.9ms
+[INFO] [1788502122.135872399] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=15.6ms pub=2.5ms
+[INFO] [1788502124.523316401] [perception_node]: TIMING2 fire=148.5ms pose=90.4ms judge=0.3ms publish=0.2ms debug_img=18.1ms TOTAL=259.2ms
+[INFO] [1788502124.774386108] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=16.2ms pub=2.3ms
+[INFO] [1788502127.152656215] [perception_node]: TIMING2 fire=151.6ms pose=87.5ms judge=0.3ms publish=0.2ms debug_img=18.5ms TOTAL=260.5ms
+[INFO] [1788502127.426904857] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=17.7ms pub=3.0ms

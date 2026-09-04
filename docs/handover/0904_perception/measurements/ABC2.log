@@ -1,0 +1,110 @@
+[INFO] [1788502869.449477747] [perception_node]: Loading RF-DETR from /home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt ...
+[2026-09-04 15:21:15] [WARNING] rf-detr - Using a different number of positional encodings than DINOv2, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:21:15] [WARNING] rf-detr - Using patch size 16 instead of 14, which means we're not loading DINOv2 backbone weights. This is not a problem if finetuning a pretrained RF-DETR model.
+[2026-09-04 15:21:16] [WARNING] rf-detr - load_pretrain_weights: args.num_queries absent; inferred ckpt_num_queries=300 from tensor rows 3900 ÷ ckpt_group_detr=13.
+[2026-09-04 15:21:16] [WARNING] rf-detr - Pretrained weights at '/home/hanhan/percep_ws/install/vision_pipeline/lib/python3.10/site-packages/vision_pipeline/models/fire_smoke_v9_rfdetr_small.pt' loaded only partially — this typically produces lower accuracy. 1 model parameter(s) not in checkpoint (left at random init): [_kp_active_mask]. Check that the model configuration (encoder, hidden_dim, out_feature_indexes, projector_scale, ...) matches the architecture the checkpoint was trained with.
+[INFO] [1788502876.964139015] [perception_node]: Optimizing fire model for FP16 inference...
+/tmp/perftest/pn_ABC.py:121: FutureWarning: The `optimize_for_inference` was deprecated since v1.9.0 in favor of `rfdetr.detr.inference`. It will be removed in v1.11.0.
+  self.fire_model.optimize_for_inference(compile=True, dtype=torch.float16)
+[transformers] `loss_type=None` was set in the config but it is unrecognized. Using the default loss: `ForCausalLMLoss`.
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2.py:273: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  assert x.shape[2] % block_size == 0 and x.shape[3] % block_size == 0, (
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2_with_windowed_attn.py:436: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if height % divisor != 0 or width % divisor != 0:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2_with_windowed_attn.py:327: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if num_channels != self.num_channels:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/dinov2.py:262: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if num_patches == num_positions and (height, width) == shape:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/backbone/__init__.py:54: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if cross_attn_feats is None and pos.ndim == 4 and pos.shape[1] == 1:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:378: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  topk = min(self.num_queries, enc_outputs_class_unselected_gidx.shape[-2])
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:63: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if pos_tensor.size(-1) == 2:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/transformer.py:65: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  elif pos_tensor.size(-1) == 4:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/torch/__init__.py:2253: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if not condition:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:188: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if n_ref_levels not in (1, self.n_levels):
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:203: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if n_ref_levels == 1:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:205: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  if reference_points.shape[-1] == 2:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/modules/ms_deform_attn.py:212: TracerWarning: Converting a tensor to a Python boolean might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  elif reference_points.shape[-1] == 4:
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/functions/ms_deform_attn_func.py:45: TracerWarning: Converting a tensor to a Python integer might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  value_list = value.split([int(height) * int(width) for height, width in shapes], dim=3)  # type: ignore[no-untyped-call]
+/home/hanhan/yolo_env/lib/python3.10/site-packages/rfdetr/models/ops/functions/ms_deform_attn_func.py:52: TracerWarning: Converting a tensor to a Python integer might cause the trace to be incorrect. We can't record the data flow of Python values, so this value will be treated as a constant in the future. This means that the trace might not generalize to other inputs!
+  value_l_ = value_list[level_index].view(batch_size * n_heads, head_dim, int(height), int(width))
+[INFO] [1788502884.655462019] [perception_node]: Loading pose model from /home/hanhan/pose_finetuned_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify', 'pose', 'obb' or 'semantic'.
+[INFO] [1788502885.416295275] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[INFO] [1788502885.441228578] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+Loading /home/hanhan/pose_finetuned_meta.engine for TensorRT inference...
+[09/04/2026-15:21:29] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-15:21:29] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +10, now: CPU 0, GPU 15 (MiB)
+[ERROR] [1788502890.107892314] [perception_node]: WATCHDOG depth_frames_stale (color_pub=1 depth_pub=1 depth_frames=1 depth_age=4.7s cb_age=4.7s uptime=5s)
+[INFO] [1788502891.092869514] [perception_node]: TIMING2 fire=0.1ms pose=54.5ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.8ms
+[INFO] [1788502891.493936274] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=4 depth_age=0.0s cb_age=0.2s uptime=6s)
+[INFO] [1788502892.293639140] [perception_node]: TIMING2 fire=0.1ms pose=54.5ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.6ms
+[INFO] [1788502893.555518842] [perception_node]: TIMING2 fire=0.1ms pose=56.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.7ms
+[INFO] [1788502894.821464330] [perception_node]: TIMING2 fire=0.1ms pose=55.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.3ms
+[INFO] [1788502895.989785293] [perception_node]: TIMING2 fire=0.1ms pose=53.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.7ms
+[INFO] [1788502897.220100493] [perception_node]: TIMING2 fire=0.1ms pose=57.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=60.7ms
+[INFO] [1788502898.507236741] [perception_node]: TIMING2 fire=0.1ms pose=64.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=67.1ms
+[INFO] [1788502899.733654095] [perception_node]: TIMING2 fire=0.1ms pose=55.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.4ms
+[INFO] [1788502900.952581212] [perception_node]: TIMING2 fire=0.1ms pose=58.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=61.7ms
+[INFO] [1788502902.184072775] [perception_node]: TIMING2 fire=0.1ms pose=54.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.1ms
+[INFO] [1788502903.399398442] [perception_node]: TIMING2 fire=0.1ms pose=54.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.1ms
+[INFO] [1788502904.654612190] [perception_node]: TIMING2 fire=0.1ms pose=54.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.9ms
+[INFO] [1788502905.839675773] [perception_node]: TIMING2 fire=0.1ms pose=55.4ms judge=0.3ms publish=0.3ms debug_img=0.0ms TOTAL=58.1ms
+[INFO] [1788502907.044196322] [perception_node]: TIMING2 fire=0.1ms pose=54.1ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.3ms
+[INFO] [1788502908.244974968] [perception_node]: TIMING2 fire=0.1ms pose=54.3ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.5ms
+[INFO] [1788502909.511717986] [perception_node]: TIMING2 fire=0.1ms pose=57.3ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=60.2ms
+[INFO] [1788502910.672240728] [perception_node]: TIMING2 fire=0.1ms pose=54.9ms judge=0.3ms publish=0.1ms debug_img=0.0ms TOTAL=57.1ms
+[INFO] [1788502911.868865006] [perception_node]: TIMING2 fire=0.1ms pose=55.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.3ms
+[INFO] [1788502913.098109473] [perception_node]: TIMING2 fire=0.1ms pose=56.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=59.1ms
+[INFO] [1788502914.359362808] [perception_node]: TIMING2 fire=0.1ms pose=55.2ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.6ms
+[INFO] [1788502915.566267094] [perception_node]: TIMING2 fire=0.1ms pose=55.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.9ms
+[INFO] [1788502916.807243591] [perception_node]: TIMING2 fire=0.1ms pose=58.0ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=60.4ms
+[INFO] [1788502918.077777760] [perception_node]: TIMING2 fire=0.1ms pose=61.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=64.2ms
+[INFO] [1788502919.275580289] [perception_node]: TIMING2 fire=0.1ms pose=57.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=59.6ms
+[INFO] [1788502920.590789730] [perception_node]: TIMING2 fire=0.1ms pose=56.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.8ms
+[INFO] [1788502921.831126169] [perception_node]: TIMING2 fire=0.1ms pose=54.2ms judge=0.3ms publish=0.1ms debug_img=0.0ms TOTAL=56.3ms
+[INFO] [1788502923.070816024] [perception_node]: TIMING2 fire=0.1ms pose=53.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.8ms
+[INFO] [1788502924.230187102] [perception_node]: TIMING2 fire=0.1ms pose=56.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.5ms
+[INFO] [1788502925.418999911] [perception_node]: TIMING2 fire=0.1ms pose=55.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.2ms
+[INFO] [1788502926.601407899] [perception_node]: TIMING2 fire=0.1ms pose=54.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.7ms
+[INFO] [1788502927.771951434] [perception_node]: TIMING2 fire=0.1ms pose=56.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.9ms
+[INFO] [1788502928.981688272] [perception_node]: TIMING2 fire=0.1ms pose=55.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.4ms
+[INFO] [1788502930.217927977] [perception_node]: TIMING2 fire=0.1ms pose=52.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.1ms
+[INFO] [1788502931.389834252] [perception_node]: TIMING2 fire=0.1ms pose=55.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.4ms
+[INFO] [1788502932.722346717] [perception_node]: TIMING2 fire=0.1ms pose=58.2ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=60.4ms
+[INFO] [1788502933.953498290] [perception_node]: TIMING2 fire=0.1ms pose=59.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=62.5ms
+[INFO] [1788502935.100052493] [perception_node]: TIMING2 fire=0.1ms pose=53.3ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.5ms
+[INFO] [1788502936.295120865] [perception_node]: TIMING2 fire=0.1ms pose=57.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=59.7ms
+[INFO] [1788502937.523434634] [perception_node]: TIMING2 fire=0.1ms pose=53.3ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.4ms
+[INFO] [1788502938.755601093] [perception_node]: TIMING2 fire=0.1ms pose=55.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.6ms
+[INFO] [1788502940.073406019] [perception_node]: TIMING2 fire=0.1ms pose=54.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.9ms
+[INFO] [1788502941.289333170] [perception_node]: TIMING2 fire=0.1ms pose=55.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.7ms
+[INFO] [1788502942.645998714] [perception_node]: TIMING2 fire=0.1ms pose=56.2ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.8ms
+[INFO] [1788502943.869775731] [perception_node]: TIMING2 fire=0.1ms pose=59.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=62.1ms
+[INFO] [1788502945.028158959] [perception_node]: TIMING2 fire=0.1ms pose=55.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.7ms
+[INFO] [1788502946.274506693] [perception_node]: TIMING2 fire=0.1ms pose=52.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.1ms
+[INFO] [1788502947.532882949] [perception_node]: TIMING2 fire=0.1ms pose=55.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.9ms
+[INFO] [1788502948.732698348] [perception_node]: TIMING2 fire=0.1ms pose=53.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.0ms
+[INFO] [1788502949.887482717] [perception_node]: TIMING2 fire=0.1ms pose=53.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.8ms
+[INFO] [1788502951.035380230] [perception_node]: TIMING2 fire=0.1ms pose=54.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.3ms
+[INFO] [1788502952.232881876] [perception_node]: TIMING2 fire=0.1ms pose=54.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.8ms
+[INFO] [1788502953.433977322] [perception_node]: TIMING2 fire=0.1ms pose=53.6ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.8ms
+[INFO] [1788502954.594705404] [perception_node]: TIMING2 fire=0.1ms pose=53.8ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=55.9ms
+[INFO] [1788502955.811822261] [perception_node]: TIMING2 fire=0.1ms pose=55.1ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=57.4ms
+[INFO] [1788502957.000346827] [perception_node]: TIMING2 fire=0.1ms pose=55.7ms judge=0.4ms publish=0.2ms debug_img=0.0ms TOTAL=57.9ms
+[INFO] [1788502958.185600836] [perception_node]: TIMING2 fire=0.1ms pose=55.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.3ms
+[INFO] [1788502959.449464275] [perception_node]: TIMING2 fire=0.1ms pose=60.7ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=64.0ms
+[INFO] [1788502960.674095113] [perception_node]: TIMING2 fire=0.1ms pose=54.1ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=56.3ms
+[INFO] [1788502961.831393783] [perception_node]: TIMING2 fire=0.1ms pose=51.4ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=53.6ms
+[INFO] [1788502963.069424075] [perception_node]: TIMING2 fire=0.1ms pose=55.9ms judge=0.3ms publish=0.2ms debug_img=0.0ms TOTAL=58.3ms
