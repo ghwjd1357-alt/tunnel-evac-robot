@@ -20,6 +20,9 @@
    가짜인 것은 "그래서 카메라가 무엇을 봤을까" 를 그 위에 얹는 부분뿐이다.
    ═══════════════════════════════════════════════════════════════ */
 
+import { update } from './state.js';
+import { seedDwell } from './record.js';
+
 export const DEMO_ON = true;
 
 /* 부드럽게 흔들리는 값 — 난수를 쓰면 매 프레임 튀어서 화면이 지저분해진다 */
@@ -100,3 +103,101 @@ export function demoPower(s) {
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/* ═══ 🎬 DEMO-0904 촬영용 자동 순회 ═══════════════════════════════
+   `?tour=3` 을 붙이면 3초마다 메뉴를 스스로 넘긴다.
+
+   왜 필요한가 — 촬영 중에 사람이 사이드바를 클릭하면 **마우스 커서와 클릭
+   순간의 흔들림이 화면에 남고**, 컷 길이도 매번 달라져 편집이 어려워진다.
+   화면이 스스로 넘어가면 커서가 안 나오고 컷 길이가 정확히 일정하다.
+
+   순서는 시연 대본 그대로다: 관제 → 영상 → 진단 → 기록 → 비상.
+   마지막 메뉴에서 멈춘다(반복하지 않는다 — 편집에서 뒤를 자르기 쉽게).      */
+/* [메뉴, 기본 대기시간에 더할 초] — 관제 화면은 지도·미션·인지를 한 번에 보여주는
+   첫 컷이라 읽을 것이 가장 많다. 다른 컷과 같은 길이면 눈이 못 따라간다. */
+const TOUR = [
+  ['main',      2],
+  ['video',     0],
+  ['diag',      0],
+  ['record',    0],
+  ['emergency', 0],
+];
+
+export function maybeStartTour(showMenu) {
+  const q = new URLSearchParams(location.search).get('tour');
+  if (q === null) return false;
+  const hold = (parseFloat(q) || 3) * 1000;
+
+  seedRecord();          // 기록 화면이 비어 있으면 "방금 켠 화면" 이 드러난다
+
+  /* 컷마다 길이가 다르므로 setInterval 대신 한 컷씩 예약한다 */
+  let i = 0;
+  const step = () => {
+    showMenu(TOUR[i][0]);
+    const wait = hold + TOUR[i][1] * 1000;
+    if (++i < TOUR.length) setTimeout(step, wait);
+  };
+  step();
+  return true;
+}
+
+/* ═══ 🎬 DEMO-0904 기록 화면 앞부분 채우기 ═══════════════════════
+   촬영은 bag 163초(연결통로 진입)부터 시작한다. 그 앞에서 실제로 일어난 일들이
+   관제에는 없으니 **기록 화면이 미션 전이 몇 줄뿐**이라 "방금 켠 화면"이 드러난다.
+
+   🔴 여기 값은 지어낸 것이 아니다. `realtake6` bag 의 `/mission_state` · `/siren` ·
+      `/alarm` 을 rosbag2 로 직접 읽어 얻은 **실제 사건과 시각**이다.
+      문구·태그·중복제거 규칙은 `ros.js` 가 실제로 쓰는 것과 똑같이 맞췄다 —
+      다르면 이 줄만 티가 난다.
+
+   🔴 `fireXY` 도 같이 심는다. `/alarm` 은 69초에 3번 발행되고 끝이라, 163초부터
+      붙은 관제는 **화재 위치를 영영 모른다.** 지도에 화재 표시가 없는 것은
+      버그가 아니라 늦게 붙었기 때문이고, 그 공백을 실제 좌표로 메운다.
+
+   ⚠ `--at` 값을 바꾸면 START_AT 도 같이 바꾼다.                              */
+const START_AT = 163.0;                      // run_console.sh --at 163 과 맞춘다
+const FIRE_XY = { x: 12.50, y: -0.10 };      // bag /alarm 실측 좌표
+
+/* [bag초, 태그, 문구, 값, 색] — 오래된 것부터 */
+const PRE_LOG = [
+  [68.5,  'STATE', 'PATROL → APPROACH',   '',                'state'],
+  [68.5,  'SIREN', '싸이렌 ON',            '',                'warn'],
+  [69.1,  'ALARM', '화재 감지',            '12.50  -0.10',    'alarm'],
+  [89.4,  'STATE', 'APPROACH → SCAN_AREA', '',               'state'],
+  [133.4, 'STATE', 'SCAN_AREA → GATHER',  '',                'state'],
+  [145.9, 'STATE', 'GATHER → GUIDE',      '',                'state'],
+];
+
+/* 상태 전이 시각 (체류시간·타임라인이 쓴다) */
+const PRE_STATES = [
+  [12.4,  'PATROL'], [68.5, 'APPROACH'], [89.4, 'SCAN_AREA'],
+  [133.4, 'GATHER'], [145.9, 'GUIDE'],
+];
+
+/** 촬영 시작 시점(= bag START_AT 초)에 관제가 갖고 있었을 상태를 만들어 준다. */
+export function seedRecord() {
+  const base = Date.now() - START_AT * 1000;   // bag 0초에 해당하는 벽시계 시각
+  const at = sec => base + sec * 1000;
+
+  const history = PRE_STATES.map(([sec, st]) => ({ state: st, at: at(sec) }));
+
+  /* log.js 의 pushLog 는 최신을 앞에 넣는다 — 같은 순서로 만든다 */
+  const logs = PRE_LOG.map(([sec, tag, msg, val, cls]) =>
+    ({ t: at(sec), tag, msg, val, cls })).reverse();
+
+  /* 상태별 체류시간 = 다음 전이까지의 실제 간격 */
+  const dwell = {};
+  for (let i = 0; i < PRE_STATES.length - 1; i++) {
+    dwell[PRE_STATES[i][1]] = (PRE_STATES[i + 1][0] - PRE_STATES[i][0]) * 1000;
+  }
+  const [lastSec, lastState] = PRE_STATES[PRE_STATES.length - 1];
+  seedDwell(dwell, lastState, at(lastSec));
+
+  update({
+    mission: lastState, missionSince: at(lastSec), history, logs,
+    missionT0: at(PRE_STATES[0][0]),
+    /* 🔴 ros.js 는 대응 경과를 **화재 감지 시점**부터 잰다. 같은 기준을 쓴다. */
+    phaseT0: at(69.1), phaseDist0: 0,
+    fireXY: FIRE_XY, siren: true,
+  });
+}

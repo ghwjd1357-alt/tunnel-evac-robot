@@ -22,6 +22,7 @@ let rttTimer = null;
 /* 라이다 점군을 map 으로 옮기려면 base_footprint→laser 오프셋이 필요하다.
    /tf_static 에서 읽고, 없으면 0 으로 둔다(수 cm 라 화면상 차이는 미미). */
 let tfBaseLaser = { x: 0, y: 0, yaw: 0 };
+let distRef = null;          // 이동거리 누적 기준점 (위 주석 참조)
 let tfMapOdom = null, tfOdomBase = null;
 
 /* ── 자세 이력 (시각 맞추기용) ──────────────────────────────────────
@@ -168,6 +169,7 @@ function wire() {
       if (last != null && baseStamp < last - TIME_JUMP_BACK_MS) {
         H.length = 0;
         pushLog('TIME', '시각이 되감김 — 누적값 초기화', '', 'warn');
+        distRef = null;                       // 기준점도 같이 지운다
         update({ trail: [], distance: 0, missionT0: null, history: [],
                  fireXY: null, victim: null, phaseT0: null, phaseDist0: 0 });
       }
@@ -177,16 +179,23 @@ function wire() {
         if (H.length > POSE_HISTORY_MAX) H.shift();
       }
     }
-    const prev = state.robot;
     let { distance, trail } = state;
-    if (prev) {
-      const d = Math.hypot(r.x - prev.x, r.y - prev.y);
-      if (d > 0.02) {                       // 노이즈 제거 후에만 누적
+    /* 🔴 2026-09-05 수정 — 누적 기준점은 '직전 자세'가 아니라 '마지막으로 누적한 자세'다.
+       구판은 직전 자세와 비교해 2cm 미만이면 **버렸다**. /tf 가 28Hz 로 오는데 로봇은
+       0.17 m/s 로 기므로 한 번에 6mm 씩 움직인다 — 문턱을 영영 못 넘어 실제로 4.42 m 를
+       달린 구간이 화면에 0.1 m 로 찍혔다(realtake6 163~190초 대조). 느릴수록 더 많이
+       버리는 구조라, 저속 주행이 전제인 이 로봇에서는 값이 항상 과소평가된다.
+       기준점을 옮기는 방식이면 잔떨림은 그대로 걸러지면서 실제 이동은 남는다. */
+    if (distRef) {
+      const d = Math.hypot(r.x - distRef.x, r.y - distRef.y);
+      if (d > 0.02) {                       // 잔떨림 제거 — 기준점에서 2cm 넘게 벗어날 때만
         distance += d;
+        distRef = r;
         trail = trail.concat([[r.x, r.y]]);
         if (trail.length > 4000) trail = trail.slice(-4000);
       }
     } else {
+      distRef = r;
       trail = [[r.x, r.y]];
     }
     quiet({ robot: r, distance, trail, fresh: { ...state.fresh, tf: Date.now() } });

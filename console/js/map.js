@@ -457,16 +457,54 @@ function marker(x, y, color, shape, label) {
 }
 
 /* ── 배선 ─────────────────────────────────────────────────────── */
+/* ── 지도 캐시 ────────────────────────────────────────────────────
+   `/map` 은 2초에 한 번 온다. 페이지를 새로 열면 첫 지도가 도착할 때까지
+   화면이 비어 있다 — 촬영 첫 컷에서 이 빈 시간이 그대로 찍혔다(09-04).
+
+   지도는 SLAM 이 끝나면 사실상 정적이므로 마지막 것을 저장해 두었다가 즉시
+   그린다. 진짜 지도가 오면 그때 덮어쓴다. 캐시가 없거나 깨졌으면 예전처럼
+   빈 화면으로 시작할 뿐, 아무것도 고장나지 않는다.
+
+   ⚠ localStorage 는 사설창·용량초과·차단설정에서 **읽기만 해도 던진다.**
+      그래서 전부 try 로 감싼다.                                            */
+const MAP_CACHE_KEY = 'console.map.v1';
+let fromCache = false;
+
+function saveMapCache() {
+  try {
+    localStorage.setItem(MAP_CACHE_KEY, JSON.stringify({
+      png: mapImage.toDataURL('image/png'), info: mapInfo, bounds: mapBounds,
+    }));
+  } catch { /* 캐시는 있으면 좋은 것일 뿐이다 */ }
+}
+
+function loadMapCache() {
+  try {
+    const raw = localStorage.getItem(MAP_CACHE_KEY);
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    const im = new Image();
+    im.onload = () => {
+      if (mapInfo && !fromCache) return;      // 진짜 지도가 먼저 왔으면 손대지 않는다
+      mapImage = im; mapInfo = c.info; mapBounds = c.bounds;
+      fromCache = true;
+      fitView(); draw();
+    };
+    im.src = c.png;
+  } catch { /* 손상된 캐시는 무시한다 */ }
+}
+
 export function setupMap() {
   readColors();
   canvas = document.getElementById('map-canvas');
   ctx = canvas.getContext('2d');
+  loadMapCache();
 
   /* /map 은 2초마다 온다. 정리 연산(침식·연결성분)이 무거우므로 3초에 한 번만 다시 만든다.
      지도는 천천히 자라므로 이 정도로 충분하다. */
   let lastGridAt = 0;
   window.addEventListener('map:grid', e => {
-    const first = !mapInfo;
+    const first = !mapInfo || fromCache;   // 캐시본은 첫 실물이 오면 즉시 대체한다
     /* 🔴 mapInfo(좌표계) 와 mapImage(그림) 는 **반드시 같이** 갱신한다.
        SLAM 이 지도를 넓히면 origin·크기가 바뀐다. 예전엔 좌표만 매번 갱신하고
        그림은 3초에 한 번만 다시 그려서, 배경은 3초 전 것인데 로봇·경로·라이다는
@@ -476,7 +514,9 @@ export function setupMap() {
     lastGridAt = Date.now();
     mapInfo = e.detail.info;
     mapImage = renderGrid(e.detail, MAP_PALETTE, true);   // true = 정리 + 경계 측정
+    fromCache = false;
     fitView();
+    saveMapCache();
   });
   window.addEventListener('map:costmap', e => {
     costInfo = e.detail.info;

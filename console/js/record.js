@@ -12,6 +12,12 @@ import { renderLog } from './log.js';
 const dwell = {};
 let lastState = null, lastT = null;
 
+/** 🎬 DEMO-0904 — 촬영 시작 전 구간의 체류시간을 미리 채운다 (js/demo.js) */
+export function seedDwell(pre, curState, curSince) {
+  Object.assign(dwell, pre);
+  lastState = curState; lastT = curSince;
+}
+
 export function tickDwell() {
   const s = state;
   if (s.mission !== lastState) {

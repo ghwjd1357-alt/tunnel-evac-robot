@@ -8,6 +8,7 @@ import { setupMap, draw as drawMap } from './map.js';
 import { setupMission } from './mission.js';
 import { setupVideo } from './video.js';
 import { setupCamFeed } from './camfeed.js';   // 🎬 DEMO-0904
+import { maybeStartTour } from './demo.js';    // 🎬 DEMO-0904
 import { setupDiag } from './diag.js';
 import { setupRecord } from './record.js';
 import { setupEmergency } from './emergency.js';
@@ -23,7 +24,8 @@ function setupMenu() {
   document.getElementById('alert-badge').onclick = () => {
     document.getElementById('alert-list').classList.toggle('show');
   };
-  showMenu('main');
+  // 🎬 DEMO-0904 — `?tour=3` 이면 스스로 넘어간다. 없으면 평소대로 관제부터.
+  if (!maybeStartTour(showMenu)) showMenu('main');
 }
 
 function showMenu(name) {
