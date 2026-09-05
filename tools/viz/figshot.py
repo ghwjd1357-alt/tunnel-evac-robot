@@ -26,8 +26,8 @@ WORK = os.environ.get('VIZ_WORK', os.path.join(BAGS, 'viz', '_work'))
 TAG  = os.environ.get('VIZ_TAG', 'realtake6')
 
 FT = '/usr/share/fonts/opentype/noto/NotoSansCJK-{}.ttc'
-def F(sz, bold=False):
-    return ImageFont.truetype(FT.format('Bold' if bold else 'Regular'), sz, index=1)
+def F(sz, w='Regular'):
+    return ImageFont.truetype(FT.format('Bold' if w in (True,'Bold') else 'Regular'), int(sz), index=1)
 
 # ---- 색 (밝은 인쇄용) ----
 C_PAPER = (255, 255, 255)
@@ -175,16 +175,26 @@ class Canvas:
                                   fill=C_PAPER, outline=color, width=3)
         self.dr.text((x + pad, y + pad // 2), text, font=font, fill=color)
 
-    def scalebar(self, metres, font, margin=26):
+    def scalebar(self, metres, font, margin=None):
+        """눈에 띄는 축척 막대. 흰 칩 위에 굵게 — 인쇄에서 줄어들어도 남는다."""
+        m = margin if margin is not None else self.W * 0.022
         px = metres * self.SC
-        x1 = self.W - margin; x0 = x1 - px
-        y = self.H - margin
-        self.dr.line([(x0, y), (x1, y)], fill=C_TXT, width=5)
-        for xx in (x0, x1):
-            self.dr.line([(xx, y - 10), (xx, y + 10)], fill=C_TXT, width=5)
         lab = f'{metres:g} m'
         tw = self.dr.textlength(lab, font=font)
-        self.dr.text(((x0 + x1) / 2 - tw / 2, y - font.size - 16), lab, font=font, fill=C_TXT)
+        bw = max(px, tw) + m * 1.2
+        bh = font.size + m * 1.5
+        bx1, by1 = self.W - m, self.H - m
+        bx0, by0 = bx1 - bw, by1 - bh
+        self.dr.rounded_rectangle([bx0, by0, bx1, by1], m * 0.35,
+                                  fill=C_PAPER, outline=C_RULE, width=max(int(self.W/700), 2))
+        lw = max(int(self.W / 260), 4)
+        y = by1 - m * 0.55
+        x0 = (bx0 + bx1) / 2 - px / 2; x1 = x0 + px
+        self.dr.line([(x0, y), (x1, y)], fill=C_TXT, width=lw)
+        tick = self.W / 150
+        for xx in (x0, x1):
+            self.dr.line([(xx, y - tick), (xx, y + tick)], fill=C_TXT, width=lw)
+        self.dr.text(((bx0 + bx1) / 2 - tw / 2, by0 + m * 0.35), lab, font=font, fill=C_TXT)
 
     def legend(self, items, font, margin=26):
         """items = [(색, '이름'), ...] 좌하단."""
@@ -224,7 +234,7 @@ def scene_map(D, a):
         x, y, ang = pose_at(D, MT0 + 306.49)
         c.robot(x, y, ang)
     if a.scalebar:
-        c.scalebar(a.scalebar, F(int(a.width / 62)))
+        c.scalebar(a.scalebar, F(int(a.width / 44), 'Bold'))
     if not a.no_legend and not a.no_trail:
         c.legend([(C_TRAIL, '실차 주행 궤적'), (C_ROB, '로봇')], F(int(a.width / 62)))
     c.frame()
@@ -256,11 +266,11 @@ def scene_plan(D, a):
     if not a.no_trail:
         c.trail(MT0, t, width=4)
     c.plan(t)
-    c.goal(tuple(arr[-1]), '목적지' if not a.no_labels else None, F(fs, True))
-    c.fire('화재 지점' if not a.no_labels else None, F(fs, True))
+    c.goal(tuple(arr[-1]), '목적지' if not a.no_labels else None, F(fs, 'Bold'))
+    c.fire('화재 지점' if not a.no_labels else None, F(fs, 'Bold'))
     c.robot(rx, ry, ra)
     if a.scalebar:
-        c.scalebar(a.scalebar, F(fs))
+        c.scalebar(a.scalebar, F(int(a.width / 44), 'Bold'))
     if not a.no_legend:
         c.legend([(C_PLAN, 'Nav2 계획 경로'), (C_TRAIL, '지나온 궤적'), (C_ROB, '로봇')], F(fs))
     c.frame()
@@ -279,7 +289,7 @@ def main():
     ap.add_argument('--pad', type=float, default=0.8, help='내용 바깥 여백 [m]')
     ap.add_argument('--win', type=float, nargs=4, metavar=('X0', 'X1', 'Y0', 'Y1'))
     ap.add_argument('--whole', action='store_true', help='map: 궤적이 아니라 지도 전체를 담는다')
-    ap.add_argument('--scalebar', type=float, default=2.0, help='축척 막대 [m] · 0 이면 끔')
+    ap.add_argument('--scalebar', type=float, default=5.0, help='축척 막대 [m] · 0 이면 끔')
     ap.add_argument('--no-trail', action='store_true')
     ap.add_argument('--no-legend', action='store_true')
     ap.add_argument('--no-labels', action='store_true')

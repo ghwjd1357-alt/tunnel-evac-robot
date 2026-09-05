@@ -88,142 +88,155 @@ def arrow(dr, pts, color, width, head=17, dashed=False):
                fill=color)
 
 
-def label(dr, x, y, text, font, color, anchor='mm', bg=C_BG, pad=5):
-    w = dr.textlength(text, font=font); h = font.size
-    if anchor == 'mm':
-        bx, by = x - w / 2, y - h / 2
-    elif anchor == 'lm':
-        bx, by = x, y - h / 2
+def label(dr, x, y, text, font, color, anchor='mm', bg=C_BG, pad=6):
+    """여러 줄(\n) 지원. 흰 칩을 깔아 선 위에 놓아도 읽힌다."""
+    lines = text.split('\n')
+    lh = font.size * 1.28
+    wmax = max(dr.textlength(t, font=font) for t in lines)
+    hh = lh * len(lines)
+    if anchor == 'lm':
+        bx = x
+    elif anchor == 'rm':
+        bx = x - wmax
     else:
-        bx, by = x - w, y - h / 2
+        bx = x - wmax / 2
+    by = y - hh / 2
     if bg:
-        dr.rectangle([bx - pad, by - pad * 0.4, bx + w + pad, by + h + pad * 0.6], fill=bg)
-    dr.text((bx, by), text, font=font, fill=color)
+        dr.rectangle([bx - pad, by - pad * 0.5, bx + wmax + pad, by + hh + pad * 0.5], fill=bg)
+    for i, t in enumerate(lines):
+        tw = dr.textlength(t, font=font)
+        if anchor == 'lm':
+            tx = bx
+        elif anchor == 'rm':
+            tx = bx + wmax - tw
+        else:
+            tx = bx + (wmax - tw) / 2
+        dr.text((tx, by + i * lh), t, font=font, fill=color)
 
 
 def build(width, ratio):
+    """🔴 배치 규칙 — 선이 서로 겹치지 않는다.
+
+    예외·회복 상태를 아래 칸에 **자기 출처 바로 밑**으로 놓아, 모든 전이가
+    짧은 세로선·대각선으로 끝나게 했다. 아래로 내려갔다 오는 것은
+    HOLD→SEARCH_BACK 하나뿐이고 그 아래에는 아무것도 없다.
+
+        윗줄  PATROL  APPROACH  SCAN_AREA  GATHER     GUIDE   ESCAPED
+        아랫줄 BLOCKED  FAULT    RESCUE   NO_VICTIM   HOLD   SEARCH_BACK
+    """
     W = int(width); H = int(round(W / ratio))
-    S = W / 2000.0                       # 기준 2000px 대비 배율
+    S = W / 2000.0
     im = Image.new('RGB', (W, H), C_BG)
     dr = ImageDraw.Draw(im)
 
-    f_name = F(44 * S, 'Bold')
-    f_ko   = F(25 * S)
+    f_ko   = F(24 * S)
     f_edge = F(23 * S)
-    f_band = F(27 * S, 'Bold')
     f_note = F(22 * S)
-    f_en   = F(34 * S, 'Bold')
-    f_ek   = F(21 * S)
+    f_leg  = F(23 * S)
 
-    M   = 46 * S
-    GAP = 26 * S
+    M   = 44 * S
+    GAP = 24 * S
     BW  = (W - 2 * M - 5 * GAP) / 6
-    BH  = 158 * S
+    BH  = 190 * S
     R   = 15 * S
     LW  = max(int(3.4 * S), 2)
-    LWD = max(int(2.4 * S), 1)
 
     def bx(i): return M + i * (BW + GAP)
     def cx(i): return bx(i) + BW / 2
 
-    def draw_box(x, y, w, h, name, ko, fill, line, fn=None, fk=None):
-        fn = fn or f_name; fk = fk or f_ko
-        rounded(dr, [x, y, x + w, y + h], R, fill, line, LW)
-        tw = dr.textlength(name, font=fn)
-        dr.text((x + w / 2 - tw / 2, y + h * 0.20), name, font=fn, fill=C_TXT)
-        kw = dr.textlength(ko, font=fk)
-        dr.text((x + w / 2 - kw / 2, y + h * 0.58), ko, font=fk, fill=C_SUB)
+    def fit(text, base, w):
+        """칸 안에 들어갈 때까지 글자를 줄인다."""
+        for sz in range(int(base), int(base * 0.6), -1):
+            f = F(sz, 'Bold')
+            if dr.textlength(text, font=f) <= w:
+                return f
+        return F(int(base * 0.6), 'Bold')
 
-    # ── 1행 : 정상 흐름 ──────────────────────────────────────────
-    Y1 = 130 * S
-    Y1B = Y1 + BH
+    def draw_box(i, y, name, ko, fill, line, w=None):
+        x = bx(i); w = w or BW
+        rounded(dr, [x, y, x + w, y + BH], R, fill, line, LW)
+        fn = fit(name, 40 * S, w - 22 * S)
+        dr.text((x + w / 2 - dr.textlength(name, font=fn) / 2, y + BH * 0.22),
+                name, font=fn, fill=C_TXT)
+        fk = f_ko
+        while dr.textlength(ko, font=fk) > w - 16 * S and fk.size > 15 * S:
+            fk = F(fk.size - 1)
+        dr.text((x + w / 2 - dr.textlength(ko, font=fk) / 2, y + BH * 0.60),
+                ko, font=fk, fill=C_SUB)
+
+    Y1 = 150 * S; Y1B = Y1 + BH
+    Y2 = 540 * S; Y2B = Y2 + BH
+
+    # ── 윗줄 : 정상 진행 ────────────────────────────────────────
     for i, (n, ko) in enumerate(MAIN):
-        last = (i == len(MAIN) - 1)
-        draw_box(bx(i), Y1, BW, BH, n, ko,
-                 C_END_F if last else C_MAIN_F, C_END_L if last else C_MAIN_L)
+        last = (i == 5)
+        draw_box(i, Y1, n, ko, C_END_F if last else C_MAIN_F,
+                 C_END_L if last else C_MAIN_L)
         if i:
-            arrow(dr, [(bx(i) - GAP + 2 * S, Y1 + BH / 2), (bx(i) - 5 * S, Y1 + BH / 2)],
-                  C_EDGE, LW, 16 * S)
+            arrow(dr, [(bx(i) - GAP + 1 * S, Y1 + BH / 2), (bx(i) - 4 * S, Y1 + BH / 2)],
+                  C_EDGE, LW, 15 * S)
     for i, txt in enumerate(['화재 알람', '집결지 도착', '탐색 완료',
                              '집결 시간 경과', '탈출 지점 도착']):
         label(dr, (cx(i) + cx(i + 1)) / 2, Y1 - 26 * S, txt, f_edge, C_SUB)
 
-    # ── 2행 : 유도 중 회복 루프 ──────────────────────────────────
-    Y2 = 530 * S
-    Y2B = Y2 + BH
-    gi = 4                                   # GUIDE
-    hold_x = bx(gi)                          # GUIDE 바로 아래
-    sbw    = BW * 1.5
-    sb_x   = bx(2)
-    draw_box(hold_x, Y2, BW, BH, LOOP[0][0], LOOP[0][1], C_LOOP_F, C_LOOP_L)
-    draw_box(sb_x, Y2, sbw, BH, LOOP[1][0], LOOP[1][1], C_LOOP_F, C_LOOP_L,
-             fn=F(40 * S, 'Bold'))
+    # ── 아랫줄 : 예외 4 + 회복 2 (각자 출처 바로 밑) ──────────────
+    draw_box(0, Y2, *EXC[3], C_EXC_F, C_EXC_L)      # BLOCKED  ← PATROL
+    draw_box(1, Y2, *EXC[2], C_EXC_F, C_EXC_L)      # FAULT    (출처 여럿)
+    draw_box(2, Y2, *EXC[0], C_EXC_F, C_EXC_L)      # RESCUE   ← SCAN_AREA
+    draw_box(3, Y2, *EXC[1], C_EXC_F, C_EXC_L)      # NO_VICTIM← SCAN_AREA
+    draw_box(4, Y2, *LOOP[0], C_LOOP_F, C_LOOP_L)   # HOLD     ← GUIDE
+    draw_box(5, Y2, *LOOP[1], C_LOOP_F, C_LOOP_L)   # SEARCH_BACK
 
-    gc = cx(gi)
-    # GUIDE ↓ HOLD (놓침)
-    xd = gc + 58 * S
-    arrow(dr, [(xd, Y1B + 3 * S), (xd, Y2 - 7 * S)], C_LOOP_L, LW, 16 * S)
-    label(dr, xd + 14 * S, (Y1B + Y2) / 2, '3초 연속 미확인', f_edge, C_LOOP_L, 'lm')
-    # HOLD ↑ GUIDE (재발견)
-    xu = gc - 58 * S
-    arrow(dr, [(xu, Y2 - 3 * S), (xu, Y1B + 7 * S)], C_END_L, LW, 16 * S)
-    label(dr, xu - 14 * S, (Y1B + Y2) / 2, '재발견', f_edge, C_END_L, 'rm')
-    # HOLD → SEARCH_BACK
-    arrow(dr, [(hold_x - 4 * S, Y2 + BH / 2), (sb_x + sbw + 7 * S, Y2 + BH / 2)],
-          C_LOOP_L, LW, 16 * S)
-    label(dr, (hold_x + sb_x + sbw) / 2, Y2 + BH / 2 - 30 * S,
-          '4.5초 재확인 실패', f_edge, C_LOOP_L)
-    # SEARCH_BACK ↑→ GUIDE (재발견)
-    lane = Y2 - 92 * S
-    xr = gc - 132 * S
-    arrow(dr, [(sb_x + sbw / 2, Y2 - 4 * S), (sb_x + sbw / 2, lane),
-               (xr, lane), (xr, Y1B + 7 * S)], C_END_L, LW, 16 * S)
-    label(dr, (sb_x + sbw / 2 + xr) / 2, lane, '재발견 → 유도 복귀', f_edge, C_END_L)
+    def vline(x, color, lab=None, side='r', font=None):
+        arrow(dr, [(x, Y1B + 3 * S), (x, Y2 - 7 * S)], color, LW, 15 * S)
+        if lab:
+            label(dr, x + (14 * S if side == 'r' else -14 * S), (Y1B + Y2) / 2,
+                  lab, font or f_edge, color, 'lm' if side == 'r' else 'rm')
 
-    # ── 3행 : 예외 위임 ──────────────────────────────────────────
-    BY0 = 812 * S
-    EY  = BY0 + 76 * S
-    EBH = 148 * S
-    BY1 = EY + EBH + 26 * S
-    rounded(dr, [M - 18 * S, BY0, W - M + 18 * S, BY1], R, C_BAND, C_BANDL, LW)
-    dr.text((M + 2 * S, BY0 + 20 * S),
-            '예외 — 자동 진행을 멈추고 사람에게 넘긴다', font=f_band, fill=C_EXC_L)
+    # PATROL → BLOCKED
+    vline(cx(0), C_EXC_L, '안전한 집결지를\n못 만들면')
+    # SCAN_AREA → RESCUE (세로) · → NO_VICTIM (대각)
+    vline(bx(2) + BW * 0.34, C_EXC_L, '쓰러짐', 'l')
+    arrow(dr, [(bx(2) + BW * 0.80, Y1B + 3 * S), (bx(3) + BW * 0.55, Y2 - 7 * S)],
+          C_EXC_L, LW, 15 * S)
+    label(dr, (bx(2) + BW * 0.80 + bx(3) + BW * 0.55) / 2 + 30 * S,
+          (Y1B + Y2) / 2, '아무도 없음', f_edge, C_EXC_L, 'lm')
+    # GUIDE ↓ HOLD · HOLD ↑ GUIDE
+    xd = bx(4) + BW * 0.28
+    arrow(dr, [(xd, Y1B + 3 * S), (xd, Y2 - 7 * S)], C_LOOP_L, LW, 15 * S)
+    label(dr, xd - 12 * S, (Y1B + Y2) / 2, '3초 연속\n미확인', f_edge, C_LOOP_L, 'rm')
+    xu = bx(4) + BW * 0.58
+    arrow(dr, [(xu, Y2 - 3 * S), (xu, Y1B + 7 * S)], C_END_L, LW, 15 * S)
+    label(dr, xu + 12 * S, (Y1B + Y2) / 2, '재발견', f_edge, C_END_L, 'lm')
+    # SEARCH_BACK ↗ GUIDE (대각 · 위 두 세로선의 오른쪽만 지난다)
+    arrow(dr, [(bx(5) + BW * 0.14, Y2 - 3 * S), (bx(4) + BW * 0.90, Y1B + 7 * S)],
+          C_END_L, LW, 15 * S)
+    label(dr, bx(5) + BW * 0.22, (Y1B + Y2) / 2 - 34 * S,
+          '재발견', f_edge, C_END_L, 'lm')
+    # HOLD → SEARCH_BACK (아래로 돌아간다 — 그 밑에는 아무것도 없다)
+    lane = Y2B + 62 * S
+    arrow(dr, [(cx(4), Y2B + 3 * S), (cx(4), lane), (cx(5), lane), (cx(5), Y2B + 7 * S)],
+          C_LOOP_L, LW, 15 * S)
+    label(dr, (cx(4) + cx(5)) / 2, lane, '4.5초 재확인 실패', f_edge, C_LOOP_L)
+    # FAULT 는 특정 상태에서만 오지 않는다
+    label(dr, cx(1), (Y1B + Y2) / 2, '주행 goal 을 내는\n어느 상태에서든', f_edge, C_EXC_L)
 
-    ebw = (W - 2 * M - 3 * (22 * S)) / 4
-    exc_cx = []
-    for i, (n, ko) in enumerate(EXC):
-        x = M + i * (ebw + 22 * S)
-        exc_cx.append(x + ebw / 2)
-        rounded(dr, [x, EY, x + ebw, EY + EBH], R * 0.85, C_EXC_F, C_EXC_L, LW)
-        tw = dr.textlength(n, font=f_en)
-        dr.text((x + ebw / 2 - tw / 2, EY + 26 * S), n, font=f_en, fill=C_TXT)
-        kw = dr.textlength(ko, font=f_ek)
-        dr.text((x + ebw / 2 - kw / 2, EY + 82 * S), ko, font=f_ek, fill=C_SUB)
+    # ── 범례 ────────────────────────────────────────────────────
+    LY0 = 880 * S; LY1 = LY0 + 104 * S
+    rounded(dr, [M - 14 * S, LY0, W - M + 14 * S, LY1], R, C_BAND, C_BANDL, LW)
+    items = [(C_MAIN_F, C_MAIN_L, '정상 진행 6'),
+             (C_LOOP_F, C_LOOP_L, '유도 중 회복 2'),
+             (C_EXC_F,  C_EXC_L,  '예외 — 멈추고 사람에게 넘긴다 4')]
+    x = M + 18 * S
+    for fill, line, name in items:
+        cw = 46 * S
+        rounded(dr, [x, LY0 + 34 * S, x + cw, LY0 + 70 * S], 7 * S, fill, line, LW)
+        dr.text((x + cw + 14 * S, LY0 + 38 * S), name, font=f_leg, fill=C_TXT)
+        x += cw + 26 * S + dr.textlength(name, font=f_leg) + 58 * S
 
-    # 점선 : 어디서 갈라지는가 (차선을 나눠 겹치지 않게)
-    #  RESCUE·NO_VICTIM ← SCAN_AREA(2)  ·  BLOCKED ← 화재 알람 처리  ·  FAULT ← 주행 goal 전반
-    routes = [(cx(2), exc_cx[0], 700 * S),          # SCAN_AREA → RESCUE
-              (cx(2), exc_cx[1], 748 * S)]          # SCAN_AREA → NO_VICTIM
-    for sx, dx_, ly in routes:
-        arrow(dr, [(sx, Y1B + 3 * S), (sx, ly), (dx_, ly), (dx_, EY - 7 * S)],
-              C_EXC_L, LWD, 14 * S, dashed=True)
-    # BLOCKED ← 화재 알람 처리 (on_alarm · PATROL 중 수신)
-    lb = 786 * S
-    arrow(dr, [(cx(0), Y1B + 3 * S), (cx(0), lb), (exc_cx[3], lb),
-               (exc_cx[3], EY - 7 * S)], C_EXC_L, LWD, 14 * S, dashed=True)
-    label(dr, (cx(0) + exc_cx[3]) / 2, lb, '화재 알람 · 안전한 집결지를 못 만들면',
-          f_ek, C_EXC_L, bg=C_BG)
-    # FAULT 는 특정 상태에서만 오지 않는다 — 짧은 꼬리 + 말로 적는다
-    fy = BY0 - 40 * S
-    arrow(dr, [(exc_cx[2], fy), (exc_cx[2], EY - 7 * S)], C_EXC_L, LWD, 14 * S, dashed=True)
-    label(dr, exc_cx[2], fy - 16 * S, '주행 goal 을 내는 어느 상태에서든',
-          f_ek, C_EXC_L, bg=C_BG)
-    label(dr, (cx(2) + exc_cx[0]) / 2, 700 * S - 20 * S, '사람 상태 판정', f_ek, C_EXC_L, bg=C_BG)
-
-    # ── 주석 ────────────────────────────────────────────────────
-    dr.text((M, H - 46 * S),
-            '정상 흐름 8 + 예외 위임 4 = 총 12개 상태   ·   '
-            '실차 2026-08-23 : 8종 상태를 9번 거치며 8회 전환, 306.5초 완주',
+    dr.text((M, H - 52 * S),
+            '총 12개 상태  ·  실차 2026-08-23 : 8종 상태를 9번 거치며 8회 전환, '
+            '306.5초에 전 구간 완주',
             font=f_note, fill=C_SUB)
     return im
 
