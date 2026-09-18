@@ -31,34 +31,44 @@ const CLIPS = ['media/robot_view.webm', 'media/robot_view.mp4'];
    받아지면 살아 있는 것으로 보고 <img> 스트림으로 바꾼다. 안 받아지면(노트북 단독·bag 재생)
    기존 데모 클립 → CAMERA 자리표시 순서 그대로다. 젯슨 기동 = run_display.sh 가 같이 띄운다. */
 const LIVE_HOST = window.location.hostname || 'localhost';
-const LIVE_TOPIC = '/camera/color/image_raw';
 /* 🔵 화질은 원본 유지(사용자 결정 09-18). 핫스팟 와이파이에선 ≈5 Mbps 라 끊길 수 있다 —
    근본 대책은 노트북↔젯슨 유선/전용 공유기(시연장). */
-const LIVE_STREAM = `http://${LIVE_HOST}:8080/stream?topic=${LIVE_TOPIC}&type=mjpeg&quality=60`;
-const LIVE_PROBE  = `http://${LIVE_HOST}:8080/snapshot?topic=${LIVE_TOPIC}`;
+const RAW_TOPIC   = '/camera/color/image_raw';   // 원본 — 로봇 몸통 카메라가 180° 뒤집혀 있어 CSS 로 돌린다
+const YOLO_TOPIC  = '/camera/debug_image';       // YOLO 결합 화면 — 노드가 이미 돌려 그린다 (회전 금지)
+const stream  = t => `http://${LIVE_HOST}:8080/stream?topic=${t}&type=mjpeg&quality=60`;
+const probeOf = t => `http://${LIVE_HOST}:8080/snapshot?topic=${t}&t=${Date.now()}`;
+
+/* 어느 칸이 어느 토픽을 무나 — 09-18 사용자 요청: "영상" 메뉴 큰 화면은 YOLO 결합 화면.
+   YOLO 노드가 없으면 원본으로, 원본도 없으면 데모 클립 → 자리표시 순으로 물러난다. */
+const WANT_YOLO = new Set(['cam-rgb-view']);
 
 export function setupCamFeed() {
-  const probe = new Image();
-  probe.onload = () => {
-    for (const v of document.querySelectorAll('video.camfeed')) useLive(v);
-  };
-  probe.onerror = () => {
-    for (const v of document.querySelectorAll('video.camfeed')) tryClip(v, 0);
-  };
-  probe.src = LIVE_PROBE + '&t=' + Date.now();
+  for (const v of document.querySelectorAll('video.camfeed')) {
+    const wantYolo = WANT_YOLO.has(v.parentElement?.id);
+    const order = wantYolo ? [YOLO_TOPIC, RAW_TOPIC] : [RAW_TOPIC];
+    tryLive(v, order, 0);
+  }
 }
 
-function useLive(v) {
+function tryLive(v, topics, i) {
+  if (i >= topics.length) { tryClip(v, 0); return; }
+  const probe = new Image();
+  probe.onload  = () => useLive(v, topics[i]);
+  probe.onerror = () => tryLive(v, topics, i + 1);
+  probe.src = probeOf(topics[i]);
+}
+
+function useLive(v, topic) {
   const box = v.parentElement;
   const img = document.createElement('img');
-  img.className = 'camfeed';
-  img.alt = '카메라 실시간';
-  img.src = LIVE_STREAM;
+  img.className = 'camfeed' + (topic === RAW_TOPIC ? ' raw' : ' yolo');
+  img.alt = topic === YOLO_TOPIC ? 'YOLO 결합 화면' : '카메라 실시간';
+  img.src = stream(topic);
   img.onerror = () => { img.remove(); box?.classList.remove('live'); tryClip(v, 0); };
   v.replaceWith(img);
   box?.classList.add('live');
   const note = box?.querySelector('.camnote');
-  if (note) note.textContent = 'LIVE';
+  if (note) note.textContent = topic === YOLO_TOPIC ? 'LIVE · YOLO' : 'LIVE';
 }
 
 function tryClip(v, i) {
