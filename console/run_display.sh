@@ -91,6 +91,8 @@ if [ -z "$BROWSER" ] && command -v firefox >/dev/null 2>&1; then
 user_pref("media.autoplay.default", 0);                 // 0 = 소리 있는 자동재생 허용
 user_pref("media.autoplay.blocking_policy", 0);
 user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.startup.couldRestoreSession.count", -1);   // "Open previous tabs?" 띠 금지 (09-18 실측)
+user_pref("browser.startup.page", 0);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.startup.homepage_override.mstone", "ignore");
 user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
@@ -99,6 +101,8 @@ user_pref("browser.tabs.warnOnClose", false);
 user_pref("dom.disable_beforeunload", true);
 user_pref("full-screen-api.warning.timeout", 0);
 EOF_USERJS
+  # 강제 종료 뒤 남는 세션 파일이 "이전 탭 복구?" 띠를 만든다 — 시작 전에 지운다
+  rm -rf "$FF_PROFILE/sessionstore-backups" "$FF_PROFILE/sessionstore.jsonlz4" 2>/dev/null || true
   BROWSER_ARGS=(--kiosk --profile "$FF_PROFILE" --no-remote "$URL")
 fi
 if [ -z "$NO_BROWSER" ] && [ -z "$BROWSER" ]; then
@@ -134,6 +138,11 @@ if command -v xinput >/dev/null 2>&1; then
   xinput list --name-only 2>/dev/null | grep -i touch | while read -r dev; do
     xinput disable "$dev" 2>/dev/null && echo "▶ 터치 입력 끔: $dev"
   done
+fi
+
+# ── 바탕화면 아이콘 끄기 — GNOME 확장(ding)이 아이콘을 kiosk 창 위에 그린다 (09-18 실측) ──
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions disable ding@rastersoft.com 2>/dev/null && echo "▶ 바탕화면 아이콘 끔" || true
 fi
 
 # ── 화면 꺼짐 방지 — 디스플레이는 몇 시간이고 켜 둔다 ──────────────────
