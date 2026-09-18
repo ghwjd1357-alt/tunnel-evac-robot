@@ -13,6 +13,7 @@
 
 import { state, onChange } from './state.js';
 import { sendDisplay } from './ros.js';
+import { PERSON_KO } from './i18n.js';
 import { hms } from './i18n.js';
 import { demoPerception } from './demo.js';   // 🎬 DEMO-0904
 
@@ -73,6 +74,12 @@ function render(s) {
   set('v-alarm', s.fireXY ? `${s.fireXY.x.toFixed(2)}  ${s.fireXY.y.toFixed(2)}` : '없음',
                  s.fireXY ? 'alarm' : 'off');
   set('v-adapter', d.adapter || '입력 없음', d.adapter ? 'ok' : 'off');
+  /* /person_status — 어댑터의 자세 판정 (ok/fallen/unknown/none/stale). 09-18 실물 어댑터
+     시험에서 화면에 이 값이 없어 ssh 로 봐야 했다. 'none' 은 PERSON_KO 에 없어 여기서 보탠다. */
+  const ps = s.personStatus;
+  const psKo = ps == null ? '—' : (ps === 'none' ? '사람 없음' : (PERSON_KO[ps] || ps));
+  set('v-pstatus', `${psKo}${ps ? `  (${ps})` : ''}`,
+      ps === 'fallen' ? 'alarm' : ps === 'ok' ? 'ok' : ps == null ? 'off' : 'warn');
 }
 
 const txt = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
