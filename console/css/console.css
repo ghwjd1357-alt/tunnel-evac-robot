@@ -366,6 +366,10 @@ body.display #map-coord { display: none; }
 }
 .camview { position: relative; }
 .camview img { width: 100%; height: 100%; object-fit: contain; }
+/* 🔴 카메라가 로봇에 180° 뒤집혀 장착된다(구조상 정상). 역할 B 인지 노드는 자체 보정하고
+   원본 토픽(/camera/color/image_raw)은 뒤집힌 채 나오므로 화면에서만 돌린다 (09-18).
+   드라이버에서 돌리면 인지 노드와 이중 반전이 된다 — 실측으로 확인한 함정. */
+.camview img.camfeed { transform: rotate(180deg); }
 /* 🎬 DEMO-0904 — 로봇에 붙여 찍은 실사 클립을 카메라 자리에 재생한다.
    파일이 없으면 video 를 숨기고 CAMERA 글자만 남는다 (js/camfeed.js). */
 .camfeed { display: none; width: 100%; height: 100%; object-fit: cover; }
