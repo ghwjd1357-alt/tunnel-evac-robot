@@ -65,6 +65,8 @@ fi
 BROWSER=""; BROWSER_ARGS=()
 for b in chromium chromium-browser google-chrome; do
   if command -v "$b" >/dev/null 2>&1; then
+    # 🔴 snap 크로미움은 젯슨에서 실행 자체가 안 된다 (09-18) — 있어도 건너뛴다
+    case "$(command -v "$b")" in /snap/*) continue ;; esac
     BROWSER="$b"
     # --incognito : 이전 세션 복원 팝업("비정상 종료") 차단 — 전원을 그냥 끄는 로봇이라 매번 뜬다
     # --kiosk     : 전체화면 + 조작 UI 없음
@@ -77,9 +79,27 @@ for b in chromium chromium-browser google-chrome; do
   fi
 done
 if [ -z "$BROWSER" ] && command -v firefox >/dev/null 2>&1; then
+  # 🔵 젯슨(JetPack 6)은 snap 크로미움이 안 뜬다(SELinux 검사에서 죽음 · 09-18 실측).
+  #    Mozilla 공식 deb 파이어폭스를 쓴다. 인자 대신 **전용 프로필의 user.js** 로 설정한다 —
+  #    자동재생 허용(안내 음성·싸이렌) · 비정상종료 복구 팝업 끔 · 첫 실행 안내 끔 · 업데이트 끔.
+  #    sudo 없이 되고, 사람이 쓰는 파이어폭스 프로필을 건드리지 않는다.
   BROWSER=firefox
-  BROWSER_ARGS=(--kiosk --private-window "$URL")
-  echo "⚠ firefox 는 자동재생을 인자로 못 푼다 — 소리가 안 나면 about:config media.autoplay.default=0"
+  FF_PROFILE="$HOME/.tunnel-display-firefox"
+  mkdir -p "$FF_PROFILE"
+  cat > "$FF_PROFILE/user.js" <<'EOF_USERJS'
+// 로봇 디스플레이 전용 — run_display.sh 가 매번 다시 쓴다
+user_pref("media.autoplay.default", 0);                 // 0 = 소리 있는 자동재생 허용
+user_pref("media.autoplay.blocking_policy", 0);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("app.update.auto", false);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("dom.disable_beforeunload", true);
+user_pref("full-screen-api.warning.timeout", 0);
+EOF_USERJS
+  BROWSER_ARGS=(--kiosk --profile "$FF_PROFILE" --no-remote "$URL")
 fi
 if [ -z "$NO_BROWSER" ] && [ -z "$BROWSER" ]; then
   echo "❌ 브라우저 없음. 먼저:  sudo apt install chromium-browser   (또는 firefox)"
