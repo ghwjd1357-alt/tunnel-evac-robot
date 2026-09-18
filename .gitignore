@@ -28,3 +28,8 @@ firmware/*.elf
 # 🔴 apply_measurements.py 가 만드는 백업. 진짜 설정 옆에 낡은 설정이 놓이면
 #   새벽에 그걸 읽는다. 원본은 git 이력에 있다.
 *.yaml.bak
+
+# 🎬 DEMO-0904 시연용 실사 클립 — 용량 때문에 저장소 밖 (console/media/README.md)
+console/media/*.mp4
+console/media/*.webm
+console/media/*.mov

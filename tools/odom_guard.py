@@ -83,7 +83,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--in-topic', default='/odom')
     ap.add_argument('--out-topic', default='/odom_guarded')
-    ap.add_argument('--report-sec', type=float, default=1.0)
+    # 🔴 08-23 실차 — 1.0 → 30.0. 이 로그가 터미널 A(런치 화면)를 덮어
+    #   bt_navigator 의 실제 오류를 가렸다(시간당 3,600줄). 진단에 15분을 태웠다.
+    #   🔵 "0 건이어도 찍는다 = 가드가 살아 있다는 관측값" 은 30초 주기로도 그대로다.
+    #   버림이 생기면 그건 아래 `warn` 으로 **즉시** 나간다 — 그 경로는 안 건드렸다.
+    ap.add_argument('--report-sec', type=float, default=30.0)
     args = ap.parse_args(argv)
 
     import rclpy                                            # noqa: PLC0415

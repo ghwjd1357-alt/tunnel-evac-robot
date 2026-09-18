@@ -1,0 +1,180 @@
+--- /home/hanhan/percep_ws/src/vision_pipeline/vision_pipeline/perception_node.py	2026-08-24 00:03:00.494349000 +0900
++++ /tmp/perftest/pn_FINAL.py	2026-09-04 16:54:44.696603992 +0900
+@@ -64,6 +64,46 @@
+     """추론 실패. 이 프레임은 발행하지 않는다 (N1)."""
+ 
+ 
++
++
++class CentroidTracker:
++    """중심점 그리디 매칭 + 유실 버퍼. ByteTrack 대체 (09-04 검증)."""
++    def __init__(self, max_dist_frac=0.25, lost_frames=30):
++        self.tracks = {}; self.next_id = 1
++        self.max_dist_frac = max_dist_frac; self.lost_frames = lost_frames
++
++    def update(self, boxes, img_w, img_h):
++        import math
++        gate = self.max_dist_frac * math.hypot(img_w, img_h)
++        cents = [((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) for b in boxes]
++        pairs = []
++        for di, (cx, cy) in enumerate(cents):
++            for tid, t in self.tracks.items():
++                d = math.hypot(cx - t['cx'], cy - t['cy'])
++                if d <= gate:
++                    pairs.append((d, di, tid))
++        pairs.sort()
++        assigned, used = {}, set()
++        for d, di, tid in pairs:
++            if di in assigned or tid in used:
++                continue
++            assigned[di] = tid; used.add(tid)
++        out = []
++        for di, (cx, cy) in enumerate(cents):
++            tid = assigned.get(di)
++            if tid is None:
++                tid = self.next_id; self.next_id += 1
++            b = boxes[di]
++            self.tracks[tid] = {'cx': cx, 'cy': cy, 'miss': 0}
++            out.append(tid)
++        for tid in list(self.tracks):
++            if tid not in out:
++                self.tracks[tid]['miss'] += 1
++                if self.tracks[tid]['miss'] > self.lost_frames:
++                    del self.tracks[tid]
++        return out
++
++
+ class PerceptionNode(Node):
+ 
+     def __init__(self):
+@@ -114,11 +154,16 @@
+         # -- 모델 (N1-b: 한 노드 안에 둘 다) --------------------------------
+         fire_path = str(g('fire_model_path'))
+         self.get_logger().info(f'Loading RF-DETR from {fire_path} ...')
+-        from rfdetr import RFDETRSmall
+-        self.fire_model = RFDETRSmall(pretrain_weights=fire_path,
+-                                      num_classes=int(g('fire_num_classes')))
++        import os as _os
++        from polygraphy.backend.trt import EngineFromBytes, TrtRunner
++        from polygraphy.backend.common import BytesFromPath
++        _eng = _os.environ.get('FIRE_ENGINE',
++                               '/home/hanhan/fire_trt_export/rfdetr-small.engine')
++        self.get_logger().info('Loading TRT engine %s ...' % _eng)
++        self._trt = TrtRunner(EngineFromBytes(BytesFromPath(_eng)))
++        self._trt.activate(); self._trt_res = 512
++        self.fire_model = None
+         self.get_logger().info('Optimizing fire model for FP16 inference...')
+-        self.fire_model.optimize_for_inference(compile=False, dtype=torch.float16)
+ 
+         pose_path = str(g('pose_model_path'))
+         self.get_logger().info(f'Loading pose model from {pose_path} ...')
+@@ -152,6 +197,8 @@
+             slop=float(g('sync_slop')))
+         self.ts.registerCallback(self.image_callback)
+ 
++        self.declare_parameter('rotate_180', True)
++        self._rot180 = bool(self.get_parameter('rotate_180').value)
+         self.frames_published = 0
+         self.frames_dropped = 0
+         self.get_logger().info(
+@@ -208,8 +255,9 @@
+             depth_np = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(
+                 depth_msg.height, depth_msg.width)
+             # 카메라가 물리적으로 180도 뒤집혀 장착된 상태 보정 (08-22)
+-            color_np = cv2.rotate(color_np, cv2.ROTATE_180)
+-            depth_np = cv2.rotate(depth_np, cv2.ROTATE_180)
++            if self._rot180:
++                color_np = cv2.rotate(color_np, cv2.ROTATE_180)
++                depth_np = cv2.rotate(depth_np, cv2.ROTATE_180)
+         except Exception as e:                                  # noqa: BLE001
+             self._fail_frame('decode', str(e))
+             return
+@@ -375,14 +423,15 @@
+                 y1 = det.bbox.y_offset
+                 x2 = x1 + det.bbox.width
+                 y2 = y1 + det.bbox.height
++                # [0904] rgb8 로 발행하므로 색 상수도 RGB 순서여야 한다
+                 if det.class_name == 'fire':
+-                    color = (0, 0, 255)
++                    color = (255, 0, 0)          # 빨강
+                 elif det.class_name == 'person_fallen':
+-                    color = (0, 165, 255)
++                    color = (255, 165, 0)        # 주황
+                 elif det.class_name == 'person_ok':
+-                    color = (0, 255, 0)
++                    color = (0, 255, 0)          # 초록
+                 else:
+-                    color = (0, 255, 255)
++                    color = (255, 255, 0)        # 노랑 (person_unknown)
+                 cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
+                 label = '%s %.2f %.1fm' % (
+                     det.class_name, det.confidence, det.position.z)
+@@ -390,8 +439,7 @@
+                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+             _d2 = time.time()
+             # 시연 화면 확대 (원본 640x480은 뷰어에서 작게 보임 — 08-28, 3배)
+-            debug_img = cv2.resize(debug_img, (int(debug_img.shape[1] * 1.5), int(debug_img.shape[0] * 1.5)),
+-                                    interpolation=cv2.INTER_LINEAR)
++            # [개선] 1.5배 확대 제거
+             debug_msg = Image()
+             debug_msg.height = debug_img.shape[0]
+             debug_msg.width = debug_img.shape[1]
+@@ -434,31 +482,44 @@
+     # 추론
+     # ======================================================================
+     def _infer_fire(self, frame) -> List[Tuple[str, float, Tuple]]:
+-        """반환 [(class_name, conf, (x1,y1,x2,y2)), ...] — 정규화 전 원본 라벨."""
+-        d = self.fire_model.predict(frame, threshold=self.fire_conf)
++        """TensorRT 엔진 추론. 🔴 후처리 정확도 미검증 — 속도 측정용."""
++        import numpy as _np
++        H, W = frame.shape[:2]; R = self._trt_res
++        img = cv2.resize(frame, (R, R), interpolation=cv2.INTER_LINEAR)
++        if not hasattr(self, '_pre_s'):
++            _m = _np.array([0.485, 0.456, 0.406], _np.float32).reshape(3, 1, 1)
++            _sd = _np.array([0.229, 0.224, 0.225], _np.float32).reshape(3, 1, 1)
++            self._pre_s = (1.0 / 255.0) / _sd; self._pre_b = -_m / _sd
++        x = img.transpose(2, 0, 1).astype(_np.float32)
++        x = _np.ascontiguousarray((x * self._pre_s + self._pre_b)[None])
++        o = self._trt.infer({'input': x})
++        dets = o['dets'][0]; logits = o['labels'][0]
++        prob = 1.0 / (1.0 + _np.exp(-logits))
++        cls = prob.argmax(1); conf = prob.max(1)
+         out = []
+-        if d.is_empty():
+-            return out
+-        for i in range(len(d.xyxy)):
+-            cid = int(d.class_id[i])
+-            name = RFDETR_CLASS_NAMES.get(cid)
+-            if name is None:                    # 0=car 등 (N4)
++        for k in _np.nonzero(conf >= self.fire_conf)[0]:
++            name = RFDETR_CLASS_NAMES.get(int(cls[k]))
++            if name is None:
+                 continue
+-            out.append((name, float(d.confidence[i]),
+-                        tuple(float(v) for v in d.xyxy[i])))
++            cx, cy, bw, bh = dets[k]
++            out.append((name, float(conf[k]),
++                        (float((cx - bw / 2) * W), float((cy - bh / 2) * H),
++                         float((cx + bw / 2) * W), float((cy + bh / 2) * H))))
+         return out
+ 
+     def _infer_pose(self, frame):
+         """반환 [(track_id, conf, bbox, keypoints, kpt_conf), ...]"""
+-        res = self.pose_model.track(frame, persist=True, conf=self.pose_conf,
+-                                    classes=[0], verbose=False)[0]
++        if not hasattr(self, '_ctrk'):
++            self._ctrk = CentroidTracker()
++        res = self.pose_model.predict(frame, conf=self.pose_conf,
++                                      classes=[0], verbose=False)[0]
+         out = []
+         boxes, kps = res.boxes, res.keypoints
+         if boxes is None or len(boxes) == 0 or kps is None:
+             return out
+-        ids = (boxes.id.int().cpu().tolist() if boxes.id is not None
+-               else list(range(len(boxes))))
+         xyxy = boxes.xyxy.cpu().numpy()
++        ids = self._ctrk.update([tuple(b) for b in xyxy],
++                                frame.shape[1], frame.shape[0])
+         confs = boxes.conf.cpu().numpy()
+         kxy = kps.xy.cpu().numpy()
+         kcf = kps.conf.cpu().numpy() if kps.conf is not None else None

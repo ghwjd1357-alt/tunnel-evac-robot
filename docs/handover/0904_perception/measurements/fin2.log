@@ -1,0 +1,260 @@
+[INFO] [1788507041.083798695] [perception_node]: Loading RF-DETR from /tmp/perftest/models/fire_smoke_v9_rfdetr_small.pt ...
+[INFO] [1788507041.172353257] [perception_node]: Loading TRT engine /home/hanhan/fire_trt_export/rfdetr-small.engine ...
+[INFO] [1788507041.759176279] [perception_node]: Optimizing fire model for FP16 inference...
+[INFO] [1788507041.760096381] [perception_node]: Loading pose model from /home/hanhan/yolo11n-pose_meta.engine ...
+/home/hanhan/yolo_env/lib/python3.10/site-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+[INFO] [1788507042.749722705] [perception_node]: perception_node ready (fire+pose, gravity=False)
+[ERROR] [1788507043.754196774] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=0 depth_age=-- cb_age=-- uptime=1s)
+[INFO] [1788507047.754301804] [perception_node]: WATCHDOG waiting_first_frame (color_pub=1 depth_pub=1 depth_frames=0 depth_age=-- cb_age=-- uptime=5s)
+[INFO] [1788507048.278497557] [perception_node]: camera_info: fx=689.9 fy=689.7 cx=639.1 cy=358.2
+[W] 'colored' module is not installed, will not use colors when logging. To enable colors, please install the 'colored' module: python3 -m pip install colored
+[I] Loading bytes from /home/hanhan/fire_trt_export/rfdetr-small.engine
+Loading /home/hanhan/yolo11n-pose_meta.engine for TensorRT inference...
+[09/04/2026-16:30:48] [TRT] [I] The logger passed into createInferRuntime differs from one already provided for an existing builder, runtime, or refitter. Uses of the global logger, returned by nvinfer1::getLogger(), will return the existing value.
+[09/04/2026-16:30:48] [TRT] [I] Loaded engine size: 9 MiB
+[09/04/2026-16:30:48] [TRT] [I] [MemUsageChange] TensorRT-managed allocation in IExecutionContext creation: CPU +0, GPU +10, now: CPU 0, GPU 109 (MiB)
+[WARN] [1788507051.207773436] [perception_node]: debug_image 발행 실패: 'PerceptionNode' object has no attribute '_timing_count'
+[WARN] [1788507051.210672437] [perception_node]: WATCHDOG callback_stale (color_pub=1 depth_pub=1 depth_frames=0 depth_age=-- cb_age=2.9s uptime=8s)
+[INFO] [1788507051.804414262] [perception_node]: WATCHDOG ok (color_pub=1 depth_pub=1 depth_frames=2 depth_age=0.1s cb_age=0.1s uptime=9s)
+[INFO] [1788507052.092811510] [perception_node]: TIMING2 fire=57.7ms pose=32.5ms judge=1.7ms publish=0.3ms debug_img=5.5ms TOTAL=97.8ms
+[INFO] [1788507052.192452061] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=2.6ms
+[INFO] [1788507053.090807576] [perception_node]: TIMING2 fire=55.6ms pose=30.5ms judge=1.4ms publish=0.2ms debug_img=4.4ms TOTAL=92.1ms
+[INFO] [1788507053.193457371] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.1ms
+[INFO] [1788507054.043150669] [perception_node]: TIMING2 fire=45.2ms pose=25.0ms judge=1.3ms publish=0.2ms debug_img=4.6ms TOTAL=76.4ms
+[INFO] [1788507054.122184988] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.8ms pub=2.6ms
+[INFO] [1788507054.854190614] [perception_node]: TIMING2 fire=45.1ms pose=24.2ms judge=1.3ms publish=0.2ms debug_img=4.8ms TOTAL=75.7ms
+[INFO] [1788507054.938587651] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=3.1ms
+[INFO] [1788507055.695452512] [perception_node]: TIMING2 fire=44.9ms pose=25.1ms judge=1.4ms publish=0.2ms debug_img=4.4ms TOTAL=76.0ms
+[INFO] [1788507055.778354414] [perception_node]: TIMING3 copy=0.6ms draw=0.3ms tobytes=1.2ms pub=3.0ms
+[INFO] [1788507056.538138752] [perception_node]: TIMING2 fire=47.3ms pose=18.3ms judge=1.2ms publish=0.2ms debug_img=3.9ms TOTAL=70.9ms
+[INFO] [1788507056.600570716] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=2.6ms
+[INFO] [1788507057.318145556] [perception_node]: TIMING2 fire=46.9ms pose=18.6ms judge=1.2ms publish=0.2ms debug_img=4.1ms TOTAL=71.1ms
+[INFO] [1788507057.381931496] [perception_node]: TIMING3 copy=0.4ms draw=0.2ms tobytes=0.8ms pub=2.6ms
+[INFO] [1788507058.117638188] [perception_node]: TIMING2 fire=45.2ms pose=20.0ms judge=1.4ms publish=0.2ms debug_img=4.1ms TOTAL=71.0ms
+[INFO] [1788507058.183386577] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=2.5ms
+[INFO] [1788507058.898400950] [perception_node]: TIMING2 fire=45.5ms pose=24.2ms judge=1.2ms publish=0.2ms debug_img=4.6ms TOTAL=75.7ms
+[INFO] [1788507058.983219602] [perception_node]: TIMING3 copy=0.6ms draw=0.3ms tobytes=1.3ms pub=2.7ms
+[INFO] [1788507059.743059603] [perception_node]: TIMING2 fire=46.0ms pose=19.2ms judge=1.2ms publish=0.2ms debug_img=4.1ms TOTAL=70.8ms
+[INFO] [1788507059.808644017] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=2.5ms
+[INFO] [1788507060.510729685] [perception_node]: TIMING2 fire=46.5ms pose=20.0ms judge=1.4ms publish=0.2ms debug_img=4.6ms TOTAL=72.8ms
+[INFO] [1788507060.584936088] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.2ms pub=2.5ms
+[INFO] [1788507061.304602225] [perception_node]: TIMING2 fire=45.9ms pose=24.4ms judge=1.5ms publish=0.3ms debug_img=4.4ms TOTAL=76.6ms
+[INFO] [1788507061.390344593] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=2.8ms
+[INFO] [1788507062.139400392] [perception_node]: TIMING2 fire=31.9ms pose=22.6ms judge=1.3ms publish=0.2ms debug_img=4.6ms TOTAL=60.7ms
+[INFO] [1788507062.218253898] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=1.0ms pub=2.6ms
+[INFO] [1788507062.944396263] [perception_node]: TIMING2 fire=46.0ms pose=19.2ms judge=1.3ms publish=0.3ms debug_img=4.3ms TOTAL=71.2ms
+[INFO] [1788507063.013468404] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=2.8ms
+[INFO] [1788507063.724432087] [perception_node]: TIMING2 fire=44.9ms pose=18.9ms judge=1.3ms publish=0.2ms debug_img=4.1ms TOTAL=69.6ms
+[INFO] [1788507063.791287176] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=1.0ms pub=2.8ms
+[INFO] [1788507064.514573030] [perception_node]: TIMING2 fire=46.6ms pose=25.4ms judge=1.3ms publish=0.2ms debug_img=4.6ms TOTAL=78.3ms
+[INFO] [1788507064.601006721] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=2.8ms
+[INFO] [1788507065.320337431] [perception_node]: TIMING2 fire=37.7ms pose=22.7ms judge=1.2ms publish=0.2ms debug_img=4.6ms TOTAL=66.5ms
+[INFO] [1788507065.401615996] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=2.8ms
+[INFO] [1788507066.173063099] [perception_node]: TIMING2 fire=46.3ms pose=25.1ms judge=1.4ms publish=0.2ms debug_img=4.4ms TOTAL=77.5ms
+[INFO] [1788507066.261014835] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=2.9ms
+[WARN] [1788507066.848468335] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.89 arearatio=1.13)
+[WARN] [1788507066.934764995] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.59 overlap=0.86 arearatio=1.16)
+[WARN] [1788507067.022018142] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.85 arearatio=1.17)
+[INFO] [1788507067.028635632] [perception_node]: TIMING2 fire=47.3ms pose=25.6ms judge=3.1ms publish=0.2ms debug_img=4.5ms TOTAL=80.7ms
+[INFO] [1788507067.114188869] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=2.7ms
+[WARN] [1788507067.365526982] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.52 overlap=0.90 arearatio=1.10)
+[WARN] [1788507067.542823535] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.58 overlap=0.91 arearatio=1.07)
+[WARN] [1788507067.715176428] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.58 overlap=0.92 arearatio=1.06)
+[WARN] [1788507067.906416598] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.91 arearatio=1.05)
+[INFO] [1788507067.913341781] [perception_node]: TIMING2 fire=54.5ms pose=21.9ms judge=3.3ms publish=0.2ms debug_img=4.6ms TOTAL=84.6ms
+[INFO] [1788507067.998632414] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=1.0ms pub=3.0ms
+[WARN] [1788507068.081037712] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.63 overlap=0.92 arearatio=1.04)
+[WARN] [1788507068.174489291] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.67 overlap=0.92 arearatio=1.05)
+[WARN] [1788507068.264410420] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.92 arearatio=1.05)
+[WARN] [1788507068.366084067] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.71 overlap=0.92 arearatio=1.05)
+[WARN] [1788507068.472138631] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.64 overlap=0.92 arearatio=1.04)
+[WARN] [1788507068.578726241] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.94 arearatio=1.04)
+[WARN] [1788507068.685630984] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.67 overlap=0.93 arearatio=1.05)
+[WARN] [1788507068.780279925] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.92 arearatio=1.05)
+[WARN] [1788507068.861973257] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.04)
+[INFO] [1788507068.869041421] [perception_node]: TIMING2 fire=41.0ms pose=25.5ms judge=3.1ms publish=0.2ms debug_img=4.8ms TOTAL=74.6ms
+[WARN] [1788507068.967491319] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.64 overlap=0.93 arearatio=1.05)
+[INFO] [1788507068.974973740] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.2ms
+[WARN] [1788507069.075555438] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.94 arearatio=1.03)
+[WARN] [1788507069.171854814] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.04)
+[WARN] [1788507069.253536369] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.93 arearatio=1.04)
+[WARN] [1788507069.355740277] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.92 arearatio=1.05)
+[WARN] [1788507069.459463640] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.64 overlap=0.93 arearatio=1.04)
+[WARN] [1788507069.566278203] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.05)
+[WARN] [1788507069.660996937] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.69 overlap=0.93 arearatio=1.04)
+[WARN] [1788507069.741866939] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.65 overlap=0.93 arearatio=1.04)
+[WARN] [1788507069.841402545] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.92 arearatio=1.05)
+[INFO] [1788507069.848693278] [perception_node]: TIMING2 fire=54.6ms pose=30.0ms judge=3.3ms publish=0.2ms debug_img=4.9ms TOTAL=93.1ms
+[WARN] [1788507069.933187494] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.63 overlap=0.93 arearatio=1.04)
+[INFO] [1788507069.940027489] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=2.9ms
+[WARN] [1788507070.016302516] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.68 overlap=0.93 arearatio=1.04)
+[WARN] [1788507070.102971605] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.72 overlap=0.93 arearatio=1.04)
+[WARN] [1788507070.189875103] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.68 overlap=0.93 arearatio=1.05)
+[WARN] [1788507070.276615043] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.70 overlap=0.93 arearatio=1.05)
+[WARN] [1788507070.376266429] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.69 overlap=0.93 arearatio=1.04)
+[WARN] [1788507070.464719368] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.68 overlap=0.92 arearatio=1.06)
+[WARN] [1788507070.549637888] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.91 arearatio=1.06)
+[WARN] [1788507070.636619022] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.70 overlap=0.93 arearatio=1.04)
+[WARN] [1788507070.735642510] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.69 overlap=0.93 arearatio=1.05)
+[INFO] [1788507070.745370208] [perception_node]: TIMING2 fire=49.5ms pose=25.0ms judge=2.9ms publish=0.2ms debug_img=7.8ms TOTAL=85.5ms
+[WARN] [1788507070.837205175] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.68 overlap=0.94 arearatio=1.04)
+[INFO] [1788507070.843297875] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=2.5ms
+[WARN] [1788507070.927755480] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.71 overlap=0.93 arearatio=1.04)
+[WARN] [1788507070.997816426] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.67 overlap=0.92 arearatio=1.05)
+[WARN] [1788507071.082221452] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.70 overlap=0.93 arearatio=1.04)
+[WARN] [1788507071.166733363] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.71 overlap=0.91 arearatio=1.07)
+[WARN] [1788507071.252929536] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.66 overlap=0.92 arearatio=1.06)
+[WARN] [1788507071.339232817] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.73 overlap=0.93 arearatio=1.05)
+[WARN] [1788507071.427512436] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.72 overlap=0.92 arearatio=1.05)
+[WARN] [1788507071.511308989] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.64 overlap=0.91 arearatio=1.06)
+[WARN] [1788507071.583814740] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.60 overlap=0.93 arearatio=1.04)
+[INFO] [1788507071.590256830] [perception_node]: TIMING2 fire=34.0ms pose=24.0ms judge=2.6ms publish=0.2ms debug_img=4.7ms TOTAL=65.5ms
+[WARN] [1788507071.666837501] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.94 arearatio=1.03)
+[INFO] [1788507071.673305737] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.8ms pub=3.1ms
+[WARN] [1788507071.829468611] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.93 arearatio=1.04)
+[INFO] [1788507072.365433557] [perception_node]: TIMING2 fire=45.2ms pose=25.0ms judge=1.1ms publish=0.2ms debug_img=4.0ms TOTAL=75.5ms
+[INFO] [1788507072.454267919] [perception_node]: TIMING3 copy=0.6ms draw=0.2ms tobytes=1.1ms pub=2.9ms
+[WARN] [1788507072.920423481] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.50 overlap=0.93 arearatio=1.03)
+[WARN] [1788507073.003858547] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.54 overlap=0.94 arearatio=1.02)
+[INFO] [1788507073.179593460] [perception_node]: TIMING2 fire=46.2ms pose=25.9ms judge=1.2ms publish=0.3ms debug_img=5.9ms TOTAL=79.5ms
+[INFO] [1788507073.266280148] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=2.9ms
+[WARN] [1788507073.401144763] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.54 overlap=0.94 arearatio=1.02)
+[INFO] [1788507073.919442830] [perception_node]: TIMING2 fire=31.5ms pose=20.9ms judge=1.3ms publish=0.2ms debug_img=4.6ms TOTAL=58.6ms
+[WARN] [1788507073.992342260] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.54 overlap=0.92 arearatio=1.05)
+[INFO] [1788507073.998249640] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=1.0ms pub=2.5ms
+[INFO] [1788507074.716998229] [perception_node]: TIMING2 fire=45.4ms pose=24.7ms judge=1.2ms publish=0.3ms debug_img=5.0ms TOTAL=76.6ms
+[INFO] [1788507074.796063513] [perception_node]: TIMING3 copy=0.6ms draw=0.2ms tobytes=0.9ms pub=2.9ms
+[INFO] [1788507075.550802193] [perception_node]: TIMING2 fire=46.5ms pose=25.6ms judge=1.6ms publish=0.3ms debug_img=5.1ms TOTAL=79.1ms
+[INFO] [1788507075.639396575] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.0ms
+[INFO] [1788507076.364234239] [perception_node]: TIMING2 fire=32.5ms pose=23.0ms judge=1.6ms publish=0.2ms debug_img=4.8ms TOTAL=62.2ms
+[INFO] [1788507076.444645658] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=1.2ms pub=3.7ms
+[INFO] [1788507077.164726834] [perception_node]: TIMING2 fire=32.9ms pose=22.4ms judge=1.2ms publish=0.2ms debug_img=4.3ms TOTAL=61.1ms
+[INFO] [1788507077.243572492] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=2.6ms
+[WARN] [1788507077.413154057] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.54 overlap=0.91 arearatio=1.07)
+[INFO] [1788507077.982931548] [perception_node]: TIMING2 fire=46.2ms pose=24.6ms judge=1.2ms publish=0.2ms debug_img=4.5ms TOTAL=76.8ms
+[INFO] [1788507078.070083468] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=1.1ms pub=3.0ms
+[INFO] [1788507078.793174840] [perception_node]: TIMING2 fire=46.2ms pose=19.8ms judge=1.3ms publish=0.2ms debug_img=4.5ms TOTAL=72.2ms
+[INFO] [1788507078.864264784] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=3.0ms
+[INFO] [1788507079.557095062] [perception_node]: TIMING2 fire=46.0ms pose=25.1ms judge=1.3ms publish=0.2ms debug_img=4.8ms TOTAL=77.4ms
+[WARN] [1788507079.637785435] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.56 overlap=0.90 arearatio=1.09)
+[INFO] [1788507079.644644214] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=3.1ms
+[WARN] [1788507079.725248759] [perception_node]: fire 오탐 의심 — person bbox 내부 포함 억제 (conf=0.55 overlap=0.88 arearatio=1.12)
+[INFO] [1788507080.348183411] [perception_node]: TIMING2 fire=44.8ms pose=24.5ms judge=1.3ms publish=0.2ms debug_img=4.7ms TOTAL=75.6ms
+[INFO] [1788507080.432948927] [perception_node]: TIMING3 copy=0.5ms draw=0.2ms tobytes=0.9ms pub=3.0ms
+[INFO] [1788507081.206705451] [perception_node]: TIMING2 fire=46.5ms pose=27.3ms judge=1.6ms publish=0.3ms debug_img=5.1ms TOTAL=80.9ms
+[INFO] [1788507081.296980666] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.2ms
+[INFO] [1788507082.130142997] [perception_node]: TIMING2 fire=47.3ms pose=20.9ms judge=1.6ms publish=0.3ms debug_img=4.9ms TOTAL=75.0ms
+[INFO] [1788507082.205584415] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=0.9ms pub=3.0ms
+[INFO] [1788507082.961561796] [perception_node]: TIMING2 fire=46.7ms pose=26.6ms judge=1.6ms publish=0.2ms debug_img=4.9ms TOTAL=80.0ms
+[INFO] [1788507083.049055551] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.0ms
+[INFO] [1788507083.802096678] [perception_node]: TIMING2 fire=46.7ms pose=25.9ms judge=1.5ms publish=0.3ms debug_img=4.8ms TOTAL=79.2ms
+[INFO] [1788507083.889876684] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.1ms
+[INFO] [1788507084.665566325] [perception_node]: TIMING2 fire=46.2ms pose=25.5ms judge=1.4ms publish=0.2ms debug_img=5.0ms TOTAL=78.5ms
+[INFO] [1788507084.753438367] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=3.2ms
+[INFO] [1788507085.578834949] [perception_node]: TIMING2 fire=58.6ms pose=32.0ms judge=1.6ms publish=0.3ms debug_img=5.4ms TOTAL=98.0ms
+[INFO] [1788507085.685874373] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=1.1ms pub=3.5ms
+[INFO] [1788507086.545353413] [perception_node]: TIMING2 fire=38.6ms pose=27.3ms judge=1.6ms publish=0.3ms debug_img=5.1ms TOTAL=72.9ms
+[INFO] [1788507086.634911283] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.1ms pub=3.2ms
+[INFO] [1788507087.467997164] [perception_node]: TIMING2 fire=46.8ms pose=26.3ms judge=1.5ms publish=0.2ms debug_img=4.9ms TOTAL=79.7ms
+[INFO] [1788507087.559206814] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.1ms pub=3.3ms
+[INFO] [1788507088.481890208] [perception_node]: TIMING2 fire=58.4ms pose=32.2ms judge=1.9ms publish=0.3ms debug_img=5.2ms TOTAL=98.1ms
+[INFO] [1788507088.580210006] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.1ms pub=3.2ms
+[INFO] [1788507089.434492014] [perception_node]: TIMING2 fire=57.1ms pose=30.6ms judge=1.5ms publish=0.3ms debug_img=5.3ms TOTAL=94.7ms
+[INFO] [1788507089.541084921] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=1.1ms pub=3.5ms
+[INFO] [1788507090.380049076] [perception_node]: TIMING2 fire=48.8ms pose=21.2ms judge=0.3ms publish=0.2ms debug_img=4.7ms TOTAL=75.3ms
+[INFO] [1788507090.464210561] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.1ms pub=3.0ms
+[INFO] [1788507091.293217660] [perception_node]: TIMING2 fire=47.7ms pose=21.4ms judge=0.4ms publish=0.2ms debug_img=4.6ms TOTAL=74.4ms
+[INFO] [1788507091.391053372] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.1ms pub=3.2ms
+[INFO] [1788507092.080971439] [perception_node]: TIMING2 fire=32.2ms pose=18.1ms judge=0.3ms publish=0.2ms debug_img=4.8ms TOTAL=55.5ms
+[INFO] [1788507092.153654018] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=0.9ms pub=2.8ms
+[INFO] [1788507092.837996906] [perception_node]: TIMING2 fire=47.0ms pose=21.1ms judge=0.3ms publish=0.2ms debug_img=4.4ms TOTAL=73.1ms
+[INFO] [1788507092.919275488] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.1ms pub=3.0ms
+[INFO] [1788507093.622200193] [perception_node]: TIMING2 fire=48.7ms pose=21.1ms judge=0.3ms publish=0.2ms debug_img=4.6ms TOTAL=74.9ms
+[INFO] [1788507093.700021320] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=0.9ms pub=2.7ms
+[INFO] [1788507094.372830414] [perception_node]: TIMING2 fire=47.5ms pose=20.9ms judge=0.4ms publish=0.2ms debug_img=4.4ms TOTAL=73.4ms
+[INFO] [1788507094.454837664] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.0ms pub=3.0ms
+[INFO] [1788507095.209036731] [perception_node]: TIMING2 fire=47.8ms pose=22.1ms judge=0.4ms publish=0.2ms debug_img=4.5ms TOTAL=75.1ms
+[INFO] [1788507095.290896839] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.0ms pub=2.7ms
+[INFO] [1788507096.024881822] [perception_node]: TIMING2 fire=45.0ms pose=20.0ms judge=0.3ms publish=0.1ms debug_img=4.5ms TOTAL=70.1ms
+[INFO] [1788507096.103207927] [perception_node]: TIMING3 copy=0.5ms draw=0.0ms tobytes=1.0ms pub=2.3ms
+[INFO] [1788507096.830017761] [perception_node]: TIMING2 fire=50.1ms pose=23.1ms judge=0.4ms publish=0.2ms debug_img=3.1ms TOTAL=77.0ms
+[INFO] [1788507096.913891231] [perception_node]: TIMING3 copy=0.7ms draw=0.0ms tobytes=1.2ms pub=1.2ms
+[INFO] [1788507097.632794144] [perception_node]: TIMING2 fire=47.8ms pose=21.3ms judge=1.3ms publish=0.3ms debug_img=2.8ms TOTAL=73.5ms
+[INFO] [1788507097.714155382] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.0ms
+[INFO] [1788507098.392917983] [perception_node]: TIMING2 fire=43.1ms pose=24.7ms judge=1.4ms publish=0.2ms debug_img=3.0ms TOTAL=72.5ms
+[INFO] [1788507098.478304026] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.0ms
+[INFO] [1788507099.227074081] [perception_node]: TIMING2 fire=46.7ms pose=19.3ms judge=1.2ms publish=0.3ms debug_img=3.1ms TOTAL=70.6ms
+[INFO] [1788507099.293741369] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.2ms pub=1.1ms
+[INFO] [1788507100.003996235] [perception_node]: TIMING2 fire=47.2ms pose=19.8ms judge=1.4ms publish=0.2ms debug_img=2.6ms TOTAL=71.4ms
+[INFO] [1788507100.071017361] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=1.0ms
+[INFO] [1788507100.781341761] [perception_node]: TIMING2 fire=46.4ms pose=25.0ms judge=1.6ms publish=0.2ms debug_img=3.1ms TOTAL=76.4ms
+[INFO] [1788507100.867631328] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=1.0ms
+[INFO] [1788507101.593083995] [perception_node]: TIMING2 fire=40.1ms pose=24.9ms judge=1.3ms publish=0.2ms debug_img=2.8ms TOTAL=69.3ms
+[INFO] [1788507101.677275171] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.0ms
+[INFO] [1788507102.433095196] [perception_node]: TIMING2 fire=47.1ms pose=25.1ms judge=1.3ms publish=0.2ms debug_img=2.8ms TOTAL=76.6ms
+[INFO] [1788507102.513437381] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=0.9ms
+[INFO] [1788507103.204420495] [perception_node]: TIMING2 fire=46.9ms pose=25.0ms judge=1.4ms publish=0.2ms debug_img=3.2ms TOTAL=76.8ms
+[INFO] [1788507103.282641216] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=0.9ms
+[INFO] [1788507103.954811425] [perception_node]: TIMING2 fire=32.4ms pose=22.0ms judge=1.4ms publish=0.3ms debug_img=2.7ms TOTAL=58.7ms
+[INFO] [1788507104.032617473] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=1.0ms
+[INFO] [1788507104.784717492] [perception_node]: TIMING2 fire=46.8ms pose=25.4ms judge=1.4ms publish=0.2ms debug_img=2.8ms TOTAL=76.7ms
+[INFO] [1788507104.871748368] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.0ms
+[INFO] [1788507105.595668536] [perception_node]: TIMING2 fire=46.7ms pose=25.5ms judge=1.5ms publish=0.2ms debug_img=2.7ms TOTAL=76.8ms
+[INFO] [1788507105.675663569] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=0.9ms pub=0.9ms
+[INFO] [1788507106.353141313] [perception_node]: TIMING2 fire=45.0ms pose=24.9ms judge=1.7ms publish=0.2ms debug_img=2.9ms TOTAL=74.8ms
+[INFO] [1788507106.429760111] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=0.9ms pub=0.9ms
+[INFO] [1788507107.113706757] [perception_node]: TIMING2 fire=45.1ms pose=24.7ms judge=1.9ms publish=0.2ms debug_img=2.9ms TOTAL=74.9ms
+[INFO] [1788507107.196688920] [perception_node]: TIMING3 copy=0.5ms draw=0.4ms tobytes=0.9ms pub=1.1ms
+[INFO] [1788507107.880560584] [perception_node]: TIMING2 fire=45.5ms pose=24.9ms judge=1.9ms publish=0.2ms debug_img=2.8ms TOTAL=75.4ms
+[INFO] [1788507107.964314906] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.1ms
+[INFO] [1788507108.704631798] [perception_node]: TIMING2 fire=46.0ms pose=19.9ms judge=1.6ms publish=0.2ms debug_img=2.8ms TOTAL=70.5ms
+[INFO] [1788507108.771287113] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.0ms
+[INFO] [1788507109.494380061] [perception_node]: TIMING2 fire=46.7ms pose=26.1ms judge=1.5ms publish=0.2ms debug_img=2.9ms TOTAL=77.5ms
+[INFO] [1788507109.580451982] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.0ms pub=1.2ms
+[INFO] [1788507110.321132368] [perception_node]: TIMING2 fire=47.3ms pose=25.7ms judge=1.7ms publish=0.2ms debug_img=3.1ms TOTAL=77.9ms
+[INFO] [1788507110.405857001] [perception_node]: TIMING3 copy=0.5ms draw=0.3ms tobytes=1.1ms pub=1.1ms
+[ERROR] [1788507110.798360456] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=0.6s cb_age=0.1s uptime=68s)
+[ERROR] [1788507112.754369669] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=2.5s cb_age=1.8s uptime=70s)
+[ERROR] [1788507122.754353175] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=12.5s cb_age=11.8s uptime=80s)
+[ERROR] [1788507132.754317824] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=22.5s cb_age=21.8s uptime=90s)
+[ERROR] [1788507142.754314703] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=32.5s cb_age=31.8s uptime=100s)
+[ERROR] [1788507152.754208331] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=42.5s cb_age=41.8s uptime=110s)
+[ERROR] [1788507162.754270570] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=52.5s cb_age=51.8s uptime=120s)
+[ERROR] [1788507172.754292721] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=62.5s cb_age=61.8s uptime=130s)
+[ERROR] [1788507182.754276811] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=72.5s cb_age=71.8s uptime=140s)
+[ERROR] [1788507192.754326344] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=82.5s cb_age=81.8s uptime=150s)
+[ERROR] [1788507202.754285644] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=92.5s cb_age=91.8s uptime=160s)
+[ERROR] [1788507212.754324584] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=102.5s cb_age=101.8s uptime=170s)
+[ERROR] [1788507222.754310948] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=112.5s cb_age=111.8s uptime=180s)
+[ERROR] [1788507232.754292298] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=122.5s cb_age=121.8s uptime=190s)
+[ERROR] [1788507242.754276966] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=132.5s cb_age=131.8s uptime=200s)
+[ERROR] [1788507252.754298754] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=142.5s cb_age=141.8s uptime=210s)
+[ERROR] [1788507262.754274599] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=152.5s cb_age=151.8s uptime=220s)
+[ERROR] [1788507272.754268991] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=162.5s cb_age=161.8s uptime=230s)
+[ERROR] [1788507282.754248468] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=172.5s cb_age=171.8s uptime=240s)
+[ERROR] [1788507292.754248624] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=182.5s cb_age=181.8s uptime=250s)
+[ERROR] [1788507302.754264252] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=192.5s cb_age=191.8s uptime=260s)
+[ERROR] [1788507312.754312321] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=202.5s cb_age=201.8s uptime=270s)
+[ERROR] [1788507322.754358919] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=212.5s cb_age=211.8s uptime=280s)
+[ERROR] [1788507332.754275154] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=222.5s cb_age=221.8s uptime=290s)
+[ERROR] [1788507342.754248849] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=232.5s cb_age=231.8s uptime=300s)
+[ERROR] [1788507352.754256940] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=242.5s cb_age=241.8s uptime=310s)
+[ERROR] [1788507362.754265386] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=252.5s cb_age=251.8s uptime=320s)
+[ERROR] [1788507372.754298228] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=262.5s cb_age=261.8s uptime=330s)
+[ERROR] [1788507382.754259565] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=272.5s cb_age=271.8s uptime=340s)
+[ERROR] [1788507392.754266659] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=282.5s cb_age=281.8s uptime=350s)
+[ERROR] [1788507402.754245306] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=292.5s cb_age=291.8s uptime=360s)
+[ERROR] [1788507412.754395072] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=302.5s cb_age=301.8s uptime=370s)
+[ERROR] [1788507422.754623002] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=312.5s cb_age=311.8s uptime=380s)
+[ERROR] [1788507432.754394681] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=322.5s cb_age=321.8s uptime=390s)
+[ERROR] [1788507442.754315453] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=332.5s cb_age=331.8s uptime=400s)
+[ERROR] [1788507452.754900288] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=342.5s cb_age=341.8s uptime=410s)
+[ERROR] [1788507462.754690512] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=352.5s cb_age=351.8s uptime=420s)
+[ERROR] [1788507472.754304428] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=362.5s cb_age=361.8s uptime=430s)
+[ERROR] [1788507482.754331218] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=372.5s cb_age=371.8s uptime=440s)
+[ERROR] [1788507492.754396888] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=382.5s cb_age=381.8s uptime=450s)
+[ERROR] [1788507502.754311039] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=392.5s cb_age=391.8s uptime=460s)
+[ERROR] [1788507512.754338549] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=402.5s cb_age=401.8s uptime=470s)
+[ERROR] [1788507522.754489506] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=412.5s cb_age=411.8s uptime=480s)
+[ERROR] [1788507532.754484737] [perception_node]: WATCHDOG depth_stream_missing (color_pub=0 depth_pub=0 depth_frames=318 depth_age=422.5s cb_age=421.8s uptime=490s)
