@@ -135,9 +135,10 @@ trap cleanup EXIT INT TERM
 #   패널 mini-USB 를 꽂으면 터치(@dacai usb touch)가 마우스로 잡힌다. 09-18 책상 검증에서
 #   터치가 kiosk 창을 500x120 으로 끌어 놓아 바탕화면이 드러났다. 우리는 터치를 안 쓴다(결정).
 if command -v xinput >/dev/null 2>&1; then
-  xinput list --name-only 2>/dev/null | grep -i touch | while read -r dev; do
-    xinput disable "$dev" 2>/dev/null && echo "▶ 터치 입력 끔: $dev"
-  done
+  #   ⚠ 이미 꺼진 장치는 이름 앞에 '∼' 가 붙어 나온다 — 그대로 넘기면 실패하고 set -e 가 스크립트를 죽인다 (09-18)
+  xinput list --name-only 2>/dev/null | grep -i touch | sed 's/^[∼~] *//' | while read -r dev; do
+    xinput disable "$dev" 2>/dev/null && echo "▶ 터치 입력 끔: $dev" || true
+  done || true
 fi
 
 # ── 바탕화면 아이콘 끄기 — GNOME 확장(ding)이 아이콘을 kiosk 창 위에 그린다 (09-18 실측) ──
@@ -185,6 +186,11 @@ else
   echo "▶ 브라우저($BROWSER) kiosk → $URL"
   "$BROWSER" "${BROWSER_ARGS[@]}" >/tmp/display_browser.log 2>&1 &
   BR_PID=$!
+  # 🔴 GNOME 은 자동 로그인 직후 "Activities"(앱 목록) 화면을 띄운 채 두고, 나중에 뜬 kiosk
+  #    창이 그것을 닫지 못한다 (09-18 패널 캡처). Escape 두 번 = 앱 목록 → 창 미리보기 → 창.
+  #    xdotool 이 없어 libXtst 를 직접 부른다 (console/x11_key.py). 창이 뜬 뒤에 보내야 한다.
+  sleep 8
+  for _ in 1 2; do python3 "$CONSOLE_DIR/x11_key.py" Escape 2>/dev/null || true; sleep 1; done
 fi
 
 echo "  (Ctrl+C 로 전부 종료)"
