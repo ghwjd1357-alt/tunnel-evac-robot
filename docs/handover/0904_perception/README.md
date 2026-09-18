@@ -24,11 +24,12 @@
 | 대상 | 09-18 상태 | 원복 |
 |---|---|---|
 | `~/percep_ws/src/…/perception_node.py` · `install/…/perception_node.py` | **`perception_node_0904.py`** (md5 `87a587af`) | 옆의 `perception_node.py.bak_original_0918` (sha256 `aed2d07a…`) 을 제자리 복사 + `p.sh` 재기동 |
-| `~/p.sh` 카메라 줄 | `time_domain:=system` 추가 | `~/p.sh.bak_0918` |
+| `~/p.sh` 카메라 줄 | `time_domain:=system` 추가 · **`1280x720`**(640×480 → 화각·화질, 사용자 결정) | `~/p.sh.bak_0918` |
 | `~/p.sh` `stop_all` | `adapter_nod[e]`·`perception_nod[e]` 자식도 죽임 (실행마다 어댑터가 쌓이던 것) | 같음 |
 | `OrbbecSDK_ROS2 …/gemini2.launch.py` | `color_rotation`·`color_mirror`·`depth_rotation`·`depth_mirror` 인자 **선언만** 추가(기본 -1/false = 무효과) | `gemini2.launch.py.bak_0918` |
 
-실측(09-18 · 회의실, 사람 4명 앉음): `TIMING2 fire=31.4ms pose=25.2ms`(원본 152/89) · 디버그 영상에
+실측(09-18 · 회의실, 사람 4명 앉음): 640×480 에서 `TIMING2 fire=31.4ms pose=25.2ms`(원본 152/89),
+**1280×720 에서 `fire=80ms pose=55ms`(≈7 Hz)** — 화각·화질을 위해 720p 를 택했다(어댑터 stale 1.5 s 에 여유). 디버그 영상에
 `person_ok 0.91 2.2m` 등 거리 포함 판정 · 어댑터 `frames=1795 hits=0 fire 없음 · 탐지 4건`.
 
 🔴 **함정 3개를 더 밟았다** (§8 의 셋에 추가):
