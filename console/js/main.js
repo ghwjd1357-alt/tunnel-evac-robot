@@ -15,6 +15,7 @@ import { setupEmergency } from './emergency.js';
 import { evaluateAlerts, healthSummary } from './alert.js';
 import { hms, MODE_OF, MODE_KO } from './i18n.js';
 import { displayText } from './display.js';
+import { setupAudio } from './audio.js';
 
 /* ── 메뉴 전환: 화면 4개 중 하나만 보인다 ─────────────────────── */
 function setupMenu() {
@@ -119,6 +120,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupEmergency();
   onChange(renderTop);
   onChange(renderDisplay);
+  setupAudio();   // 디스플레이 모드에서만 소리를 낸다 (안에서 판단)
 
   connect();
 

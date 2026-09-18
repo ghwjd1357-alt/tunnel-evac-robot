@@ -36,6 +36,14 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 `real_bringup.launch.py` 에는 rosbridge 가 없어 이 스크립트가 따로 뜬다.
 🔴 09-18 기준 **노트북에서 서버 기동까지만 검증**했다 — 패널 미장착. kiosk·자동 시작·1 m 가독성은 실장 뒤.
 
+**소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
+상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
+🔴 **끊김·미션 낡음·`FAULT`·`BLOCKED` 는 침묵** — 틀린 안내보다 침묵이 안전하다. 관제가 보낸 문구는
+브라우저 내장 TTS(젯슨에 한국어 음성이 없으면 조용히 건너뜀). 음성 파일은 `media/voice/make_voice.py` 가
+`i18n.js` 화면 문구를 읽어 만든다(edge-tts · 생성 때만 인터넷) — **문구를 바꾸면 다시 돌린다.**
+🔴 크로미움 자동재생 인자(`--autoplay-policy=no-user-gesture-required`)는 `run_display.sh` 가 넣는다 —
+주소를 손으로 열면 화면은 뜨고 소리만 안 난다. 🔴 스피커 실물 검증 0회 (패널 미장착).
+
 사전 1회 `sudo apt install ros-humble-rosbridge-suite`.
 
 🔴 `--bag` 은 **재생**이다. 실시간 주행이 아니다. 영상·문서에 "실시간"으로 쓰지 않는다.
@@ -108,6 +116,8 @@ js/log.js  i18n.js  로그 · 말 대응표
 run_console.sh      rosbridge + 웹서버 + bag 재생 한 줄 기동 (노트북·촬영)
 run_display.sh      젯슨용 — rosbridge + 웹서버 + 브라우저 kiosk (`--install-autostart`)
 js/display.js       ★ 디스플레이 문구 우선순위 — 끊김 > 관제 문구 > 상태 낡음 > 상태 문구
+js/audio.js         디스플레이 소리 — 전이 1회 음성 · GUIDE/GATHER 20초 반복 · /siren · 끊김/FAULT 침묵
+media/voice/        안내 음성 mp3 10종 (make_voice.py 가 i18n.js 문구로 생성) · media/siren.mp3
 serve.py            ★ 캐시 금지 정적 서버 — `python3 -m http.server` 로 되돌리지 않는다
 wait_client.py      촬영용 — 브라우저 접속을 기다렸다가 bag 을 시작
 ```
@@ -169,6 +179,7 @@ z = 구동 상태 — 0 해제 / 1 대기 / 2 무장 / 3 무장대기 / 4 무장
 python3 console/test/check_wiring.py         # 배선 정합 (id·import·CSS 변수·이모지)
 node console/test/test_alerts.mjs            # 경보 규칙 15 케이스
 node console/test/test_display.mjs           # 디스플레이 문구 24 케이스 (끊김·낡음이 마지막 문구를 지우는가)
+node console/test/test_audio.mjs             # 소리 결정 15 케이스 + 음성·싸이렌 파일 존재
 node console/test/run_console_test.mjs 60    # 실데이터 — bag 재생 중에 실행
 ```
 

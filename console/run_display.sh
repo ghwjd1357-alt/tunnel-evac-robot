@@ -68,14 +68,18 @@ for b in chromium chromium-browser google-chrome; do
     BROWSER="$b"
     # --incognito : 이전 세션 복원 팝업("비정상 종료") 차단 — 전원을 그냥 끄는 로봇이라 매번 뜬다
     # --kiosk     : 전체화면 + 조작 UI 없음
+    # --autoplay-policy : 사용자 클릭 없이도 소리 재생 허용 — 안내 음성·싸이렌(js/audio.js).
+    #                     이 인자가 없으면 화면은 뜨고 소리만 조용히 안 난다
     BROWSER_ARGS=(--kiosk --incognito --noerrdialogs --disable-infobars --disable-session-crashed-bubble
-                  --no-first-run --window-size=1024,600 --window-position=0,0 "$URL")
+                  --no-first-run --autoplay-policy=no-user-gesture-required
+                  --window-size=1024,600 --window-position=0,0 "$URL")
     break
   fi
 done
 if [ -z "$BROWSER" ] && command -v firefox >/dev/null 2>&1; then
   BROWSER=firefox
   BROWSER_ARGS=(--kiosk --private-window "$URL")
+  echo "⚠ firefox 는 자동재생을 인자로 못 푼다 — 소리가 안 나면 about:config media.autoplay.default=0"
 fi
 if [ -z "$NO_BROWSER" ] && [ -z "$BROWSER" ]; then
   echo "❌ 브라우저 없음. 먼저:  sudo apt install chromium-browser   (또는 firefox)"
@@ -108,6 +112,21 @@ trap cleanup EXIT INT TERM
 xset s off -dpms 2>/dev/null || true
 gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
 gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+
+# ── 소리 출력을 패널(DP/HDMI)로 ────────────────────────────────────
+#   젯슨 DP 는 영상과 소리를 같이 실어 보낸다. 패널 PCB 앰프 → 스피커 4Ω 2W.
+#   기본 출력이 다른 장치(내장 코덱·USB)면 브라우저 소리가 거기로 간다 → HDMI sink 를 기본으로.
+#   pactl 이 없거나 sink 가 안 잡히면 그냥 진행한다 (책상 검증에서 `pactl list short sinks` 로 본다).
+if command -v pactl >/dev/null 2>&1; then
+  _hdmi="$(pactl list short sinks 2>/dev/null | grep -i -m1 -E 'hdmi|dp|displayport' | cut -f2 || true)"
+  if [ -n "$_hdmi" ]; then
+    pactl set-default-sink "$_hdmi" 2>/dev/null && echo "▶ 소리 출력 → $_hdmi" || true
+    pactl set-sink-volume "$_hdmi" 80% 2>/dev/null || true
+    pactl set-sink-mute "$_hdmi" 0 2>/dev/null || true
+  else
+    echo "⚠ HDMI/DP 오디오 sink 를 못 찾았다 — 소리는 안 나도 화면은 뜬다"
+  fi
+fi
 
 echo "▶ rosbridge 시작 (ws://localhost:9090)"
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml >/tmp/display_rosbridge.log 2>&1 &
