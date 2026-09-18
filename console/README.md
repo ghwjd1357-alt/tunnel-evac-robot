@@ -40,6 +40,10 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 (→ `x11_key.py` Escape ×2) · 바탕화면 아이콘이 창 위에 그려짐(→ ding 확장 끔).
 🔴 **젯슨 브라우저 = Mozilla deb 파이어폭스(ESR)** — snap 크로미움은 JetPack 6 에서 실행 자체가 안 되고,
 SELinux 패키지로 살리려다 부팅이 깨졌다(복구 완료). `policycoreutils`·`selinux-utils` 를 젯슨에 깔지 않는다.
+🔵 **터치는 기본 켜 둔다**(09-18 사용자 결정 — 설정 작업에 쓴다). 끄려면 `--no-touch`. 시연 전 다시 정한다.
+🔵 **책상 전원 = 젯슨 USB(mini-USB, 전원+터치)**. DC 잭에 5 V 를 같이 넣지 않는다 — 두 입력 사이 다이오드
+유무를 모르므로 **백피딩**(컨버터 5 V → 젯슨 USB) 위험. 최종 = DC 잭 전원 + **VBUS 끊은 USB**(터치만).
+🔵 젯슨 접속: 학교망이면 `ssh hanhan@jetson.local`, 네트워크가 죽어도 **USB 케이블 `192.168.55.1`** 로 붙는다.
 
 **소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
 상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
@@ -50,7 +54,10 @@ SELinux 패키지로 살리려다 부팅이 깨졌다(복구 완료). `policycor
 주소를 손으로 열면 화면은 뜨고 소리만 안 난다.
 🔴 **09-18 실물: 소리가 안 난다 — 패널 보드 쪽.** 젯슨은 재생 중 HDA 핀 활성(`Pin-ctls 0x40`)·ELD 유효·
 스트림 송출까지 확인, 파이어폭스 스트림도 pulse 에 잡힘, 스피커 4 Ω 정상. 32~96 kHz·16/24 bit 전부
-무음. 막힌 곳 = 패널 LONTIUM → NS4168 앰프 사이(펌웨어 또는 보드). **판매처 문의 중** · 대안 = USB 스피커.
+무음. 막힌 곳 = 패널 LONTIUM → NS4168 앰프 사이(펌웨어 또는 보드). 매뉴얼(`CD-HL070T-01X_Manual_KOR_V1.0`)도
+"꽂으면 나온다" 뿐 — **제조사 이메일 문의(sales@cleardisplay.co.kr)**. 대안 = **블루투스 스피커**(USB 포트가
+1개뿐 · `pulseaudio-module-bluetooth` 설치·로드 완료 · 🔴 페어링 보류) / 백업 = USB 사운드카드 + 컨버터 5 V 스피커.
+`run_display.sh` 의 sink 선택은 HDMI 만 본다 — 스피커가 정해지면 그 sink 를 우선하게 고친다.
 
 사전 1회 `sudo apt install ros-humble-rosbridge-suite`.
 
