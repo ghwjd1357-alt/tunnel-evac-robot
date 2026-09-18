@@ -13,6 +13,7 @@
 #     bash ~/ros2_ws/console/run_display.sh --install-autostart   # 로그인하면 자동으로 뜨게 등록
 #     bash ~/ros2_ws/console/run_display.sh --remove-autostart
 #     bash ~/ros2_ws/console/run_display.sh --no-browser    # 서버만 (다른 PC 브라우저로 볼 때)
+#     bash ~/ros2_ws/console/run_display.sh --no-touch      # 패널 터치 입력을 끈다 (기본은 켜 둠 — 09-18 사용자 결정)
 #
 #   종료: Ctrl+C (브라우저·서버 모두 정리)
 #
@@ -27,7 +28,7 @@ set -eu
 CONSOLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 URL="http://localhost:8000/?display=1"
 AUTOSTART="$HOME/.config/autostart/tunnel-display.desktop"
-NO_BROWSER=""
+NO_BROWSER=""; NO_TOUCH=""
 
 # ── 자동 시작 등록/해제 ─────────────────────────────────────────────
 #   GNOME 데스크톱은 로그인 직후 ~/.config/autostart/*.desktop 을 실행한다.
@@ -52,6 +53,7 @@ EOF
   --remove-autostart)
     rm -f "$AUTOSTART"; echo "✅ 해제: $AUTOSTART"; exit 0 ;;
   --no-browser) NO_BROWSER=1 ;;
+  --no-touch)   NO_TOUCH=1 ;;
   "") ;;
   *) echo "알 수 없는 옵션: $1"; exit 2 ;;
 esac
@@ -131,10 +133,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ── 터치 입력 끄기 — 대피자가 만져도 화면이 안 움직이게 ────────────────
-#   패널 mini-USB 를 꽂으면 터치(@dacai usb touch)가 마우스로 잡힌다. 09-18 책상 검증에서
-#   터치가 kiosk 창을 500x120 으로 끌어 놓아 바탕화면이 드러났다. 우리는 터치를 안 쓴다(결정).
-if command -v xinput >/dev/null 2>&1; then
+# ── 터치 입력 — 기본은 켜 둔다 (09-18 사용자 결정: 설정 작업에 패널 터치를 쓴다) ──────
+#   --no-touch 를 주면 끈다. 패널 mini-USB 를 꽂으면 터치(@dacai usb touch)가 마우스로 잡히고,
+#   09-18 책상 검증에서 터치가 kiosk 창을 500x120 으로 끌어 놓아 바탕화면이 드러난 적이 있다.
+#   🔴 시연 전에는 --no-touch 로 돌릴지 다시 정한다 (대피자 오조작).
+if [ -n "$NO_TOUCH" ] && command -v xinput >/dev/null 2>&1; then
   #   ⚠ 이미 꺼진 장치는 이름 앞에 '∼' 가 붙어 나온다 — 그대로 넘기면 실패하고 set -e 가 스크립트를 죽인다 (09-18)
   xinput list --name-only 2>/dev/null | grep -i touch | sed 's/^[∼~] *//' | while read -r dev; do
     xinput disable "$dev" 2>/dev/null && echo "▶ 터치 입력 끔: $dev" || true
