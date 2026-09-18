@@ -116,7 +116,7 @@ fi
 #   🔴 브라우저 패턴은 브라우저 이름과 묶는다. "display=1" 만으로 찾으면 그 문자열이
 #      들어간 **아무 명령줄**(curl 시험·다른 터미널)까지 -9 로 죽인다 — 09-18 노트북
 #      시험에서 실제로 시험 셸이 죽었다 (AGENTS §4-1 자기매칭 함정의 형제 버전).
-for _pat in "rosbridge_websocket" "console/serve.py" "(chromium|chrome|firefox).*display=1"; do
+for _pat in "rosbridge_websocket" "console/serve.py" "web_video_server" "(chromium|chrome|firefox).*display=1"; do
   for _pid in $(pgrep -f "$_pat" 2>/dev/null); do
     [ "$_pid" = "$$" ] && continue
     [ "$_pid" = "$PPID" ] && continue
@@ -128,6 +128,7 @@ HTTP_PID=""; BR_PID=""
 
 cleanup() {
   pkill -f "rosbridge[_]websocket" 2>/dev/null || true
+  pkill -f "web_video[_]server" 2>/dev/null || true
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" 2>/dev/null || true
   [ -n "$BR_PID" ]   && kill "$BR_PID"   2>/dev/null || true
 }
@@ -173,6 +174,14 @@ fi
 echo "▶ rosbridge 시작 (ws://localhost:9090)"
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml >/tmp/display_rosbridge.log 2>&1 &
 sleep 2
+
+# ── 카메라 MJPEG (:8080) — 관제 "영상"·"로봇 시야" 칸이 이걸 문다 (js/camfeed.js) ────
+#   설치 = sudo apt install ros-humble-web-video-server. 없으면 관제는 데모 클립/자리표시로 남는다.
+if ros2 pkg list 2>/dev/null | grep -q '^web_video_server$'; then
+  ros2 run web_video_server web_video_server --ros-args -p port:=8080 -p default_stream_type:=mjpeg \
+    >/tmp/display_wvs.log 2>&1 &
+  echo "▶ 카메라 스트림 시작 (:8080 MJPEG)"
+fi
 
 echo "▶ 웹서버 시작 (:8000, 캐시 금지)"
 python3 "$CONSOLE_DIR/serve.py" 8000 "$CONSOLE_DIR" >/dev/null 2>&1 &

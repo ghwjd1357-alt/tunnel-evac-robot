@@ -26,10 +26,37 @@
 // 앞에서부터 시도한다. 하나가 실패하면 다음으로 넘어간다.
 const CLIPS = ['media/robot_view.webm', 'media/robot_view.mp4'];
 
+/* 🔵 09-18 실물 결합 — 로봇의 web_video_server(:8080) MJPEG 를 **먼저** 시도한다.
+   관제 페이지를 로봇(젯슨)에서 서빙하므로 호스트는 페이지 주소와 같다. 스냅샷 한 장이
+   받아지면 살아 있는 것으로 보고 <img> 스트림으로 바꾼다. 안 받아지면(노트북 단독·bag 재생)
+   기존 데모 클립 → CAMERA 자리표시 순서 그대로다. 젯슨 기동 = run_display.sh 가 같이 띄운다. */
+const LIVE_HOST = window.location.hostname || 'localhost';
+const LIVE_TOPIC = '/camera/color/image_raw';
+const LIVE_STREAM = `http://${LIVE_HOST}:8080/stream?topic=${LIVE_TOPIC}&type=mjpeg&quality=60`;
+const LIVE_PROBE  = `http://${LIVE_HOST}:8080/snapshot?topic=${LIVE_TOPIC}`;
+
 export function setupCamFeed() {
-  for (const v of document.querySelectorAll('video.camfeed')) {
-    tryClip(v, 0);
-  }
+  const probe = new Image();
+  probe.onload = () => {
+    for (const v of document.querySelectorAll('video.camfeed')) useLive(v);
+  };
+  probe.onerror = () => {
+    for (const v of document.querySelectorAll('video.camfeed')) tryClip(v, 0);
+  };
+  probe.src = LIVE_PROBE + '&t=' + Date.now();
+}
+
+function useLive(v) {
+  const box = v.parentElement;
+  const img = document.createElement('img');
+  img.className = 'camfeed';
+  img.alt = '카메라 실시간';
+  img.src = LIVE_STREAM;
+  img.onerror = () => { img.remove(); box?.classList.remove('live'); tryClip(v, 0); };
+  v.replaceWith(img);
+  box?.classList.add('live');
+  const note = box?.querySelector('.camnote');
+  if (note) note.textContent = 'LIVE';
 }
 
 function tryClip(v, i) {
