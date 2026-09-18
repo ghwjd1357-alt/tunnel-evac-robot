@@ -34,7 +34,12 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 **로봇(젯슨)에서 디스플레이만 띄울 때** = `bash ~/ros2_ws/console/run_display.sh`
 (rosbridge + 웹서버 + 브라우저 kiosk. `--install-autostart` 로 로그인 시 자동 실행).
 `real_bringup.launch.py` 에는 rosbridge 가 없어 이 스크립트가 따로 뜬다.
-🔴 09-18 기준 **노트북에서 서버 기동까지만 검증**했다 — 패널 미장착. kiosk·자동 시작·1 m 가독성은 실장 뒤.
+🟢 **09-18 젯슨 책상 검증 통과** — 패널(CD-HL070T-01C · LONTIUM 수신칩) DP-1 1024×600 네이티브,
+자동 로그인(gdm `AutomaticLogin=hanhan`) → `--install-autostart` → 부팅만으로 kiosk 전체화면.
+그 과정에서 잡은 것 셋: 터치가 kiosk 창을 끌어 놓음(→ xinput 끔) · GNOME Activities 가 창을 가림
+(→ `x11_key.py` Escape ×2) · 바탕화면 아이콘이 창 위에 그려짐(→ ding 확장 끔).
+🔴 **젯슨 브라우저 = Mozilla deb 파이어폭스(ESR)** — snap 크로미움은 JetPack 6 에서 실행 자체가 안 되고,
+SELinux 패키지로 살리려다 부팅이 깨졌다(복구 완료). `policycoreutils`·`selinux-utils` 를 젯슨에 깔지 않는다.
 
 **소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
 상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
@@ -42,7 +47,10 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 브라우저 내장 TTS(젯슨에 한국어 음성이 없으면 조용히 건너뜀). 음성 파일은 `media/voice/make_voice.py` 가
 `i18n.js` 화면 문구를 읽어 만든다(edge-tts · 생성 때만 인터넷) — **문구를 바꾸면 다시 돌린다.**
 🔴 크로미움 자동재생 인자(`--autoplay-policy=no-user-gesture-required`)는 `run_display.sh` 가 넣는다 —
-주소를 손으로 열면 화면은 뜨고 소리만 안 난다. 🔴 스피커 실물 검증 0회 (패널 미장착).
+주소를 손으로 열면 화면은 뜨고 소리만 안 난다.
+🔴 **09-18 실물: 소리가 안 난다 — 패널 보드 쪽.** 젯슨은 재생 중 HDA 핀 활성(`Pin-ctls 0x40`)·ELD 유효·
+스트림 송출까지 확인, 파이어폭스 스트림도 pulse 에 잡힘, 스피커 4 Ω 정상. 32~96 kHz·16/24 bit 전부
+무음. 막힌 곳 = 패널 LONTIUM → NS4168 앰프 사이(펌웨어 또는 보드). **판매처 문의 중** · 대안 = USB 스피커.
 
 사전 1회 `sudo apt install ros-humble-rosbridge-suite`.
 
