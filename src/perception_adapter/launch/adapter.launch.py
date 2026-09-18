@@ -45,7 +45,11 @@ def generate_launch_description():
             description='true = REP-103 optical 회전(-90°,0,-90°)을 넣는다. '
                         '역할 B가 이미 광학 프레임을 발행하면 false'),
         DeclareLaunchArgument('trigger_class', default_value='fire'),
-        DeclareLaunchArgument('min_confidence', default_value='0.40'),
+        # 🔴 09-18 — 0.40 → 0.60. 노드 기본값은 08-22 에 0.60 으로 올렸는데(역할 B §9 실내 오탐
+        #   0.45~0.58) 이 런치가 0.40 을 다시 넘겨 덮어쓰고 있었다. 회귀 test_p20 은 노드 기본값만
+        #   봐서 초록이었고, 실차 어댑터는 0.4 로 돌았다(젯슨 `ros2 param get` 실측). 이제
+        #   test_launch_defaults_match_node 가 런치↔노드 기본값 전부를 대조한다.
+        DeclareLaunchArgument('min_confidence', default_value='0.60'),
         DeclareLaunchArgument('confirm_frames', default_value='5'),
         DeclareLaunchArgument('max_range', default_value='5.0'),
         DeclareLaunchArgument(

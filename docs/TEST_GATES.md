@@ -264,6 +264,13 @@ pytest 수치는 무변동 — 새 단위테스트는 `src/tunnel_bringup/test/`
 
 **⑦ 잔류 cmd_vel 활주** (07-24 신규): `abort_e2e` 의 "실정지"가 깨졌는데 미션 로그의 취소 사슬은 정상 종결(≤100ms)인 경우. `libgazebo_ros_diff_drive` 는 command timeout 이 없어 **마지막 cmd_vel 을 무한 유지**하므로, 중단된 Nav2 회복행동(BackUp 0.05m/s)이 남긴 속도로 로봇이 계속 미끄러진다. 판별 = 이동 속도가 `backup_speed` 와 일치 + launch.log 에 `backup failed`. 이건 미션 코드 결함이 아니다 — 상세 `docs/FREEZE_MANIFEST.md §6`.
 
+**⑧ 살아 있는 로봇의 토픽이 노트북 단위 테스트에 들어온다** (09-18 신규): 젯슨과 노트북이 같은
+망(학교 와이파이·핫스팟)에 있고 로봇 스택이 떠 있으면, pytest 안의 rclpy 노드가 **실제 `/tf` 를
+DDS 로 받는다.** 증상 = "TF 변환이 실패해야 한다"는 부정 회귀(`test_p13`)가 실제 지도 좌표
+`(7.37, −1.32)` 를 얻어 붉어지고, 디스커버리 타이밍에 따라 통과/실패가 갈린다. 판별 = 실패값이
+로봇 좌표처럼 생겼고 로봇이 켜져 있다. 회피 = **`ROS_LOCALHOST_ONLY=1 python3 -m pytest …`**
+(09-18 실측: 격리 전 1 failed 반복 → 격리 후 123/123 ×2). 코드 결함이 아니다.
+
 ## 6. 정확도 벤치 (SLAM·Nav2 튜닝 전/후)
 
 `bash tools/accuracy_bench.sh 라벨` → `bench_out/라벨/` / 비교 `python3 tools/accuracy_report.py A/trace.csv B/trace.csv --labels 전 후 -o compare.png`.
