@@ -24,7 +24,7 @@
 | 대상 | 09-18 상태 | 원복 |
 |---|---|---|
 | `~/percep_ws/src/…/perception_node.py` · `install/…/perception_node.py` | **`perception_node_0904.py`** (md5 `87a587af`) | 옆의 `perception_node.py.bak_original_0918` (sha256 `aed2d07a…`) 을 제자리 복사 + `p.sh` 재기동 |
-| `~/p.sh` 카메라 줄 | `time_domain:=system` 추가 · **`1280x720`**(640×480 → 화각·화질, 사용자 결정) | `~/p.sh.bak_0918` |
+| `~/p.sh` 카메라 줄 | `time_domain:=system` 추가 · **`1280x720 @15fps`**(640×480@30 → 화각·화질, 사용자 결정. 30fps 는 드라이버 135 % 로 YOLO 가 2.9 Hz 까지 밀렸다 → 15fps 에서 7.1 Hz) | `~/p.sh.bak_0918` |
 | `~/p.sh` `stop_all` | `adapter_nod[e]`·`perception_nod[e]` 자식도 죽임 (실행마다 어댑터가 쌓이던 것) | 같음 |
 | `OrbbecSDK_ROS2 …/gemini2.launch.py` | `color_rotation`·`color_mirror`·`depth_rotation`·`depth_mirror` 인자 **선언만** 추가(기본 -1/false = 무효과) | `gemini2.launch.py.bak_0918` |
 
