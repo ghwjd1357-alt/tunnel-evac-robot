@@ -1,0 +1,10 @@
+# 젯슨 USB 자동 절전(autosuspend) 끄기 — 예약 66 ⓐ (2026-09-18)
+#
+# 카메라(Orbbec Gemini)가 절전 진입/복귀를 반복하면 재열거(dev 7→8→9→10)가 나고,
+# 그 순간의 전류 요동이 같은 5V 계통의 라이다 시리얼(cp210x)을 흔든다(08-22 실측).
+# 기본값 usbcore.autosuspend=2 (2초). 이 규칙은 붙는 USB 장치 전부를 항상 켜 둔다.
+#
+# 설치:  sudo cp tools/jetson/50-usb-no-autosuspend.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+# 확인:  for d in /sys/bus/usb/devices/*/power/control; do echo "$d=$(cat $d)"; done   → 전부 on
+# 해제:  sudo rm /etc/udev/rules.d/50-usb-no-autosuspend.rules
+ACTION=="add", SUBSYSTEM=="usb", TEST=="power/control", ATTR{power/control}="on"

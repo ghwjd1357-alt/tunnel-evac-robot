@@ -5145,6 +5145,14 @@ MIN_EFFECTIVE_WHEEL_CMD = 0.020;   // 0 이 아닌 모든 바퀴 명령을 0.02 
 
     ⏸ **재개 시점** = 시연영상 확보 후. YOLO 통합의 **선결 조건**이다.
 
+    🔵 **09-18 재개 — 절반은 구성이 바뀌며 사라졌다.** 08-22 의 버스파워 허브는 이제 없다 —
+    Teensy·라이다·카메라가 젯슨 포트에 **직결**이고 열화상 ESP32 는 없다(사용자 확인).
+    ⓐ autosuspend 끄기 = `tools/jetson/50-usb-no-autosuspend.rules`(설치 한 줄은 파일 머리).
+    판정기 = **`tools/usb_cam_lidar_test.py`** — 완료판정 넷을 기계로 대조(≥180 s · `/scan`
+    최대 공백 <1.0 s · 커널 usb disconnect/urb −32/reset/over-current 0 건 · **움직인 시간 ≥60 %**
+    = 정지 시험 무효). 회귀 `tools/test_usb_cam_lidar_test.py` 8 케이스(변이 확인).
+    🔴 **닫히지 않았다** — 실차 3분 주행이 아직 없다. 통과 로그가 나오면 이 줄 아래에 적는다.
+
 - **🔴 예약 67 — 긴 직선 복도에서 위치추정이 진행 방향을 고정하지 못한다 (2026-08-22 신설)**
 
     **등록 사유** — `slam_toolbox` localization 은 스캔매칭이라 **20 m 짜리 특징 없는
