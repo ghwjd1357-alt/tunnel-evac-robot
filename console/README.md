@@ -45,6 +45,17 @@ SELinux 패키지로 살리려다 부팅이 깨졌다(복구 완료). `policycor
 유무를 모르므로 **백피딩**(컨버터 5 V → 젯슨 USB) 위험. 최종 = DC 잭 전원 + **VBUS 끊은 USB**(터치만).
 🔵 젯슨 접속: 학교망이면 `ssh hanhan@jetson.local`, 네트워크가 죽어도 **USB 케이블 `192.168.55.1`** 로 붙는다.
 
+**네트워크 — 관제·영상은 회선이 전부다** (09-18 실측)
+| 경로 | 실측 | 판정 |
+|---|---|---|
+| 폰 핫스팟 (노트북·젯슨 둘 다 폰에 붙음) | **≈1 Mbps** · RTT 131 ms(지터 112) · 720p 프레임(195 KB) 1장에 1.4 s | ❌ 영상 통째로 끊김. 재전송 수십만 건 |
+| **USB 케이블** 젯슨↔노트북 (`192.168.55.1`) | 100 Mbps 급 · 네트워크가 죽어도 붙음 | ✅ 개발·확인용 |
+| 노트북 AP (`nmcli con up tunnel-console` · 5 GHz ch36 · psk `tunnel2026`) | 직결. 노트북 인터넷은 끊김(Claude 세션 불가) | 🔶 프로필은 노트북·젯슨 양쪽에 만들어 둠 · **연결 검증 미완**(09-18 시도, 젯슨이 안 붙음 — 원인 미확인) |
+| 휴대용 5 GHz 공유기 | — | 시연장 정답 후보 |
+🔴 `jetson.local` 이름 해석이 핫스팟에서 가끔 안 된다 — 그땐 `ip`(`hostname -I`)로. 관제가 안 열리면 먼저
+젯슨에서 `pgrep -f rosbridge` — `run_display.sh` 를 내리면(kiosk 종료·Ctrl+C) rosbridge·웹서버·MJPEG 가
+**같이 내려간다.** 복구 = 재부팅(자동 시작) 또는 `bash console/run_display.sh`.
+
 **소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
 상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
 🔴 **끊김·미션 낡음·`FAULT`·`BLOCKED` 는 침묵** — 틀린 안내보다 침묵이 안전하다. 관제가 보낸 문구는
@@ -136,6 +147,11 @@ media/voice/        안내 음성 mp3 10종 (make_voice.py 가 i18n.js 문구로
 serve.py            ★ 캐시 금지 정적 서버 — `python3 -m http.server` 로 되돌리지 않는다
 wait_client.py      촬영용 — 브라우저 접속을 기다렸다가 bag 을 시작
 ```
+
+**카메라 실시간** — `web_video_server`(:8080 MJPEG, `run_display.sh` 가 띄움). "영상" 메뉴 큰 칸 = **YOLO 결합 화면**
+(`/camera/debug_image`, 노드가 이미 똑바로 돌려 그림), 로봇 시야·비상 = 원본(`/camera/color/image_raw`, 180° 뒤집혀
+오므로 CSS 회전). 카메라는 `p.sh` 가 **1280×720 @15 fps** 로 띄운다(30 fps 는 드라이버 135 % 로 YOLO 2.9 Hz →
+15 fps 에서 7.1 Hz). 젯슨 인지 상태 정본 = `docs/handover/0904_perception/README.md §0-a`.
 
 🔴 `serve.py` 는 `Cache-Control: no-store` 를 보낸다. 브라우저가 낡은 모듈과 새 모듈을
 섞어 물면 **화면이 아무 오류 없이 "연결 대기"로 죽는다** (`PITFALLS §20-③`).
