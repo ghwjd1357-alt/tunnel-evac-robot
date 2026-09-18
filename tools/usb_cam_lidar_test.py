@@ -84,11 +84,13 @@ def main():
     node.create_subscription(Odometry, '/odom', on_odom, 10)
     t0 = time.monotonic()
     print(f'예약 66 감시 시작 — {a.duration:.0f}s · 로봇을 계속 움직여라 (정지 시험은 무효)', flush=True)
+    next_report = 0.0
     try:
         while time.monotonic() - t0 < a.duration:
             rclpy.spin_once(node, timeout_sec=0.2)
             el = time.monotonic() - t0
-            if int(el) % 30 == 0 and abs(el - int(el)) < 0.2:
+            if el >= next_report:                    # 30초마다 한 줄 (09-18 실차: 같은 초에 여러 줄 찍혔다)
+                next_report += 30.0
                 # 마지막 수신 뒤 지금까지의 침묵도 공백에 넣는다 — 끊긴 채 끝나는 경우
                 gap_now = (time.monotonic() - st['scan_last']) if st['scan_last'] else 0.0
                 print(f'  {el:5.0f}s  scan {st["scan_n"]:5d}건 · 최대공백 {max(st["scan_gap"], gap_now):.2f}s · '
@@ -104,7 +106,13 @@ def main():
     print(f'관측 {dur:.0f}s · /scan {st["scan_n"]}건 · 최대 공백 {st["scan_gap"]:.2f}s · '
           f'움직임 {moving*100:.0f}% · USB 이상 {len(usb_events)}건')
     print('🟢 PASS — 완료판정 충족' if ok else '🔴 FAIL — ' + ' / '.join(why))
-    node.destroy_node(); rclpy.shutdown()
+    # Ctrl+C 로 끝내면 rclpy 가 이미 종료돼 있다 — 두 번 부르면 RCLError (09-18 실차)
+    try:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+    except Exception:
+        pass
     sys.exit(0 if ok else 1)
 
 
