@@ -32,10 +32,9 @@ const CLIPS = ['media/robot_view.webm', 'media/robot_view.mp4'];
    기존 데모 클립 → CAMERA 자리표시 순서 그대로다. 젯슨 기동 = run_display.sh 가 같이 띄운다. */
 const LIVE_HOST = window.location.hostname || 'localhost';
 const LIVE_TOPIC = '/camera/color/image_raw';
-/* 🔴 핫스팟 와이파이에서 640×480 q60(≈5 Mbps)은 통째로 끊긴다(09-18 실측). 관제의 카메라 칸은
-   작으므로 320×240 q40 으로 줄여 트래픽을 1/4 이하로 — 화질 손해는 화면에서 안 보인다.
-   시연장은 유선/전용 공유기가 근본 대책. */
-const LIVE_STREAM = `http://${LIVE_HOST}:8080/stream?topic=${LIVE_TOPIC}&type=mjpeg&quality=40&width=320&height=240`;
+/* 🔵 화질은 원본 유지(사용자 결정 09-18). 핫스팟 와이파이에선 ≈5 Mbps 라 끊길 수 있다 —
+   근본 대책은 노트북↔젯슨 유선/전용 공유기(시연장). */
+const LIVE_STREAM = `http://${LIVE_HOST}:8080/stream?topic=${LIVE_TOPIC}&type=mjpeg&quality=60`;
 const LIVE_PROBE  = `http://${LIVE_HOST}:8080/snapshot?topic=${LIVE_TOPIC}`;
 
 export function setupCamFeed() {
