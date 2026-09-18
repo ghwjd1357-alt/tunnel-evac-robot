@@ -127,6 +127,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# ── 터치 입력 끄기 — 대피자가 만져도 화면이 안 움직이게 ────────────────
+#   패널 mini-USB 를 꽂으면 터치(@dacai usb touch)가 마우스로 잡힌다. 09-18 책상 검증에서
+#   터치가 kiosk 창을 500x120 으로 끌어 놓아 바탕화면이 드러났다. 우리는 터치를 안 쓴다(결정).
+if command -v xinput >/dev/null 2>&1; then
+  xinput list --name-only 2>/dev/null | grep -i touch | while read -r dev; do
+    xinput disable "$dev" 2>/dev/null && echo "▶ 터치 입력 끔: $dev"
+  done
+fi
+
 # ── 화면 꺼짐 방지 — 디스플레이는 몇 시간이고 켜 둔다 ──────────────────
 #   X11 이면 xset, GNOME 이면 gsettings. 둘 다 실패해도 진행한다(없는 환경).
 xset s off -dpms 2>/dev/null || true
