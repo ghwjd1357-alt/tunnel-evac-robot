@@ -17,7 +17,33 @@
 
 ---
 
-## 1. 🔴 젯슨에 남아 있는 변경 — 전부
+## 0-a. 🔵 09-18 — 젯슨에 **적용했다** (사용자 결정 · 역할 A 작업)
+
+09-04 판을 젯슨에 올렸다. 이 절이 §1 의 "원본 무손상" 상태를 **대체**한다.
+
+| 대상 | 09-18 상태 | 원복 |
+|---|---|---|
+| `~/percep_ws/src/…/perception_node.py` · `install/…/perception_node.py` | **`perception_node_0904.py`** (md5 `87a587af`) | 옆의 `perception_node.py.bak_original_0918` (sha256 `aed2d07a…`) 을 제자리 복사 + `p.sh` 재기동 |
+| `~/p.sh` 카메라 줄 | `time_domain:=system` 추가 | `~/p.sh.bak_0918` |
+| `~/p.sh` `stop_all` | `adapter_nod[e]`·`perception_nod[e]` 자식도 죽임 (실행마다 어댑터가 쌓이던 것) | 같음 |
+| `OrbbecSDK_ROS2 …/gemini2.launch.py` | `color_rotation`·`color_mirror`·`depth_rotation`·`depth_mirror` 인자 **선언만** 추가(기본 -1/false = 무효과) | `gemini2.launch.py.bak_0918` |
+
+실측(09-18 · 회의실, 사람 4명 앉음): `TIMING2 fire=31.4ms pose=25.2ms`(원본 152/89) · 디버그 영상에
+`person_ok 0.91 2.2m` 등 거리 포함 판정 · 어댑터 `frames=1795 hits=0 fire 없음 · 탐지 4건`.
+
+🔴 **함정 3개를 더 밟았다** (§8 의 셋에 추가):
+4. **카메라 `time_domain=global`(기본) 은 재기동 뒤 컬러/깊이 stamp 가 수 초 어긋난다** (실측 컬러 −2 s ·
+   깊이 −11 s) → `ApproximateTimeSynchronizer` 가 영영 안 맞고 `WATCHDOG sync_failed_no_callback` 만 남는다.
+   `time_domain:=system` 으로 고정.
+5. **카메라 180° 보정은 이 노드 안에 이미 있다**(`ROTATE_180`, 08-22). 드라이버 `color_rotation:=180` 을 같이
+   주면 **이중 반전**돼 자세 판정이 다시 `unknown` 이 된다. 드라이버는 돌리지 않는다(관제 화면만 CSS 회전).
+6. **`p.sh stop` 은 `ros2 launch` 껍데기만 죽였다** → `adapter_node` 가 실행마다 하나씩 쌓인다(4개까지 관측).
+   `/perception_adapter` 가 둘 이상이면 `/person_status` 가 두 곳에서 나온다. `stop_all` 에 pkill 추가.
+
+⚠ **어댑터 실물 자세 판정(서기→ok · 눕기→fallen · 나가기→none)은 아직 못 봤다** — 시험 시점에 카메라 앞에
+사람이 4명(회의) 있어 `unknown` 이 정답인 상황이었다. 한 사람 조건으로 다시 잰다.
+
+## 1. 🔴 젯슨에 남아 있는 변경 — 전부 (09-04 시점 · 위 §0-a 로 갱신됨)
 
 | 대상 | 상태 | 원복 방법 |
 |---|---|---|
