@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════
+# 로봇 몸통 디스플레이 기동 (2026-09-18 신설) — Jetson 에서 실행
+#
+#   rosbridge(:9090) + 캐시금지 웹서버(:8000) + 브라우저 전체화면(kiosk)
+#   → 7인치 패널에 http://localhost:8000/?display=1 이 뜬다
+#
+#   real_bringup.launch.py 에는 rosbridge 가 없다. 로봇 스택과 별개로
+#   이 스크립트가 따로 뜬다 — 죽어도 로봇은 계속 간다(반대도 마찬가지).
+#
+#   사용:
+#     bash ~/ros2_ws/console/run_display.sh                 # 지금 띄운다
+#     bash ~/ros2_ws/console/run_display.sh --install-autostart   # 로그인하면 자동으로 뜨게 등록
+#     bash ~/ros2_ws/console/run_display.sh --remove-autostart
+#     bash ~/ros2_ws/console/run_display.sh --no-browser    # 서버만 (다른 PC 브라우저로 볼 때)
+#
+#   종료: Ctrl+C (브라우저·서버 모두 정리)
+#
+# 🔴 run_console.sh 와 같이 띄우지 않는다 — 둘 다 :9090/:8000 을 쓴다.
+#    (시작할 때 이전 실행 잔재를 죽이는 것도 run_console.sh 와 같은 이유 = PITFALLS §20-③)
+# ⚠ set -u 는 ROS setup source 뒤에 (테스트/스크립트 함정 ①)
+# ═══════════════════════════════════════════════════════════════════
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash 2>/dev/null || true
+set -eu
+
+CONSOLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+URL="http://localhost:8000/?display=1"
+AUTOSTART="$HOME/.config/autostart/tunnel-display.desktop"
+NO_BROWSER=""
+
+# ── 자동 시작 등록/해제 ─────────────────────────────────────────────
+#   GNOME 데스크톱은 로그인 직후 ~/.config/autostart/*.desktop 을 실행한다.
+#   systemd 서비스가 아니라 이걸 쓰는 이유: 브라우저는 그래픽 세션 안에서만
+#   뜬다(DISPLAY·Wayland 소켓). 세션 밖 systemd 에서 띄우면 화면 없이 죽는다.
+#   🔴 자동 로그인(설정 → 사용자 → 자동 로그인)이 켜져 있어야 부팅만으로 뜬다.
+case "${1:-}" in
+  --install-autostart)
+    mkdir -p "$(dirname "$AUTOSTART")"
+    cat > "$AUTOSTART" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Tunnel Robot Display
+Comment=로봇 몸통 디스플레이 (rosbridge + 웹서버 + kiosk 브라우저)
+Exec=bash -c 'sleep 8; bash $CONSOLE_DIR/run_display.sh'
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+    echo "✅ 등록: $AUTOSTART  (로그인 8초 뒤 자동 실행)"
+    echo "   해제: bash $CONSOLE_DIR/run_display.sh --remove-autostart"
+    exit 0 ;;
+  --remove-autostart)
+    rm -f "$AUTOSTART"; echo "✅ 해제: $AUTOSTART"; exit 0 ;;
+  --no-browser) NO_BROWSER=1 ;;
+  "") ;;
+  *) echo "알 수 없는 옵션: $1"; exit 2 ;;
+esac
+
+if ! ros2 pkg list 2>/dev/null | grep -q rosbridge_server; then
+  echo "❌ rosbridge 미설치. 먼저:  sudo apt install ros-humble-rosbridge-suite"
+  exit 1
+fi
+
+# ── 브라우저 고르기 — 있는 것 아무거나. kiosk = 주소창·탭·닫기 버튼 없음 ──
+BROWSER=""; BROWSER_ARGS=()
+for b in chromium chromium-browser google-chrome; do
+  if command -v "$b" >/dev/null 2>&1; then
+    BROWSER="$b"
+    # --incognito : 이전 세션 복원 팝업("비정상 종료") 차단 — 전원을 그냥 끄는 로봇이라 매번 뜬다
+    # --kiosk     : 전체화면 + 조작 UI 없음
+    BROWSER_ARGS=(--kiosk --incognito --noerrdialogs --disable-infobars --disable-session-crashed-bubble
+                  --no-first-run --window-size=1024,600 --window-position=0,0 "$URL")
+    break
+  fi
+done
+if [ -z "$BROWSER" ] && command -v firefox >/dev/null 2>&1; then
+  BROWSER=firefox
+  BROWSER_ARGS=(--kiosk --private-window "$URL")
+fi
+if [ -z "$NO_BROWSER" ] && [ -z "$BROWSER" ]; then
+  echo "❌ 브라우저 없음. 먼저:  sudo apt install chromium-browser   (또는 firefox)"
+  exit 1
+fi
+
+# ── 이전 실행 잔재 정리 (자기 자신·부모는 제외) ──────────────────────
+#   🔴 브라우저 패턴은 브라우저 이름과 묶는다. "display=1" 만으로 찾으면 그 문자열이
+#      들어간 **아무 명령줄**(curl 시험·다른 터미널)까지 -9 로 죽인다 — 09-18 노트북
+#      시험에서 실제로 시험 셸이 죽었다 (AGENTS §4-1 자기매칭 함정의 형제 버전).
+for _pat in "rosbridge_websocket" "console/serve.py" "(chromium|chrome|firefox).*display=1"; do
+  for _pid in $(pgrep -f "$_pat" 2>/dev/null); do
+    [ "$_pid" = "$$" ] && continue
+    [ "$_pid" = "$PPID" ] && continue
+    kill -9 "$_pid" 2>/dev/null || true
+  done
+done
+sleep 1
+HTTP_PID=""; BR_PID=""
+
+cleanup() {
+  pkill -f "rosbridge[_]websocket" 2>/dev/null || true
+  [ -n "$HTTP_PID" ] && kill "$HTTP_PID" 2>/dev/null || true
+  [ -n "$BR_PID" ]   && kill "$BR_PID"   2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# ── 화면 꺼짐 방지 — 디스플레이는 몇 시간이고 켜 둔다 ──────────────────
+#   X11 이면 xset, GNOME 이면 gsettings. 둘 다 실패해도 진행한다(없는 환경).
+xset s off -dpms 2>/dev/null || true
+gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null || true
+
+echo "▶ rosbridge 시작 (ws://localhost:9090)"
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml >/tmp/display_rosbridge.log 2>&1 &
+sleep 2
+
+echo "▶ 웹서버 시작 (:8000, 캐시 금지)"
+python3 "$CONSOLE_DIR/serve.py" 8000 "$CONSOLE_DIR" >/dev/null 2>&1 &
+HTTP_PID=$!
+# 서버가 실제로 응답할 때까지 기다린다 — 브라우저가 먼저 뜨면 "연결할 수 없음" 페이지가 박힌다
+for _ in $(seq 1 20); do
+  curl -s -o /dev/null "http://localhost:8000/" 2>/dev/null && break
+  sleep 0.5
+done
+
+if [ -n "$NO_BROWSER" ]; then
+  echo "▶ 브라우저는 안 띄움. 다른 PC 에서:  http://<젯슨IP>:8000/?display=1"
+else
+  echo "▶ 브라우저($BROWSER) kiosk → $URL"
+  "$BROWSER" "${BROWSER_ARGS[@]}" >/tmp/display_browser.log 2>&1 &
+  BR_PID=$!
+fi
+
+echo "  (Ctrl+C 로 전부 종료)"
+wait

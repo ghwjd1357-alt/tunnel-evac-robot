@@ -31,6 +31,11 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 | `http://localhost:8000` | 관제 |
 | `http://localhost:8000/?display=1` | 로봇 몸통 디스플레이 (7인치 1024x600) |
 
+**로봇(젯슨)에서 디스플레이만 띄울 때** = `bash ~/ros2_ws/console/run_display.sh`
+(rosbridge + 웹서버 + 브라우저 kiosk. `--install-autostart` 로 로그인 시 자동 실행).
+`real_bringup.launch.py` 에는 rosbridge 가 없어 이 스크립트가 따로 뜬다.
+🔴 09-18 기준 **노트북에서 서버 기동까지만 검증**했다 — 패널 미장착. kiosk·자동 시작·1 m 가독성은 실장 뒤.
+
 사전 1회 `sudo apt install ros-humble-rosbridge-suite`.
 
 🔴 `--bag` 은 **재생**이다. 실시간 주행이 아니다. 영상·문서에 "실시간"으로 쓰지 않는다.
@@ -81,6 +86,8 @@ bash console/run_console.sh --bag realtake6 --at 163 --on-connect
 
 **말** — 한글을 크게, 코드값은 작게 병기. 대응표 = `js/i18n.js`.
 디스플레이는 **대피자가 읽는 말**을 따로 쓴다(`GUIDE` → "따라오세요").
+🔴 **끊기면 마지막 말을 지운다** — rosbridge 가 죽거나 미션 노드가 5초 침묵하면 "따라오세요" 대신
+"연결 끊김"/"신호 없음"(회색)을 띄운다. 켜두고 아무도 안 만지는 화면이라 낡은 안내가 제일 위험하다(`js/display.js`).
 
 **글꼴** — 나눔고딕. Noto Sans CJK KR 은 어디에나 기본이라 "아무 설정 안 한 화면"으로 읽힌다.
 둘 다 로컬에 있어 인터넷 없이 동작한다.
@@ -98,7 +105,9 @@ js/mission.js       관제 화면       js/video.js    영상·의사소통
 js/diag.js          진단 화면       js/record.js   기록 화면
 js/emergency.js     비상 원격 조종  js/alert.js    ★ 경보 규칙 10종
 js/log.js  i18n.js  로그 · 말 대응표
-run_console.sh      rosbridge + 웹서버 + bag 재생 한 줄 기동
+run_console.sh      rosbridge + 웹서버 + bag 재생 한 줄 기동 (노트북·촬영)
+run_display.sh      젯슨용 — rosbridge + 웹서버 + 브라우저 kiosk (`--install-autostart`)
+js/display.js       ★ 디스플레이 문구 우선순위 — 끊김 > 관제 문구 > 상태 낡음 > 상태 문구
 serve.py            ★ 캐시 금지 정적 서버 — `python3 -m http.server` 로 되돌리지 않는다
 wait_client.py      촬영용 — 브라우저 접속을 기다렸다가 bag 을 시작
 ```
@@ -159,6 +168,7 @@ z = 구동 상태 — 0 해제 / 1 대기 / 2 무장 / 3 무장대기 / 4 무장
 ```bash
 python3 console/test/check_wiring.py         # 배선 정합 (id·import·CSS 변수·이모지)
 node console/test/test_alerts.mjs            # 경보 규칙 15 케이스
+node console/test/test_display.mjs           # 디스플레이 문구 24 케이스 (끊김·낡음이 마지막 문구를 지우는가)
 node console/test/run_console_test.mjs 60    # 실데이터 — bag 재생 중에 실행
 ```
 

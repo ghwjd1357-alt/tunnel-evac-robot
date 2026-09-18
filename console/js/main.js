@@ -13,7 +13,8 @@ import { setupDiag } from './diag.js';
 import { setupRecord } from './record.js';
 import { setupEmergency } from './emergency.js';
 import { evaluateAlerts, healthSummary } from './alert.js';
-import { hms, MODE_OF, MODE_KO, DISPLAY_KO } from './i18n.js';
+import { hms, MODE_OF, MODE_KO } from './i18n.js';
+import { displayText } from './display.js';
 
 /* ── 메뉴 전환: 화면 4개 중 하나만 보인다 ─────────────────────── */
 function setupMenu() {
@@ -59,24 +60,18 @@ function moveMap(name) {
 /* ── 상단바 (모든 화면 공통) ──────────────────────────────────── */
 /**
  * 로봇 몸통 디스플레이에 띄우는 문구.
- * 관제가 보낸 문구(/display_msg)가 있으면 그게 우선이다 — 사람이 일부러 보낸 말이니까.
- * 없으면 임무 상태를 대피자가 읽을 말로 바꿔 띄운다.
+ * 무엇을 띄울지는 display.js 가 정한다(연결 끊김 > 관제 문구 > 상태 낡음 > 상태 문구).
+ * 여기서는 그 결과를 DOM 에 옮기기만 한다.
  */
 function renderDisplay(s) {
   if (!document.body?.classList?.contains('display')) return;
   const box = document.getElementById('big-state');
-  const said = s.sayText && s.sayAt && (Date.now() - s.sayAt < SAY_HOLD_MS);
-  box.classList.toggle('said', !!said);
-  if (said) {
-    txt('big-main', s.sayText);
-    txt('big-sub', '관제에서 보낸 안내입니다');
-    return;
-  }
-  const [main, sub] = DISPLAY_KO[s.mission] || ['연결 중', '관제와 연결하고 있습니다'];
+  const { main, sub, cls } = displayText(s);
+  box.classList.toggle('said', cls === 'said');
+  box.classList.toggle('offline', cls === 'offline');
   txt('big-main', main);
   txt('big-sub', sub);
 }
-const SAY_HOLD_MS = 20000;   // 보낸 문구를 20초 띄운 뒤 상태 문구로 돌아간다
 const txt = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
 
 function renderTop(s) {

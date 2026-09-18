@@ -335,12 +335,17 @@ body.display[data-mode="critical"] #big-main { color: var(--alarm); }
 
 /* 관제가 보낸 문구가 있으면 그게 주인공이 된다 */
 body.display #big-state.said #big-main { color: var(--accent); }
+/* 연결 끊김·상태 낡음 — 낡은 안내를 믿고 따라가지 않도록 문구를 죽인다.
+   모드 색(incident/critical)보다 뒤에 두어 이긴다 (2026-09-18) */
+body.display #big-state.offline #big-main { color: var(--dimmer); }
 
 body.display #display-map { min-height: 0; min-width: 0; display: grid; }
 body.display #display-map > #map-panel { min-width: 0; min-height: 0; }
 /* 대피자가 지도를 만지지 못하게 */
 body.display #map-canvas { cursor: default; pointer-events: none; }
 body.display #map-toggles { display: none; }
+/* 마우스 좌표 읽기(#map-coord)는 관제용 — 패널에는 마우스가 없어 '—' 만 남는다 */
+body.display #map-coord { display: none; }
 
 /* ═══ 화면 · 영상 · 의사소통 ═════════════════════════════════════
    메인의 '로봇 시야'는 작은 확인용, 여기는 크게 보는 자리.
