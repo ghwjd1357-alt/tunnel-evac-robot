@@ -56,6 +56,18 @@ SELinux 패키지로 살리려다 부팅이 깨졌다(복구 완료). `policycor
 젯슨에서 `pgrep -f rosbridge` — `run_display.sh` 를 내리면(kiosk 종료·Ctrl+C) rosbridge·웹서버·MJPEG 가
 **같이 내려간다.** 복구 = 재부팅(자동 시작) 또는 `bash console/run_display.sh`.
 
+**🎬 패널 촬영 — 기록의 한 구간만 재생한다** (10-02)
+```
+bash ~/ros2_ws/console/run_display.sh --bag gather_take --rate 1.8 --loop
+```
+`gather_take` = `realtake6` 131.3~140.3초를 `tools/bag_slice.py` 로 자른 것(2.5 MB · 9 s).
+1.8배속이면 **한 바퀴 5초 · 재생 1.7초에 `SCAN_AREA → GATHER`**("주변을 살피는 중" → "여기서
+기다리세요"). `--loop` 라 5초마다 돌아와 4초 클립을 몇 번이든 다시 찍는다.
+🔴 **재생이지 실시간 주행이 아니다** — 영상·문서에 "실시간"으로 쓰지 않는다. 배속 사실도 숨기지 않는다.
+🔴 잘린 bag 은 **재생 재료이지 증거가 아니다** — 측정·분석은 원본 `realtake6` 으로 한다.
+🔵 다른 구간을 찍으려면 `python3 tools/bag_slice.py <원본> <새이름> --start A --end B` (전이 시각은
+`run_console.sh` 머리의 장면표 또는 `/mission_state` 를 직접 훑어 찾는다).
+
 **소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
 상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
 🔴 **끊김·미션 낡음·`FAULT`·`BLOCKED` 는 침묵** — 틀린 안내보다 침묵이 안전하다. 관제가 보낸 문구는

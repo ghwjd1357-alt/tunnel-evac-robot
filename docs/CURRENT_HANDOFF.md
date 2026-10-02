@@ -27,6 +27,9 @@
 🧠 인지     🟢 09-18 젯슨에 **0904 판(TensorRT · fire 31 ms) 적용** + 카메라 `time_domain:=system` — 사슬
           카메라→YOLO→어댑터 실물로 흐름(4명 탐지·거리). 🔴 어댑터 자세 판정(ok/fallen/none) 실증은 **한 사람 조건**에서 아직.
           젯슨 로컬 변경 목록·원복 = `docs/handover/0904_perception/README.md §0-a`. 어댑터 fire 문턱 런치 0.40→0.60 (`dc48773`).
+🎬 10-02   패널 촬영 재료 준비 — `gather_take`(realtake6 131.3~140.3 s · 2.5 MB)를 젯슨에 두고
+          `run_display.sh --bag gather_take --rate 1.8 --loop` 로 **5초 루프 · 1.7초에 SCAN_AREA→GATHER**.
+          자르는 도구 = `tools/bag_slice.py`(회귀 6 · 래치 프라임). 실행법·금지 서술 = `console/README.md`.
 📡 회선     🔴 **폰 핫스팟은 1 Mbps** — 관제 영상이 통째로 끊긴다(실측). 개발·확인 = USB `192.168.55.1`, 시연 = 노트북 AP
           (`tunnel-console`, 검증 미완) 또는 휴대용 5 GHz 공유기. 무선은 장점이지 폰 중계가 장점이 아니다 (`console/README.md`).
 ```
