@@ -30,6 +30,9 @@
 🎬 10-02   패널 촬영 재료 준비 — `gather_take`(realtake6 131.3~140.3 s · 2.5 MB)를 젯슨에 두고
           `run_display.sh --bag gather_take --rate 1.8 --loop` 로 **5초 루프 · 1.7초에 SCAN_AREA→GATHER**.
           자르는 도구 = `tools/bag_slice.py`(회귀 6 · 래치 프라임). 실행법·금지 서술 = `console/README.md`.
+🎬 10-02   패널 촬영 재료 — `gather_take`(realtake6 두 구간 이어 붙임 · 2.2 MB · 7.5 s)를 젯슨에 두고
+          `run_display.sh --bag gather_take --rate 1.5 --loop` → **5초 루프로 SCAN_AREA→GATHER→GUIDE**.
+          도구 = `tools/bag_slice.py`(회귀 9 · 래치 프라임 · 다중 구간). 실행법·금지 서술 = `console/README.md`.
 📡 회선     🔴 **폰 핫스팟은 1 Mbps** — 관제 영상이 통째로 끊긴다(실측). 개발·확인 = USB `192.168.55.1`, 시연 = 노트북 AP
           (`tunnel-console`, 검증 미완) 또는 휴대용 5 GHz 공유기. 무선은 장점이지 폰 중계가 장점이 아니다 (`console/README.md`).
 ```

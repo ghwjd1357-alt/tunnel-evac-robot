@@ -20,7 +20,7 @@ ROWS = [
     (17, SCAN, S(10.0)),     # 구간 끝 경계 — 포함
     (18, SCAN, S(10.1)),     # 구간 밖
 ]
-WINDOW = dict(t0=T0, start_ns=S(5.0), end_ns=S(10.0), prime_topic_ids={MAP, TF})
+WINDOW = dict(windows=[(S(5.0), S(10.0))], prime_topic_ids={MAP, TF})
 
 
 def test_window_keeps_boundaries_and_drops_outside():
@@ -50,8 +50,34 @@ def test_no_prime_when_topic_not_latched():
 
 
 def test_empty_window_returns_nothing():
-    assert m.plan_messages(ROWS, t0=T0, start_ns=S(20.0), end_ns=S(21.0),
-                           prime_topic_ids=set()) == []
+    assert m.plan_messages(ROWS, windows=[(S(20.0), S(21.0))], prime_topic_ids=set()) == []
+
+
+# ── 여러 구간 이어 붙이기 (10-02) ────────────────────────────────────
+#   한 상태가 길어 클립이 늘어질 때 그 가운데를 들어낸다. 뒤 구간은 앞 구간 끝에 붙어야
+#   재생이 끊기지 않는다 — 공백이 남으면 화면이 그 시간만큼 멈춰 보인다.
+TWO = dict(windows=[(S(1.0), S(2.0)), (S(7.0), S(10.0))], prime_topic_ids=set())
+
+
+def test_stitched_windows_have_no_gap_between_them():
+    got = dict(m.plan_messages(ROWS, **TWO))
+    assert got[12] == S(1.0), '첫 구간은 원래 시각 그대로'
+    # 두 번째 구간(7~10s)은 공백 5초(2→7)만큼 당겨진다
+    assert got[16] == S(7.5) - (S(7.0) - S(2.0)), '뒤 구간이 앞 구간 끝에 붙는다'
+    assert got[17] == S(10.0) - (S(7.0) - S(2.0))
+    total = max(got.values()) - min(got.values())
+    assert total == S(4.0) - S(0.0), f'총 길이 = 구간 길이 합(1+3초)이어야 한다: {total/1e9}s'
+
+
+def test_stitched_windows_drop_the_gap_messages():
+    got = dict(m.plan_messages(ROWS, **TWO))
+    assert 14 not in got and 15 not in got, '들어낸 구간(4.9·5.0s)은 안 들어간다'
+
+
+def test_prime_uses_only_the_first_window():
+    got = dict(m.plan_messages(ROWS, windows=[(S(5.0), S(6.0)), (S(7.0), S(8.0))],
+                               prime_topic_ids={MAP, TF}))
+    assert got[13] == S(5.0) and got[11] == S(5.0), '프라임은 첫 구간 시작으로'
 
 
 def test_display_topic_list_matches_console_subscriptions():

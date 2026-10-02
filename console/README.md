@@ -68,6 +68,26 @@ bash ~/ros2_ws/console/run_display.sh --bag gather_take --rate 1.8 --loop
 🔵 다른 구간을 찍으려면 `python3 tools/bag_slice.py <원본> <새이름> --start A --end B` (전이 시각은
 `run_console.sh` 머리의 장면표 또는 `/mission_state` 를 직접 훑어 찾는다).
 
+**🎬 패널 촬영 — 기록의 한 구간만 재생한다** (10-02)
+```
+bash ~/ros2_ws/console/run_display.sh --bag gather_take --rate 1.5 --loop
+```
+`gather_take` = `realtake6` 의 두 구간(131.5~135.5 · 145.0~148.5초)을 `tools/bag_slice.py` 로
+잘라 이어 붙인 것(2.2 MB · 7.5 s). **1.5배속이면 한 바퀴 5.0초**:
+
+| 재생(1.5배속) | 화면 | 상태 |
+|---|---|---|
+| 0.2 ~ 1.9 s | 주변을 살피는 중 / 사람이 있는지 확인합니다 | `SCAN_AREA` |
+| 1.9 ~ 3.9 s | 여기서 기다리세요 / 잠시 후 안내를 시작합니다 | `GATHER` |
+| 3.9 ~ 5.0 s | 따라오세요 / 탈출구로 안내합니다 | `GUIDE` |
+
+`--loop` 라 5초마다 돌아와 같은 장면을 몇 번이든 다시 찍는다. 🔵 가운데를 들어낸 이유 =
+기록의 `GATHER` 가 12.5초라 그대로 쓰면 클립이 늘어진다. **로봇이 집결지에 서 있는 구간**을
+잘랐기에 지도 위 로봇이 안 튄다(10-02 패널 6프레임 대조 확인).
+🔴 **재생이지 실시간 주행이 아니다** — 영상·문서에 "실시간"으로 쓰지 않는다. 배속·편집 사실도 숨기지 않는다.
+🔴 잘린 bag 은 **재생 재료이지 증거가 아니다** — 측정·분석은 원본 `realtake6` 으로 한다.
+🔵 다른 장면은 `python3 tools/bag_slice.py <원본> <새이름> --window A:B [--window C:D]`.
+
 **소리** — 패널 PCB 앰프 + 스피커(4Ω 2W)로 젯슨 DP 오디오가 나간다. `js/audio.js`:
 상태 전이 순간 안내 음성 1회 · `GUIDE`·`GATHER` 는 20초마다 반복 · `/siren` 은 미션이 켠 대로 ·
 🔴 **끊김·미션 낡음·`FAULT`·`BLOCKED` 는 침묵** — 틀린 안내보다 침묵이 안전하다. 관제가 보낸 문구는
