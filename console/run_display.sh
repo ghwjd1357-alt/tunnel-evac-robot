@@ -15,6 +15,14 @@
 #     bash ~/ros2_ws/console/run_display.sh --no-browser    # 서버만 (다른 PC 브라우저로 볼 때)
 #     bash ~/ros2_ws/console/run_display.sh --no-touch      # 패널 터치 입력을 끈다 (기본은 켜 둠 — 09-18 사용자 결정)
 #
+#   🎬 촬영 — 기록을 패널에 재생한다 (10-02 신설)
+#     bash ~/ros2_ws/console/run_display.sh --bag gather_take --at 4 --loop
+#       `--bag TAG`  ~/robot_evidence/TAG 를 재생 (로봇 없이 화면이 돈다)
+#       `--at N`     N 초 지점부터      `--rate R`  배속      `--loop`  반복 (테이크 반복 촬영)
+#     🔴 재생이지 실시간 주행이 아니다 — 영상·문서에 "실시간" 으로 쓰지 않는다.
+#     ── gather_take (realtake6 128~145초 구간 · tools/bag_slice.py) ──
+#        재생 6.3초에 SCAN_AREA → GATHER. `--at 4` 면 틀고 2.3초 뒤 전환.
+#
 #   종료: Ctrl+C (브라우저·서버 모두 정리)
 #
 # 🔴 run_console.sh 와 같이 띄우지 않는다 — 둘 다 :9090/:8000 을 쓴다.
@@ -28,13 +36,14 @@ set -eu
 CONSOLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 URL="http://localhost:8000/?display=1"
 AUTOSTART="$HOME/.config/autostart/tunnel-display.desktop"
-NO_BROWSER=""; NO_TOUCH=""
+NO_BROWSER=""; NO_TOUCH=""; BAG=""; AT=""; RATE="1"; LOOP=""
 
 # ── 자동 시작 등록/해제 ─────────────────────────────────────────────
 #   GNOME 데스크톱은 로그인 직후 ~/.config/autostart/*.desktop 을 실행한다.
 #   systemd 서비스가 아니라 이걸 쓰는 이유: 브라우저는 그래픽 세션 안에서만
 #   뜬다(DISPLAY·Wayland 소켓). 세션 밖 systemd 에서 띄우면 화면 없이 죽는다.
 #   🔴 자동 로그인(설정 → 사용자 → 자동 로그인)이 켜져 있어야 부팅만으로 뜬다.
+while [ $# -gt 0 ]; do
 case "${1:-}" in
   --install-autostart)
     mkdir -p "$(dirname "$AUTOSTART")"
@@ -54,9 +63,15 @@ EOF
     rm -f "$AUTOSTART"; echo "✅ 해제: $AUTOSTART"; exit 0 ;;
   --no-browser) NO_BROWSER=1 ;;
   --no-touch)   NO_TOUCH=1 ;;
+  --bag)  BAG="${2:-}"; shift ;;
+  --at)   AT="--start-offset ${2:-0}"; shift ;;
+  --rate) RATE="${2:-1}"; shift ;;
+  --loop) LOOP="--loop" ;;
   "") ;;
   *) echo "알 수 없는 옵션: $1"; exit 2 ;;
 esac
+shift || true
+done
 
 if ! ros2 pkg list 2>/dev/null | grep -q rosbridge_server; then
   echo "❌ rosbridge 미설치. 먼저:  sudo apt install ros-humble-rosbridge-suite"
@@ -116,7 +131,7 @@ fi
 #   🔴 브라우저 패턴은 브라우저 이름과 묶는다. "display=1" 만으로 찾으면 그 문자열이
 #      들어간 **아무 명령줄**(curl 시험·다른 터미널)까지 -9 로 죽인다 — 09-18 노트북
 #      시험에서 실제로 시험 셸이 죽었다 (AGENTS §4-1 자기매칭 함정의 형제 버전).
-for _pat in "rosbridge_websocket" "console/serve.py" "web_video_server" "(chromium|chrome|firefox).*display=1"; do
+for _pat in "rosbridge_websocket" "console/serve.py" "web_video_server" "bag play" "(chromium|chrome|firefox).*display=1"; do
   for _pid in $(pgrep -f "$_pat" 2>/dev/null); do
     [ "$_pid" = "$$" ] && continue
     [ "$_pid" = "$PPID" ] && continue
@@ -124,13 +139,14 @@ for _pat in "rosbridge_websocket" "console/serve.py" "web_video_server" "(chromi
   done
 done
 sleep 1
-HTTP_PID=""; BR_PID=""
+HTTP_PID=""; BR_PID=""; BAG_PID=""
 
 cleanup() {
   pkill -f "rosbridge[_]websocket" 2>/dev/null || true
   pkill -f "web_video[_]server" 2>/dev/null || true
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" 2>/dev/null || true
   [ -n "$BR_PID" ]   && kill "$BR_PID"   2>/dev/null || true
+  [ -n "$BAG_PID" ]  && kill "$BAG_PID"  2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -203,6 +219,20 @@ else
   #    xdotool 이 없어 libXtst 를 직접 부른다 (console/x11_key.py). 창이 뜬 뒤에 보내야 한다.
   sleep 8
   for _ in 1 2; do python3 "$CONSOLE_DIR/x11_key.py" Escape 2>/dev/null || true; sleep 1; done
+fi
+
+# ── 🎬 bag 재생 — 브라우저가 붙은 **뒤에** 시작한다 ─────────────────────
+#   먼저 틀면 주소가 뜨는 사이에 구간이 지나가 버린다 (09-04 촬영에서 실제로 어긋났다 ·
+#   `console/README.md`). 여기서는 kiosk 를 띄운 직후라 몇 초만 기다리면 된다.
+if [ -n "$BAG" ]; then
+  BAG_PATH="$HOME/robot_evidence/$BAG"
+  if [ ! -d "$BAG_PATH" ]; then echo "❌ bag 없음: $BAG_PATH"; exit 1; fi
+  [ -z "$NO_BROWSER" ] && sleep 6
+  echo "▶ bag 재생: $BAG (rate=$RATE ${LOOP:-단발}${AT:+ · ${AT#--start-offset }초부터})"
+  echo "  🔴 이것은 기록의 재생이다. 실시간 주행이 아니다."
+  # shellcheck disable=SC2086
+  ros2 bag play "$BAG_PATH" --rate "$RATE" $LOOP $AT &
+  BAG_PID=$!
 fi
 
 echo "  (Ctrl+C 로 전부 종료)"
