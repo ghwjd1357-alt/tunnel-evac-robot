@@ -418,7 +418,7 @@ rqt_graph                # 노드·토픽 연결을 그림으로
 | 실차 운행 지도 | 젯슨에만 있음 | 젯슨 `~/Desktop/maps_0820/`. 저장소 `maps/` 는 **시뮬** 지도 |
 | 주행 기록(rosbag)·시연 영상 | 용량(약 2.6 GB) | 사용자 노트북 `~/robot_evidence/` |
 | 관제 화면 데모 영상 클립 | 용량 | 사용자 노트북 `console/media/` |
-| 날짜별 개발 기록·검토문 | 다른 저장소 | 문서 곳곳의 `~/Desktop/…` 경로 = 사용자 노트북의 기록. **결정 이유는 커밋 메시지에도 있다** (§8 `git log`) |
+| 날짜별 개발 기록·검토문 | 다른 저장소 | **공개 저장소** https://github.com/ghwjd1357-alt/tunnel-evac-docs (마크다운 문서만). 문서 곳곳의 `~/Desktop/…` 경로가 이 저장소의 파일이다. 결정 이유는 커밋 메시지에도 있다 (§8 `git log`) |
 
 **실행까지 해 보려면**(읽기만이면 필요 없음): Ubuntu 22.04 + ROS2 Humble + Gazebo Classic 11 이 있어야 하고,
 위 외부 패키지를 설치한 뒤 `colcon build --symlink-install`. 실차 없이 돌리는 방법 = `docs/TEST_GATES.md`.
