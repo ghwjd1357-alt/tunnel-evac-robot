@@ -41,7 +41,10 @@ PHASES = {
         "anchor": "TODO(D+0)",
         "marker": "TODO(D+0): 확인",
         "want_items": 11,
-        "want_sites": 5,
+        # 2026-11-15: 5 → 2. 한이음 종료로 핸드오프를 `docs/legacy/hanium/` 에 보관했다 —
+        #   옛 핸드오프의 3자리(완료조건·완료 판정·진행표)는 역사가 됐고 새 핸드오프는
+        #   금지 범위 1자리만 둔다. 남은 둘 = JETSON_SETUP §9 제목 + 새 핸드오프 금지 범위.
+        "want_sites": 2,
         "want_markers": 7,
     },
     "D+1": {

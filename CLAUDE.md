@@ -2,6 +2,7 @@
 
 > 매 세션 자동 로드되는 최소 진입점 (07-20 개편 — 구판 백업 = `docs/legacy/CLAUDE_pre-restructure_0720.md`, git `8042464`).
 > 프로젝트 사실·계획·함정의 정본은 `AGENTS.md` + `docs/`. 이 파일엔 Claude 전용 규칙만.
+> 🏁 **한이음 종료**(태그 `hanium-final`) → 학교 텀프로젝트로 재활용 중(2026-11-15~). 현재 위치 = `docs/CURRENT_HANDOFF.md`.
 
 ## 0. 필수 읽기 (명령형 — 건너뛰지 않는다)
 

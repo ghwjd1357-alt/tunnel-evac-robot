@@ -471,7 +471,11 @@ class ContextRouterTest(unittest.TestCase):
             reservation(new_master, "23. **", r"^(?:\d+\. \*\*|## 8\.)"),
         )
         old_handoff = git("show", "ef25ad3:docs/CURRENT_HANDOFF.md")
-        new_handoff = (ROOT / "docs/CURRENT_HANDOFF.md").read_text()
+        # 2026-11-15: 한이음 종료로 그 핸드오프를 보관본으로 옮겼다. 예약 23 블록은 보관본에
+        #   그대로 있다 — 동결 대상이 같은 블록이므로 보관본을 본다(새 핸드오프에는 없다).
+        new_handoff = (
+            ROOT / "docs/legacy/hanium/CURRENT_HANDOFF_hanium_final.md"
+        ).read_text()
         self.assertEqual(
             reservation(old_handoff, "- **⚠ 미해결 보류 — 예약 23", r"^- \*\*"),
             reservation(new_handoff, "- **⚠ 미해결 보류 — 예약 23", r"^- \*\*"),

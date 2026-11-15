@@ -1,5 +1,8 @@
 # FREEZE_MANIFEST.md — platform-core-freeze 동결 증거
 
+> 🏁 **한이음 기록 — 읽기 전용** (2026-11-15). 한이음은 종료됐다(태그 `hanium-final`). 동결 증거는 그대로
+> 유효하다 — platform-core 를 건드리기 전에는 여전히 이 문서를 읽는다.
+
 > 동결의 **의미** = `PROJECT_CONTEXT.md §6` (동결 3단) · **절차** = `MASTER_PLAN.md §1` 5단.
 > 이 파일은 "무엇을 어떤 상태로 얼어붙였는가"의 기계적 증거다. 서사·판단 근거는
 > `~/Desktop/개발현황/0723_현황.md §11`, 독립 검토는 `CODEX 현황/0723검토현황.md`.
