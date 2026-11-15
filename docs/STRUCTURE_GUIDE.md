@@ -8,6 +8,7 @@
 
 ## 0. 이 문서를 읽는 법
 
+- **GitHub 만으로 무엇을 볼 수 있고 무엇은 없는지 = §10.**
 - 처음이면 **§1 그림 → §2 폴더 지도** 순서로 읽고, 그다음 맡은 쪽(§3 펌웨어 / §4 젯슨)으로 간다.
 - 두 쪽이 만나는 지점은 **§5** 에 따로 모았다.
 - 외부 코드·원작자 구분은 **§7** 에 있다. 과목 공지가 "외부 코드를 쓰면 시연 때 출처와
@@ -67,7 +68,7 @@
 | `src/tunnel_bringup/` | **실차** 런치·설정(yaml)·URDF·기동 게이트 | Python · YAML | 약 1,300줄 + 설정 7개 | 역할 A |
 | `src/tunnel_interfaces/` | 커스텀 메시지 정의 2개 (`.msg`) | ROS IDL | 실행 코드 없음 | 역할 A·B 합의 |
 | `src/tunnel_sim/` | **시뮬레이션**(Gazebo) 런치·월드·설정 | Python · XML | 약 900줄 | 역할 A |
-| `src/sllidar_ros2/` | 라이다 드라이버 | **C++** | 69개 C++ 파일 | **외부** (Slamtec, BSD) |
+| `src/sllidar_ros2/` | 라이다 드라이버 — ⚠ **GitHub 에는 없다**(§10) | **C++** | 69개 C++ 파일 | **외부** (Slamtec, BSD) |
 | `src/my_first_pkg/` | ROS2 입문 연습 (talker/listener) | Python | 약 250줄 | 역할 A (학습용) |
 | `console/` | 관제 웹 화면 + 로봇 디스플레이 화면 | JavaScript · Python | JS 17개 | 역할 A |
 | `tools/` | 검사·측정·분석 스크립트 (테스트 36개 포함) | Python · Shell · C++ 2개 | 약 100개 | 역할 A |
@@ -353,7 +354,7 @@ PATROL(순찰) → APPROACH(집결지로 이동) → SCAN_AREA(제자리 회전 
 | 펌웨어 이후 수정 (`.ino` 증가분 + `.h` 5개) | 역할 A | `git log -- firmware/` |
 | `src/` 의 mission·adapter·bringup·sim·interfaces | 역할 A (interfaces 는 역할 B 와 합의) | `git log` |
 | 인지 노드 (RF-DETR 화재 · YOLO 자세 + depth) | 역할 B — 저장소에는 사본만 | `docs/handover/0904_perception/` |
-| `src/sllidar_ros2` | Slamtec (외부, BSD 라이선스) | `src/sllidar_ros2/package.xml` |
+| `src/sllidar_ros2` | Slamtec (외부, BSD 라이선스) | https://github.com/Slamtec/sllidar_ros2 (커밋 `3430009`) |
 | Nav2 · slam_toolbox · robot_localization · micro-ROS · rosbridge | 외부 오픈소스 (설치형) | 저장소에는 설정만 |
 | 관제 웹의 외부 라이브러리 | 외부 | `console/vendor/` |
 | AI 도구 사용 | 커밋 378개 중 344개에 `Co-Authored-By: Claude` 표기, 검토에 Codex 사용 | `git log --grep='Co-Authored-By'` |
@@ -399,3 +400,26 @@ rqt_graph                # 노드·토픽 연결을 그림으로
 | 영역별 함정 | `docs/PITFALLS.md` |
 | 한이음 진행 기록·결정 이유 | `docs/MASTER_PLAN.md` (읽기 전용) |
 | 관제 웹 | `console/README.md` |
+
+---
+
+## 10. GitHub 에 있는 것 / 없는 것
+
+**코드를 읽고 분석하는 데는 GitHub 저장소만으로 충분하다** — 우리가 쓴 코드·펌웨어·설정·문서·커밋 이력이
+전부 있고, 저장소는 공개라 로그인 없이 열린다. 아래는 **저장소에 없는 것**과 구하는 곳이다.
+
+| 없는 것 | 왜 없나 | 구하는 곳 |
+|---|---|---|
+| 라이다 드라이버 `src/sllidar_ros2/` | 외부 코드라 `.gitignore` 로 제외 | `git clone https://github.com/Slamtec/sllidar_ros2.git` → `git checkout 3430009` (우리가 쓴 판, 2024-06-17) |
+| 펌웨어가 쓰는 라이브러리 | 외부 코드 | `micro_ros_arduino` 2.0.8-humble · `Adafruit_BNO055` 1.6.4 · `Adafruit_BusIO` 1.17.4 · `Adafruit_Unified_Sensor` 1.1.15 (각 이름으로 GitHub 검색) · `Encoder` 1.4.3 = Teensyduino 1.58.2 동봉. 굽기까지 하려면 `docs/FIRMWARE_REBUILD.md` |
+| Nav2 · slam_toolbox · robot_localization · micro_ros_agent · rosbridge | 설치형 외부 패키지 | 각 프로젝트 GitHub (`ros-navigation/navigation2`, `SteveMacenski/slam_toolbox`, `cra-ros-pkg/robot_localization` 등). 저장소엔 우리 **설정 파일**만 |
+| 역할 B 인지 코드의 **원본** | 역할 B 소유 | 저장소엔 **사본** `docs/handover/0904_perception/perception_node_0904.py` 만. 원본은 역할 B |
+| 젯슨에서만 고친 내용 | 젯슨 로컬 변경 | 목록·원복법 = `docs/handover/0904_perception/README.md` |
+| 실차 운행 지도 | 젯슨에만 있음 | 젯슨 `~/Desktop/maps_0820/`. 저장소 `maps/` 는 **시뮬** 지도 |
+| 주행 기록(rosbag)·시연 영상 | 용량(약 2.6 GB) | 사용자 노트북 `~/robot_evidence/` |
+| 관제 화면 데모 영상 클립 | 용량 | 사용자 노트북 `console/media/` |
+| 날짜별 개발 기록·검토문 | 다른 저장소 | 문서 곳곳의 `~/Desktop/…` 경로 = 사용자 노트북의 기록. **결정 이유는 커밋 메시지에도 있다** (§8 `git log`) |
+
+**실행까지 해 보려면**(읽기만이면 필요 없음): Ubuntu 22.04 + ROS2 Humble + Gazebo Classic 11 이 있어야 하고,
+위 외부 패키지를 설치한 뒤 `colcon build --symlink-install`. 실차 없이 돌리는 방법 = `docs/TEST_GATES.md`.
+
