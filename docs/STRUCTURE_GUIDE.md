@@ -15,6 +15,15 @@
   - **clone 해서 VS Code**: `Ctrl+P` 로 파일을 열고 `:123`.
 - 과목 공지가 "외부 코드를 쓰면 시연 때 출처와 아이디어가 들어간 부분을 밝히라"고 했다. 원작자·외부 코드 구분은 §7 에 있다.
 
+### 근거 표시
+
+| 표시 | 뜻 |
+|---|---|
+| 🔍 **코드 확인** | 저장소의 코드·설정 파일·git 기록에서 직접 확인한 내용 |
+| 📄 **문서 근거** | 코드에 없는 사실(배선·부품·작성자·측정 기록·저장소 밖 파일). 근거 문서를 같이 적었다. **코드보다 낡았을 수 있다** |
+
+- 절 제목에 붙은 표시는 그 절 전체의 근거다. 절 안에서 근거가 다른 줄에는 그 줄에 따로 붙였다.
+
 ### 팀 안에서 쓰던 이름
 
 | 이름 | 뜻 |
@@ -44,7 +53,9 @@
 
 ## 1. 전체 그림
 
-### 하드웨어
+### 하드웨어 📄
+
+배선·부품 연결은 코드에 없다 — `docs/ELECTRICAL_BASELINE.md` · `docs/PROJECT_CONTEXT.md` 기준. 핀 번호(21 · 18/19 · PWM/DIR)만 🔍 `.ino` 상수다.
 
 ```
 [RPLIDAR C1] --USB--+
@@ -57,7 +68,7 @@
 [E-stop button] --> relay 1, 2 (cut motor power)  +  relay 3 --> Teensy pin 21 (software latch)
 ```
 
-### 토픽 흐름 (실차, `real_bringup.launch.py` 기준)
+### 토픽 흐름 (실차, `real_bringup.launch.py` 기준) 🔍
 
 ```
 sllidar_node   --/scan-----------------> slam_toolbox, Nav2 costmaps, mission_node, console
@@ -80,11 +91,13 @@ console        --/cmd_vel (manual drive, soft stop)--> micro_ros_agent --USB--> 
   `behavior_server`(회복 동작 spin·backup·wait, smoother 를 거치지 않음 — Humble `navigation_launch.py` 에 리맵 없음)가 낸다.
 - Teensy 가 젯슨에 보내는 것은 **`/odom`·`/imu/data`** 와 진단 토픽이다(§5).
 - `/odometry/filtered`(EKF 출력 토픽)는 기동 게이트와 관제 화면이 받는다. 위치추정에 쓰이는 것은 EKF 가 내는 **TF** 쪽이다.
-- 하드웨어 수치(바퀴 간격·지름·엔코더 PPR 등) = `docs/REAL_ROBOT_VALUES.md`.
+- 하드웨어 수치(바퀴 간격·지름·엔코더 PPR 등) = `docs/REAL_ROBOT_VALUES.md`. 📄
 
 ---
 
-## 2. 저장소 폴더 지도
+## 2. 저장소 폴더 지도 🔍
+
+'만든 쪽' 열만 📄 이다(§7).
 
 | 폴더 | 들어 있는 것 | 언어 | 규모 | 만든 쪽 (§7) |
 |---|---|---|---|---|
@@ -111,7 +124,7 @@ console        --/cmd_vel (manual drive, soft stop)--> micro_ros_agent --USB--> 
 
 ## 3. 펌웨어 지도 (Teensy 4.1 · C++)
 
-### 3-1. 파일
+### 3-1. 파일 🔍
 
 | 파일 | 줄 | 하는 일 |
 |---|---|---|
@@ -121,12 +134,12 @@ console        --/cmd_vel (manual drive, soft stop)--> micro_ros_agent --USB--> 
 | `estop_debounce.h` | 140 | E-stop 입력 떨림(글리치) 걸러내기 + 관측 카운터 |
 | `runtime_guard.h` | 134 | `loop()` 한 바퀴가 너무 오래 걸리면 무장 해제 |
 | `link_stall_probe.h` | 548 | USB 링크 멈춤 사건을 재고 `/firmware/event` 로 보고 |
-| `SHA256SUMS.txt` | 1 | **구동부 원본** `.ino` 의 해시. 원본에서 수정했으므로 지금 `sha256sum -c` 를 돌리면 **실패하는 것이 정상**이다(`firmware/VENDOR_DROP.md`) |
+| `SHA256SUMS.txt` | 1 | **구동부 원본** `.ino` 의 해시. 원본에서 수정했으므로 지금 `sha256sum -c` 를 돌리면 **실패하는 것이 정상**이다(`firmware/VENDOR_DROP.md`) 📄 (VENDOR_DROP) |
 
 - `.h` 다섯 개는 **Arduino 함수를 쓰지 않게** 짜여 있어서 노트북에서 `g++` 로 따로 컴파일해 시험한다(§3-6).
 - 빌드 환경(Teensyduino 버전·라이브러리·패치) = `docs/FIRMWARE_REBUILD.md`.
 
-### 3-2. 실행 흐름
+### 3-2. 실행 흐름 🔍
 
 **`setup()`** — `.ino:1739` (전원을 켜면 한 번)
 
@@ -157,7 +170,7 @@ publishFirmwarePulse() · drainLinkEvents()   생존 신호 · 링크 사건 보
 linkProbeLoopEnd()            한 바퀴 시간 재기 끝
 ```
 
-### 3-3. 함수 지도 (`.ino`, 기능별)
+### 3-3. 함수 지도 (`.ino`, 기능별) 🔍
 
 | 묶음 | 함수 (줄) |
 |---|---|
@@ -170,7 +183,7 @@ linkProbeLoopEnd()            한 바퀴 시간 재기 끝
 | **진단·시간** | `publishDiagnostics`(1440) · `publishFirmwareInfo`(1483) · `publishFirmwarePulse`(1631) · `drainLinkEvents`(1672) · `periodicTimeSync`(1700) · `recordRuntimePhase`(976) · `publishMeasured`(1001, 발행 결과를 링크 계측에 넘김) |
 | **기타** | `resetOdomCallback`(1416) · `resetYawCallback`(1426) · `clampDouble`(574) · `normalizeAngle`(581) · `errorLoop`(1722) |
 
-### 3-4. 펌웨어가 주고받는 토픽 (구독 3 · 발행 10 · 서비스 1)
+### 3-4. 펌웨어가 주고받는 토픽 (구독 3 · 발행 10 · 서비스 1) 🔍
 
 | 방향 | 이름 | 타입 | 구동부 원본에 있었나 |
 |---|---|---|---|
@@ -184,7 +197,7 @@ linkProbeLoopEnd()            한 바퀴 시간 재기 끝
 | 발행 | `firmware/pulse` · `firmware/event` | String | 추가 |
 | 서비스 | `drive/enable` | SetBool | 추가 |
 
-### 3-5. 주요 상수 (`.ino`)
+### 3-5. 주요 상수 (`.ino`) 🔍
 
 | 상수 | 값 | 줄 |
 |---|---|---|
@@ -202,9 +215,9 @@ linkProbeLoopEnd()            한 바퀴 시간 재기 끝
 - `MAX_*_CMD` 는 펌웨어가 받아들이는 **상한**이다. 실제 주행 속도는 Nav2 설정이 정한다:
   기본 `nav2_params_real.yaml` = 0.12 m/s · 0.50 rad/s(`velocity_smoother`, 163–164행),
   시험 사본 `nav2_params_real_db.yaml` = 0.20 m/s · 0.83 rad/s.
-- `MAX_*_CMD` 상향은 `docs/CURRENT_HANDOFF.md` 금지 범위에 들어 있다(전기 안전 검증과 묶임).
+- `MAX_*_CMD` 상향은 `docs/CURRENT_HANDOFF.md` 금지 범위에 들어 있다(전기 안전 검증과 묶임). 📄
 
-### 3-6. 보드 없이 시험하는 곳 (`tools/`)
+### 3-6. 보드 없이 시험하는 곳 (`tools/`) 🔍
 
 | 파일 | 하는 일 |
 |---|---|
@@ -212,11 +225,11 @@ linkProbeLoopEnd()            한 바퀴 시간 재기 끝
 | `tools/link_stall_host_test.cpp` + `.sh` | `link_stall_probe.h` 를 같은 방식으로 시험 |
 | `tools/test_firmware_runtime_guard.py` | `runtime_guard.h` 경계 시험 |
 | `tools/firmware_constants.py` | `.ino` 에서 상수를 읽어 오는 도구(다른 도구들이 씀) |
-| `tools/firmware_precheck.sh` | 굽기 전 점검 — 원본 기준점(`f57d454`)에서 승인된 변경 내용의 sha256 을 대조. 08-22 에 승인 밖 변경을 구웠기 때문에 지금 실행하면 **FAIL** 이 나온다(`docs/CURRENT_HANDOFF.md` 열린 위험 · 예약 62) |
+| `tools/firmware_precheck.sh` | 굽기 전 점검 — 원본 기준점(`f57d454`)에서 승인된 변경 내용의 sha256 을 대조. 08-22 에 승인 밖 변경을 구웠기 때문에 지금 실행하면 **FAIL** 이 나온다(`docs/CURRENT_HANDOFF.md` 열린 위험 · 예약 62) 📄 (FAIL 이유 = 핸드오프 · 결과 FAIL 은 실행 확인) |
 
-### 3-7. 구동부 원본과 이후 수정 구분
+### 3-7. 구동부 원본과 이후 수정 구분 🔍
 
-- 원본 = 구동부 파트가 만든 `.ino` 한 파일(**1,308줄** — 마지막 줄바꿈이 없어 `wc -l` 은 1,307 로 센다). 2026-08-05 커밋 `f57d454` 로 저장소에 들어왔다.
+- 원본 = 구동부 파트가 만든 `.ino` 한 파일(**1,308줄** — 마지막 줄바꿈이 없어 `wc -l` 은 1,307 로 센다). 2026-08-05 커밋 `f57d454` 로 저장소에 들어왔다. 📄 ('구동부 파트가 만든' = `firmware/VENDOR_DROP.md` · 줄 수는 git)
 - `hanium-final` 까지의 변경: `.ino` **+817 / −49 줄**(2,076줄이 됨) + `.h` 다섯 개 신규(합계 1,244줄).
 - 원본에 없던 함수 10개: `disarmDrive` · `disarmDriveWithReason` · `driveEnableCallback` · `updateEstopFilter` ·
   `updateAppliedPwmEpoch` · `recordRuntimePhase` · `currentEpochMs` · `publishMeasured` · `publishFirmwarePulse` · `drainLinkEvents`.
@@ -248,7 +261,7 @@ git diff f57d454 hanium-final -- firmware/teensy_integrated_base_v1_4/
 
 ## 4. 젯슨 지도 (Jetson Orin Nano · ROS2 Humble)
 
-### 4-1. 실차 기동 — `real_bringup.launch.py`
+### 4-1. 실차 기동 — `real_bringup.launch.py` 🔍
 
 ```bash
 ros2 launch tunnel_bringup real_bringup.launch.py map_file:=<지도 경로>                       # 미션 없이 Nav2 까지
@@ -285,7 +298,7 @@ ros2 launch tunnel_bringup real_bringup.launch.py map_file:=<지도 경로> miss
 - **어댑터(`adapter_node`)는 이 런치에 없다** — 별도 런치 `src/perception_adapter/launch/adapter.launch.py`.
 - 지도 제작은 다른 런치: `real_mapping.launch.py`.
 
-### 4-2. `mission_manager` — 미션 상태머신
+### 4-2. `mission_manager` — 미션 상태머신 🔍
 
 | 파일 | 줄 | 하는 일 |
 |---|---|---|
@@ -345,7 +358,7 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 **토픽**: 구독 `/scan`(614) `/alarm` `/victim` `/person_status` `/mission_cmd` · 발행 `/mission_state` `/siren` ·
 액션 클라이언트 `navigate_to_pose`(Nav2). 위치는 TF 로 얻는다(`/map` 토픽은 구독하지 않는다).
 
-### 4-3. `perception_adapter` — 인지 → 미션 연결
+### 4-3. `perception_adapter` — 인지 → 미션 연결 🔍
 
 | 파일 | 줄 | 하는 일 |
 |---|---|---|
@@ -355,15 +368,15 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 
 주요 구성: `ConfirmTracker`(124, N번 연속 확인) · `validate_params`(224) · `pick_best`(294) ·
 `PerceptionAdapter.on_detections`(991) · `_person_frame_verdict`(809) · `_person_to_map`(769, 카메라 좌표 → 지도 좌표).
-판정 규칙·상수의 근거 = `docs/PROJECT_CONTEXT.md` §4.1-b.
+판정 규칙·상수의 근거 = `docs/PROJECT_CONTEXT.md` §4.1-b. 📄
 
-### 4-4. `tunnel_interfaces` — 메시지 정의
+### 4-4. `tunnel_interfaces` — 메시지 정의 🔍
 
 - `Detection3D.msg`: `class_name`(사람 자세·화재 구분도 이 이름으로) · `confidence` · `bbox` · `position`
 - `Detection3DArray.msg`: `header` + `Detection3D[]`
-- 역할 B(인지)와 역할 A(어댑터) 사이 약속. 계약 전문 = `docs/PROJECT_CONTEXT.md` §4.1.
+- 역할 B(인지)와 역할 A(어댑터) 사이 약속. 계약 전문 = `docs/PROJECT_CONTEXT.md` §4.1. 📄
 
-### 4-5. `tunnel_bringup` · `tunnel_sim`
+### 4-5. `tunnel_bringup` · `tunnel_sim` 🔍
 
 | 위치 | 내용 |
 |---|---|
@@ -376,7 +389,9 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 | `tunnel_sim/launch/*.launch.py` (7개) | 시뮬 로봇·SLAM·Nav2·미션 기동 |
 | `tunnel_sim/tunnel_sim/fake_follower.py` | 시뮬에서 따라오는 사람 흉내 |
 
-### 4-6. 설정 파일 (외부 패키지의 동작을 정하는 곳)
+### 4-6. 설정 파일 (외부 패키지의 동작을 정하는 곳) 🔍
+
+설명은 각 파일 머리말 주석 기준이다.
 
 | 파일 (`src/tunnel_bringup/config/`) | 대상 |
 |---|---|
@@ -391,7 +406,7 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 
 ---
 
-## 5. 두 영역의 경계 — 젯슨 ↔ Teensy
+## 5. 두 영역의 경계 — 젯슨 ↔ Teensy 🔍
 
 | 방향 | 토픽 | 젯슨 쪽 상대 | 펌웨어 쪽 함수 |
 |---|---|---|---|
@@ -409,19 +424,19 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 
 | 경로 | 어디서 | 위치 |
 |---|---|---|
-| 하드웨어 E-stop | 버튼 → 릴레이 1·2 가 **모터 전원 자체를 끊는다** | `docs/ELECTRICAL_BASELINE.md` §4 |
+| 하드웨어 E-stop | 버튼 → 릴레이 1·2 가 **모터 전원 자체를 끊는다** | `docs/ELECTRICAL_BASELINE.md` §4 📄 |
 | 펌웨어 E-stop 래치 | 21번 핀 입력 → `checkSafety` 가 무장 해제 | `.ino:1022` · `estop_debounce.h` |
 | 명령 워치독 | `/cmd_vel` 이 0.5초 끊기면 모터 정지 | `.ino:1022` `checkSafety` · `WATCHDOG_TIMEOUT_MS` |
 | 무장 게이트 | `DRIVE_ARMED` 상태가 아니면 모터가 돌지 않는다 · 재무장은 `/drive/enable` 서비스로만 | `rearm_gate.h` · `drive_wiring.h` |
 | 루프 지연 감시 | `loop()` 한 바퀴가 너무 길면 무장 해제 | `runtime_guard.h` |
-| 0 속도 명령 | Nav2 가 멈추거나, 관제 소프트 정지(`abort` + `/cmd_vel` 0 ×10). 기록된 한계: `abort` 는 한 번만 발행된다(예약 81) · 관제의 `/cmd_vel` 0 은 `velocity_smoother` 의 20 Hz 출력에 덮일 수 있다(예약 82) — `docs/MASTER_PLAN.md` §7 | `console/js/ros.js:400` |
+| 0 속도 명령 | Nav2 가 멈추거나, 관제 소프트 정지(`abort` + `/cmd_vel` 0 ×10). 기록된 한계: `abort` 는 한 번만 발행된다(예약 81) · 관제의 `/cmd_vel` 0 은 `velocity_smoother` 의 20 Hz 출력에 덮일 수 있다(예약 82) — `docs/MASTER_PLAN.md` §7 | `console/js/ros.js:400` 📄 (한계 = 측정 기록 · 동작은 코드) |
 | 미션 정지 | 관제 `abort` → `FAULT` | `mission_node.py` `on_cmd` |
 
 ---
 
 ## 6. 그 밖의 폴더
 
-### `console/` — 관제 웹
+### `console/` — 관제 웹 🔍
 
 - 실행: `console/run_console.sh` → rosbridge(포트 9090) + 웹서버(포트 8000). 사용법 = `console/README.md`.
 - `index.html` + `js/` 16개: `ros.js`(토픽 연결) · `map.js`(지도) · `mission.js`(상태) · `diag.js`(펌웨어 진단 해독) ·
@@ -435,7 +450,7 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
   실물 `/detections` 가 한 번이라도 오면 실물 값이 쓰인다(`demo.js` `demoPerception`).
 - `대피자 추종` 표시는 센서 값이 아니라 미션 상태에서 만든 값이다(`console/js/mission.js` · `i18n.js` `FOLLOWER_OF`).
 
-### `tools/` — 검사·측정 스크립트
+### `tools/` — 검사·측정 스크립트 🔍
 
 | 이름 앞부분 | 개수 | 대략 |
 |---|---|---|
@@ -446,7 +461,7 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 | `odom_guard.py` | 1 | 실차 런치가 실행하는 `/odom` 필터(§4-1) |
 | `viz/` | — | rosbag → 영상 렌더러 (`tools/viz/README.md`) |
 
-### 테스트 위치
+### 테스트 위치 🔍
 
 | 위치 | 대상 |
 |---|---|
@@ -462,7 +477,9 @@ FAULT ─(자동 재시도)─▶ 실패 직전 상태 (`mission_node.py:1233` `
 
 ---
 
-## 7. 출처·작성자 구분 (사실 기록)
+## 7. 출처·작성자 구분 (사실 기록) 📄
+
+작성자는 팀 기록 기준이다(git 커밋 작성자는 모두 한 계정이라 git 만으로는 가릴 수 없다). 'AI 도구 사용' 행의 수치만 🔍 git 기록이다.
 
 | 대상 | 작성 | 근거 |
 |---|---|---|
@@ -522,22 +539,24 @@ rqt_graph                        # 노드·토픽 연결을 그림으로
 
 ---
 
-## 10. GitHub 에 있는 것 / 없는 것
+## 10. GitHub 에 있는 것 / 없는 것 🔍
+
+표의 각 행 근거가 다르면 행 끝에 표시했다.
 
 우리가 쓴 코드·펌웨어·설정·문서·커밋 이력은 GitHub 저장소에 있고, 저장소는 공개라 로그인 없이 열린다.
 아래는 **저장소에 없는 것**과 구하는 곳이다.
 
 | 없는 것 | 왜 없나 | 구하는 곳 |
 |---|---|---|
-| 라이다 드라이버 `src/sllidar_ros2/` | 외부 코드라 `.gitignore` 로 제외 | `git clone https://github.com/Slamtec/sllidar_ros2.git` → `git checkout 3430009` (사용한 판, 2024-06-17) |
-| 펌웨어가 쓰는 라이브러리 | 외부 코드 | `micro_ros_arduino` 2.0.8-humble · `Adafruit_BNO055` 1.6.4 · `Adafruit_BusIO` 1.17.4 · `Adafruit_Unified_Sensor` 1.1.15 (각 이름으로 GitHub 검색) · `Encoder` 1.4.3 = Teensyduino 1.58.2 동봉. 굽기까지 하려면 `docs/FIRMWARE_REBUILD.md` |
+| 라이다 드라이버 `src/sllidar_ros2/` | 외부 코드라 `.gitignore` 로 제외 | `git clone https://github.com/Slamtec/sllidar_ros2.git` → `git checkout 3430009` (사용한 판, 2024-06-17) 🔍 (로컬 clone 의 git) |
+| 펌웨어가 쓰는 라이브러리 | 외부 코드 | `micro_ros_arduino` 2.0.8-humble · `Adafruit_BNO055` 1.6.4 · `Adafruit_BusIO` 1.17.4 · `Adafruit_Unified_Sensor` 1.1.15 (각 이름으로 GitHub 검색) · `Encoder` 1.4.3 = Teensyduino 1.58.2 동봉. 굽기까지 하려면 `docs/FIRMWARE_REBUILD.md` 📄 (노트북 라이브러리 폴더의 `library.properties`) |
 | Nav2 · slam_toolbox · robot_localization · micro_ros_agent · rosbridge | 설치형 외부 패키지 | 각 프로젝트 GitHub (`ros-navigation/navigation2`, `SteveMacenski/slam_toolbox`, `cra-ros-pkg/robot_localization` 등) |
-| 역할 B 인지 코드의 **원본** | 역할 B 소유 | 저장소엔 **사본** `docs/handover/0904_perception/perception_node_0904.py` 만 |
-| 젯슨에서만 고친 내용 | 젯슨 로컬 변경 | 목록·원복법 = `docs/handover/0904_perception/README.md` |
-| 실차 운행 지도 | 젯슨에만 있음 | 젯슨 `~/Desktop/maps_0820/`. 저장소 `maps/` 는 **시뮬** 지도 |
-| 주행 기록(rosbag)·시연 영상 | 용량(폴더 전체 약 14 GB) | 사용자 노트북 `~/robot_evidence/` |
-| 관제 화면 데모 영상 클립 | 용량 | 사용자 노트북 `console/media/` |
-| 날짜별 개발 기록·검토문 | 다른 저장소 | **공개 저장소** https://github.com/ghwjd1357-alt/tunnel-evac-docs — 마크다운 문서만 있다. 문서 곳곳의 `~/Desktop/…` 경로 중 마크다운 파일은 이 저장소에 있고, 라이브러리 폴더·지도 같은 그 밖의 경로는 없다 |
+| 역할 B 인지 코드의 **원본** | 역할 B 소유 | 저장소엔 **사본** `docs/handover/0904_perception/perception_node_0904.py` 만 📄 |
+| 젯슨에서만 고친 내용 | 젯슨 로컬 변경 | 목록·원복법 = `docs/handover/0904_perception/README.md` 📄 |
+| 실차 운행 지도 | 젯슨에만 있음 | 젯슨 `~/Desktop/maps_0820/`. 저장소 `maps/` 는 **시뮬** 지도 📄 |
+| 주행 기록(rosbag)·시연 영상 | 용량(폴더 전체 약 14 GB) | 사용자 노트북 `~/robot_evidence/` 🔍 (노트북에서 `du` 측정) |
+| 관제 화면 데모 영상 클립 | 용량 | 사용자 노트북 `console/media/` 🔍 (`.gitignore`) |
+| 날짜별 개발 기록·검토문 | 다른 저장소 | **공개 저장소** https://github.com/ghwjd1357-alt/tunnel-evac-docs — 마크다운 문서만 있다. 문서 곳곳의 `~/Desktop/…` 경로 중 마크다운 파일은 이 저장소에 있고, 라이브러리 폴더·지도 같은 그 밖의 경로는 없다 🔍 (GitHub API 로 공개 확인) |
 
 **실행 환경**: Ubuntu 22.04 + ROS2 Humble + Gazebo Classic 11 이 있어야 하고,
 위 외부 패키지를 설치한 뒤 `colcon build --symlink-install`. 실차 없이 돌리는 방법 = `docs/TEST_GATES.md`.
