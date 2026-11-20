@@ -25,10 +25,24 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$HERE")"
-SKETCH="$REPO/firmware/teensy_integrated_base_v1_4"
+# 검사할 스케치 폴더. 기본 = 원본. 다른 폴더(예: firmware/term_drive_v2)를 보려면
+#   SKETCH=firmware/term_drive_v2 bash tools/link_stall_host_test.sh
+# ⚠ 동작 검사(.cpp)는 원본 폴더의 헤더를 include 한다 — 다른 폴더를 볼 때는 그 폴더의
+#   헤더가 원본과 바이트 단위로 같아야 의미가 있다 (아래에서 확인한다).
+SKETCH="${SKETCH:-$REPO/firmware/teensy_integrated_base_v1_4}"
+case "$SKETCH" in /*) ;; *) SKETCH="$REPO/$SKETCH" ;; esac
 SRC="$HERE/link_stall_host_test.cpp"
 CLASSIFY="$HERE/link_stall_classify.py"
-INO="$SKETCH/teensy_integrated_base_v1_4.ino"
+INO="$SKETCH/$(basename "$SKETCH").ino"
+ORIG_SKETCH="$REPO/firmware/teensy_integrated_base_v1_4"
+if [ "$SKETCH" != "$ORIG_SKETCH" ]; then
+    for h in rearm_gate.h drive_wiring.h estop_debounce.h runtime_guard.h link_stall_probe.h; do
+        if ! cmp -s "$SKETCH/$h" "$ORIG_SKETCH/$h"; then
+            echo "FAIL $SKETCH/$h 가 원본과 다르다 — 동작 검사가 이 폴더의 헤더를 보지 않으므로 판정할 수 없다" >&2; exit 2
+        fi
+    done
+    echo "▶ 검사 대상 스케치: $SKETCH (안전 헤더 5개 = 원본과 바이트 동일)"
+fi
 
 for f in "$SRC" "$CLASSIFY" "$INO" "$SKETCH/link_stall_probe.h" \
          "$SKETCH/runtime_guard.h"; do
