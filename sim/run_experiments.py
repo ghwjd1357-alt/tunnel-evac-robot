@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""run_experiments.py — 시뮬 빌드 → 손계산 대조(3단계) → 실험 그래프 4종(4단계).
+"""run_experiments.py — 시뮬 빌드 → 손계산 대조(3단계) → 그래프·수치 표(4단계, plot_paper.py).
 
 사용 (sim 폴더에서):
     python3 run_experiments.py
 
 결과:
-    results/checks.md            손계산 ↔ 시뮬 대조표
-    results/1_step_response.png  스텝 응답 (0 → 0.12 m/s)
-    results/2_kp_compare.png     Kp 30·적분상한 20 (08-22 이전) vs Kp 60·40 (현재)
-    results/3_windup.png         바퀴 막힘 → 풀림 (적분 상한 · 조건부 적분)
-    results/4_filter.png         속도 필터 α (잡음 vs 지연)
+    results/checks.md        손계산 ↔ 시뮬 대조표
+    results/paper/           보고서판 그림 5개(PNG+PDF) + tables.md
+    results/slides/          발표판 그림 5개(PNG)
 
-이 스크립트는 그래프·대조만 한다. 제어 계산은 전부 C++ 시뮬(펌웨어 헤더 그대로)이 한다.
+이 스크립트는 대조·그래프만 한다. 제어 계산은 전부 C++ 시뮬(펌웨어 헤더 그대로)이 한다.
 """
 
 import csv
@@ -35,9 +33,6 @@ plt.rcParams["font.family"] = "Noto Sans CJK JP"
 plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams["figure.dpi"] = 110
 
-MODEL_NOTE = "모터는 가정 모델 (지면 실측 직선 + 시정수 0.10 s 가정) — 제어 코드는 펌웨어 그대로"
-
-
 def build():
     os.makedirs(BUILD, exist_ok=True)
     cmd = ["g++", "-std=c++11", "-Wall", "-Wextra", "-Werror",
@@ -57,10 +52,6 @@ def run(**kwargs):
 def at(data, t):
     """시각 t 에 가장 가까운 행 번호."""
     return min(range(len(data["t_s"])), key=lambda i: abs(data["t_s"][i] - t))
-
-
-def footer(fig, text=MODEL_NOTE):
-    fig.text(0.5, 0.005, text, ha="center", fontsize=8, color="gray")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -119,147 +110,13 @@ def checks():
     return passed == len(rows)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4단계 — 그래프
-# ─────────────────────────────────────────────────────────────────────────
-def plot_step():
-    d = run(seconds=3)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 7), sharex=True)
-    ax1.plot(d["t_s"], d["target"], "k--", label="목표 0.12 m/s")
-    ax1.plot(d["t_s"], d["true_velocity"], label="실제 바퀴 속도 (모델)")
-    ax1.step(d["t_s"], d["measured"], where="post", alpha=0.45, label="측정 속도 (엔코더, 20 ms)")
-    ax1.plot(d["t_s"], d["filtered"], label="필터 속도 (제어기가 보는 값)")
-    ax1.set_ylabel("속도 [m/s]")
-    ax1.set_title("① 스텝 응답 — 정지 → 0.12 m/s")
-    ax1.legend(loc="lower right", fontsize=9)
-    ax1.grid(alpha=0.3)
-
-    ax2.step(d["t_s"], d["applied_pwm"], where="post", label="실제 출력 PWM (부스트·램프 후)")
-    ax2.step(d["t_s"], d["desired_pwm"], where="post", label="원하는 PWM (FF + P + I)")
-    ax2.plot(d["t_s"], d["ff_pwm"], "k:", label="FF 64")
-    ax2.annotate("출발 부스트 75", xy=(0.04, 75), xytext=(0.4, 76), arrowprops=dict(arrowstyle="->"))
-    ax2.set_ylabel("PWM")
-    ax2.set_xlabel("시간 [s]")
-    ax2.set_ylim(55, 80)
-    ax2.legend(loc="upper right", fontsize=9)
-    ax2.grid(alpha=0.3)
-    footer(fig)
-    fig.tight_layout(rect=(0, 0.02, 1, 1))
-    fig.savefig(os.path.join(RESULTS, "1_step_response.png"))
-    plt.close(fig)
-
-
-def plot_kp():
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    nominal = {"Kp 30 · 적분상한 20 (08-22 이전)": dict(kp=30, ilimit=20),
-               "Kp 60 · 적분상한 40 (현재)": dict(kp=60, ilimit=40)}
-    for label, gains in nominal.items():
-        d = run(seconds=3, **gains)
-        axes[0].plot(d["t_s"], d["true_velocity"], label=label)
-    axes[0].axhline(0.12, color="k", ls="--", lw=1)
-    axes[0].set_title("(a) 평지 0.12 m/s — 거의 같다 (FF 가 대부분을 낸다)")
-    axes[0].set_xlabel("시간 [s]")
-    axes[0].set_ylabel("실제 바퀴 속도 [m/s]")
-    axes[0].legend(fontsize=9)
-    axes[0].grid(alpha=0.3)
-
-    load = 50
-    for label, gains in nominal.items():
-        d = run(target=0.187, load=load, seconds=120, **gains)
-        axes[1].plot(d["t_s"], d["true_velocity"], label=label)
-    axes[1].axhline(0.187, color="k", ls="--", lw=1, label="목표 0.187 m/s (FF 86)")
-    axes[1].set_title(f"(b) 부하 {load} PWM (예시) — 되돌릴 권한의 차이")
-    axes[1].set_xlabel("시간 [s]")
-    axes[1].legend(fontsize=9, loc="lower right")
-    axes[1].grid(alpha=0.3)
-    footer(fig, MODEL_NOTE + " · (b) 부하 값은 예시, 0.187 = .ino:337 주석의 08-22 오차")
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(os.path.join(RESULTS, "2_kp_compare.png"))
-    plt.close(fig)
-
-
-def plot_windup():
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8))
-    cases = {"적분상한 40 (현재)": 40, "적분상한 20 (08-22 이전)": 20, "상한 없음 (비교용)": 1000}
-    for label, limit in cases.items():
-        d = run(target=0.12, seconds=200, block_from=0, block_to=80, ilimit=limit)
-        axes[0][0].plot(d["t_s"], d["i_term"], label=label)
-        axes[1][0].plot(d["t_s"], d["true_velocity"], label=label)
-    axes[0][0].axvspan(0, 80, color="red", alpha=0.07)
-    axes[0][0].set_title("(a) 0.12 m/s 명령 · 바퀴 0~80 s 막힘 → I 항")
-    axes[0][0].set_ylabel("I 항 [PWM]")
-    axes[0][0].legend(fontsize=9)
-    axes[1][0].axhline(0.12, color="k", ls="--", lw=1)
-    axes[1][0].set_xlim(75, 200)
-    axes[1][0].set_title("(a) 80 s 에 풀린 뒤 — 쌓인 적분만큼 과속, 적분이 느려 오래 간다")
-    axes[1][0].set_ylabel("실제 바퀴 속도 [m/s]")
-    axes[1][0].set_xlabel("시간 [s]")
-    axes[1][0].legend(fontsize=9)
-
-    d = run(target=0.30, seconds=40, block_from=0, block_to=30)
-    axes[0][1].plot(d["t_s"], d["i_term"], label="I 항")
-    axes[0][1].axhline(40, color="gray", ls=":", label="적분 상한 40")
-    axes[0][1].plot(d["t_s"], [p - 124 - 18 for p in d["desired_pwm"]], alpha=0)  # 축 맞춤용
-    axes[0][1].axvspan(0, 30, color="red", alpha=0.07)
-    axes[0][1].set_title("(b) 0.30 m/s 명령 · 0~30 s 막힘 → 조건부 적분")
-    axes[0][1].set_ylabel("I 항 [PWM]")
-    axes[0][1].set_ylim(-2, 45)
-    axes[0][1].legend(fontsize=9)
-    axes[1][1].step(d["t_s"], d["desired_pwm"], where="post", label="원하는 PWM")
-    axes[1][1].axhline(160, color="red", ls=":", label="출력 상한 160")
-    axes[1][1].axvspan(0, 30, color="red", alpha=0.07)
-    axes[1][1].set_title("(b) 출력이 160 에 닿는 순간 적분이 멈춘다 (I = 18)")
-    axes[1][1].set_ylabel("PWM")
-    axes[1][1].set_xlabel("시간 [s]")
-    axes[1][1].legend(fontsize=9)
-    for row in axes:
-        for ax in row:
-            ax.grid(alpha=0.3)
-    footer(fig, MODEL_NOTE + " · ⚠ (b) 풀린 뒤 속도는 직선 모델 맞춤 구간 밖이라 생략")
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(os.path.join(RESULTS, "3_windup.png"))
-    plt.close(fig)
-
-
-def plot_filter():
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
-    d = run(seconds=3)
-    axes[0].step(d["t_s"], d["measured"], where="post", alpha=0.5, label="측정 (17/18칸 → 0.1152/0.1220)")
-    axes[0].plot(d["t_s"], d["filtered"], lw=2, label="필터 α 0.10")
-    axes[0].plot(d["t_s"], d["true_velocity"], "k--", lw=1, label="실제 (모델)")
-    axes[0].set_xlim(1.0, 3.0)
-    axes[0].set_ylim(0.112, 0.126)
-    axes[0].set_title("(a) 정상상태 — 양자화 잡음을 필터가 고른다")
-    axes[0].set_xlabel("시간 [s]")
-    axes[0].set_ylabel("속도 [m/s]")
-    axes[0].legend(fontsize=9)
-
-    for alpha in (0.10, 0.30, 1.00):
-        d = run(seconds=2, alpha=alpha)
-        name = "필터 없음 (α 1.0)" if alpha == 1.0 else f"α {alpha:.2f}" + (" (현재)" if alpha == 0.10 else "")
-        axes[1].plot(d["t_s"], d["true_velocity"], label=name)
-    axes[1].axhline(0.12, color="k", ls="--", lw=1)
-    axes[1].set_title("(b) 출발 — 필터가 느릴수록(α 작을수록) 지연 때문에 넘친다")
-    axes[1].set_xlabel("시간 [s]")
-    axes[1].set_ylabel("실제 바퀴 속도 [m/s]")
-    axes[1].legend(fontsize=9)
-    for ax in axes:
-        ax.grid(alpha=0.3)
-    footer(fig)
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    fig.savefig(os.path.join(RESULTS, "4_filter.png"))
-    plt.close(fig)
-
-
 def main():
     os.makedirs(RESULTS, exist_ok=True)
     build()
     ok = checks()
-    plot_step()
-    plot_kp()
-    plot_windup()
-    plot_filter()
-    print("그래프 →", RESULTS)
+    import plot_paper   # 그래프·수치 표 (논문 양식 · 보고서판 + 발표판)
+    plot_paper.main()
+    print("그래프 →", os.path.join(RESULTS, "paper"), "·", os.path.join(RESULTS, "slides"))
     return 0 if ok else 1
 
 
