@@ -51,14 +51,15 @@ static const double VELOCITY_FILTER_ALPHA = 0.10;  // .ino:351
 static const uint32_t CONTROL_PERIOD_MS = 20;      // .ino:356 (PWM 램프) · :361 (엔코더·제어 20000 us)
 
 // 설정 묶음 — .ino:493~514 와 같은 순서로 채운다 (순서가 밀리면 값이 조용히 바뀐다).
-inline WheelControlConfig makeControlConfig(double kp)
+// 실험에서 바꿔 보는 값(kp · 적분 상한)은 인자로 받는다. 펌웨어 값 = WHEEL_KP · INTEGRAL_PWM_LIMIT.
+inline WheelControlConfig makeControlConfig(double kp, double integralPwmLimit)
 {
   const WheelControlConfig config = {
-    kp,                                 // kp  (실험에서 바꿔 보려고 인자로 받는다. 펌웨어 = WHEEL_KP)
+    kp,                                 // kp
     WHEEL_KI,                           // ki
     WHEEL_KD,                           // kd
     USE_PID_D_TERM,                     // useDerivative
-    INTEGRAL_PWM_LIMIT,                 // integralPwmLimit
+    integralPwmLimit,                   // integralPwmLimit
     DERIVATIVE_FILTER_ALPHA,            // derivativeFilterAlpha
     FEEDFORWARD_PWM_PER_MPS_ABOVE_MIN,  // feedforwardSlope
     FEEDFORWARD_MAX_PWM,                // feedforwardMaxPwm
@@ -67,7 +68,8 @@ inline WheelControlConfig makeControlConfig(double kp)
   return config;
 }
 
-inline WheelMotionConfig makeMotionConfig()
+// 실험에서 바꿔 보는 값(속도 필터 α)은 인자로 받는다. 펌웨어 값 = VELOCITY_FILTER_ALPHA.
+inline WheelMotionConfig makeMotionConfig(double velocityFilterAlpha)
 {
   const WheelMotionConfig config = {
     MAX_WHEEL_CMD,            // maxWheelCmd
@@ -75,7 +77,7 @@ inline WheelMotionConfig makeMotionConfig()
     MIN_EFFECTIVE_WHEEL_CMD,  // minEffectiveWheelCmd
     START_BOOST_DURATION_MS,  // startBoostDurationMs
     PWM_RAMP_STEP,            // pwmRampStep
-    VELOCITY_FILTER_ALPHA,    // velocityFilterAlpha
+    velocityFilterAlpha,      // velocityFilterAlpha
     DISTANCE_PER_COUNT        // distancePerCount
   };
   return config;

@@ -29,27 +29,39 @@ public:
         deadband(deadbandPwm),
         tau(timeConstantS),
         metersPerCount(distancePerCount),
+        loadPwm(0.0),
+        blocked(false),
         velocity(0.0),
         position(0.0)
   {
   }
 
+  // 실험용 조건 (실물로는 위험하거나 재현이 어려운 상황)
+  //  · 부하: 바퀴를 움직이는 데 PWM 이 loadPwm 만큼 더 든다 (예: 걸림·경사). 값은 실험마다 (예시).
+  //  · 막힘: 바퀴가 물리적으로 붙잡혀 속도 0.
+  void setLoadPwm(double extraPwm) { loadPwm = extraPwm; }
+  void setBlocked(bool isBlocked) { blocked = isBlocked; }
+
   // PWM 을 dt 초 동안 줬을 때 바퀴 속도·위치를 한 칸 진행한다.
   void step(int pwm, double dt)
   {
-    // ✏️ 빈칸 A — 모델 ① : 정상상태 속도 v_ss 를 구한다.
-    //    · |PWM| 이 deadband 이하면 0
-    //    · 아니면 gain × (|PWM| − deadband)
-    //    · PWM 이 음수면 v_ss 도 음수 (뒤로)
-    //    도구: fabs(x) = 절댓값
-    double steadyVelocity = 0.0;   // ← 여기를 고친다
+    // 모델 ① : 정상상태 속도. |PWM| 이 불감대(+부하) 이하면 0, 그 위로는 직선.
+    const double magnitude = fabs(static_cast<double>(pwm));
+    const double threshold = deadband + loadPwm;
+    double steadyVelocity = 0.0;
+    if (magnitude > threshold) {
+      steadyVelocity = gain * (magnitude - threshold);
+    }
+    if (pwm < 0) {
+      steadyVelocity = -steadyVelocity;   // 뒤로
+    }
 
-    // ✏️ 빈칸 B — 모델 ② : velocity 를 steadyVelocity 쪽으로 다가가게 한다.
-    //    힌트: 1단계의 속도 필터와 **같은 모양**이다.
-    //          filtered += α × (measured − filtered)   에서   α 자리에 dt / tau
-    //    (아래 줄 한 줄을 쓴다)
+    // 모델 ② : 1차 지연. 속도 필터와 같은 모양 — α 자리에 dt / τ.
+    velocity += (dt / tau) * (steadyVelocity - velocity);
 
-    (void)steadyVelocity;   // 빈칸 B 를 쓰면 이 줄은 지운다 (안 쓰는 변수 경고 막기용)
+    if (blocked) {
+      velocity = 0.0;   // 붙잡힌 바퀴
+    }
 
     // 바퀴가 굴러간 거리를 쌓는다.
     position += velocity * dt;
@@ -68,6 +80,8 @@ private:
   double deadband;
   double tau;
   double metersPerCount;
+  double loadPwm;
+  bool blocked;
 
   double velocity;   // 실제(참) 바퀴 속도 [m/s] — 실물에서는 아무도 직접 못 본다
   double position;   // 굴러간 거리 [m]
